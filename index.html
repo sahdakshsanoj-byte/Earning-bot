@@ -86,12 +86,27 @@
     </div>
 
     <div id="help" class="tab-content" style="display: none;">
-        <div class="card">
-            <h4>Support Center 🎧</h4>
-            <textarea id="support-msg" placeholder="Write your message..."></textarea>
-            <button class="btn" onclick="sendSupport()">Send to Admin</button>
-        </div>
+    <div class="card">
+        <h4>Support Center 🎧</h4>
+        <p>Direct message to Admin:</p>
+        <textarea id="support-msg" placeholder="Write your issue here..."></textarea>
+        <button class="btn" onclick="sendSupport()">Send to Admin</button>
     </div>
+
+    <div class="card" style="border: 1px solid var(--accent);">
+        <h4>Official Email Support 📧</h4>
+        <p style="font-size: 13px; color: #94a3b8; margin-bottom: 10px;">For business or payment proof issues:</p>
+        <a href="mailto:support@yourdomain.com" style="text-decoration: none;">
+            <div style="background: #1e293b; padding: 12px; border-radius: 8px; text-align: center; color: var(--accent); border: 1px dashed var(--accent);">
+                support@yourdomain.com
+            </div>
+        </a>
+        <button class="btn" style="background: var(--accent); color: white; margin-top: 10px;" onclick="window.location.href='mailto:support@yourdomain.com'">
+            Open Gmail ✉️
+        </button>
+    </div>
+</div>
+
 
     <nav class="nav-bar">
         <button class="nav-item active" onclick="switchTab('rewards', this)"><span>💰</span> Rewards</button>
