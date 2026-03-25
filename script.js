@@ -47,11 +47,11 @@ function claimDaily() {
 function sendSupport() {
     const msg = document.getElementById('support-msg').value;
     if(!msg.trim()) {
-        tg.showAlert("Pehle kuch likho toh sahi!");
+        tg.showAlert("please write here you face any problem");
         return;
     }
     tg.sendData(JSON.stringify({type: 'support', message: msg}));
-    tg.showAlert("Admin ko message bhej diya! ✅");
+    tg.showAlert("Admin reached your message and reply 5-6 hours! ✅");
     document.getElementById('support-msg').value = "";
 }
 
