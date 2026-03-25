@@ -42,8 +42,9 @@
             <p>Scroll down to complete all tasks!</p>
         </div>
 
-        <div class="card" style="max-height: 400px; overflow-y: auto; padding-right: 10px;">
-            <h4 style="color: #ff0000; border-bottom: 1px solid #ff0000; padding-bottom: 5px;">YouTube Tasks 📺</h4>
+        <div class="card" style="max-height: 380px; overflow-y: auto !important; -webkit-overflow-scrolling: touch; padding-right: 10px; display: block;">
+            
+            <h4 style="color: #ff0000; border-bottom: 1px solid #ff0000; padding-bottom: 5px; position: sticky; top: 0; background: var(--card-bg); z-index: 10;">YouTube Tasks 📺</h4>
             <div id="yt-tasks-list">
                 <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
                     <p style="font-size: 13px;">Task 1: Watch & Verify (+20)</p>
@@ -53,11 +54,51 @@
                         <button class="btn-sm" onclick="verifyTask('yt1', 'yt-1', 20)">Verify</button>
                     </div>
                 </div>
+                <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
+                    <p style="font-size: 13px;">Task 2: Watch & Verify (+20)</p>
+                    <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('YT_LINK_2')">Watch Video 2</button>
+                    <div style="display: flex; gap: 5px;">
+                        <input type="text" id="yt-2" placeholder="Code" style="flex:1; padding:8px;">
+                        <button class="btn-sm" onclick="verifyTask('yt2', 'yt-2', 20)">Verify</button>
+                    </div>
+                </div>
+                <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
+                    <p style="font-size: 13px;">Task 3: Watch & Verify (+20)</p>
+                    <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('YT_LINK_3')">Watch Video 3</button>
+                    <div style="display: flex; gap: 5px;">
+                        <input type="text" id="yt-3" placeholder="Code" style="flex:1; padding:8px;">
+                        <button class="btn-sm" onclick="verifyTask('yt3', 'yt-3', 20)">Verify</button>
+                    </div>
+                </div>
             </div>
 
-            <h4 style="color: #3498db; border-bottom: 1px solid #3498db; padding-bottom: 5px; margin-top: 20px;">Website Tasks 🌐</h4>
+            <h4 style="color: #3498db; border-bottom: 1px solid #3498db; padding-bottom: 5px; margin-top: 20px; position: sticky; top: 0; background: var(--card-bg); z-index: 10;">Website Tasks 🌐</h4>
             <div id="web-tasks-list">
+                <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
+                    <p style="font-size: 13px;">Task 1: Visit Site (+15)</p>
+                    <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('WEB_LINK_1')">Visit Site 1</button>
+                    <div style="display: flex; gap: 5px;">
+                        <input type="text" id="web-1" placeholder="Code" style="flex:1; padding:8px;">
+                        <button class="btn-sm" onclick="verifyTask('web1', 'web-1', 15)">Verify</button>
+                    </div>
                 </div>
+                <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
+                    <p style="font-size: 13px;">Task 2: Visit Site (+15)</p>
+                    <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('WEB_LINK_2')">Visit Site 2</button>
+                    <div style="display: flex; gap: 5px;">
+                        <input type="text" id="web-2" placeholder="Code" style="flex:1; padding:8px;">
+                        <button class="btn-sm" onclick="verifyTask('web2', 'web-2', 15)">Verify</button>
+                    </div>
+                </div>
+                <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
+                    <p style="font-size: 13px;">Task 3: Visit Site (+15)</p>
+                    <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('WEB_LINK_3')">Visit Site 3</button>
+                    <div style="display: flex; gap: 5px;">
+                        <input type="text" id="web-3" placeholder="Code" style="flex:1; padding:8px;">
+                        <button class="btn-sm" onclick="verifyTask('web3', 'web-3', 15)">Verify</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="card">
@@ -138,4 +179,4 @@
     <script src="script.js"></script>
 </body>
 </html>
-                              
+            
