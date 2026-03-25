@@ -1,38 +1,56 @@
 const tg = window.Telegram.WebApp;
-let coins = parseInt(localStorage.getItem('user_coins')) || 0;
+tg.expand(); // App ko full screen karne ke liye
 
-// Update UI on load
-document.getElementById('balance').innerText = coins + " 🪙";
+// Coins Initialization
+let coins = parseInt(localStorage.getItem('user_coins')) || 0;
+const balanceEl = document.getElementById('balance');
+if(balanceEl) balanceEl.innerText = coins + " 🪙";
 
 function switchTab(tabId, el) {
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active-tab'));
-    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-    document.getElementById(tabId).classList.add('active-tab');
-    el.classList.add('active');
-    document.getElementById('tab-title').innerText = tabId.charAt(0).toUpperCase() + tabId.slice(1);
+    // 1. Saare tabs ko hide karo (Logic: display = 'none')
+    const tabs = document.querySelectorAll('.tab-content');
+    tabs.forEach(tab => {
+        tab.style.display = 'none'; // Ye sabse zaroori line hai
+        tab.classList.remove('active-tab');
+    });
+
+    // 2. Saare buttons se active class hatao
+    const buttons = document.querySelectorAll('.nav-item');
+    buttons.forEach(btn => btn.classList.remove('active'));
+
+    // 3. Target tab ko dhoondo aur dikhao
+    const target = document.getElementById(tabId);
+    if (target) {
+        target.style.display = 'block'; // Forcefully show
+        target.classList.add('active-tab');
+        el.classList.add('active');
+        
+        // Header title update
+        const titleHeader = document.getElementById('tab-title');
+        if(titleHeader) titleHeader.innerText = tabId.charAt(0).toUpperCase() + tabId.slice(1);
+    } else {
+        console.error("Bhai, id='" + tabId + "' nahi mili HTML mein!");
+    }
 }
 
 function claimDaily() {
-    // Basic logic: Har click pe 10 coin (Baad mein 24h timer lagayenge)
     coins += 10;
     localStorage.setItem('user_coins', coins);
-    document.getElementById('balance').innerText = coins + " 🪙";
+    if(balanceEl) balanceEl.innerText = coins + " 🪙";
     tg.showAlert("Congrats! 10 Coins added. 🎁");
 }
 
 function sendSupport() {
-    const msg = document.getElementById('support-msg').value;
-    if(msg.trim() === "") {
+    const msgEl = document.getElementById('support-msg');
+    const msg = msgEl ? msgEl.value : "";
+    
+    if(!msg.trim()) {
         tg.showAlert("Kuch toh likho bhai!");
         return;
     }
-    // Ye message tumhare Python Bot ko jayega
+    
+    // Python bot ko data bhejna
     tg.sendData(JSON.stringify({type: "support", message: msg}));
     tg.showAlert("Message sent to Admin! ✅");
-    document.getElementById('support-msg').value = "";
+    if(msgEl) msgEl.value = "";
 }
-
-function inviteFriend() {
-    tg.showAlert("Referral link copied! (Feature coming soon)");
-}
-
