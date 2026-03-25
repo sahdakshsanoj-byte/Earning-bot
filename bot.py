@@ -4,8 +4,8 @@ import json
 from telebot import types
 
 # 1. Setup
-BOT_TOKEN = "YOUR_BOT_TOKEN"
-ADMIN_ID = 123456789  # Replace with your actual numerical ID (No quotes)
+BOT_TOKEN = "8658984116:AAGb37UHU5JZ00BzbdKCk19O5Sj6tyfhZ0Q"
+ADMIN_ID =   6613528513  # Replace with your actual numerical ID (No quotes)
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # 2. Database Initializing
