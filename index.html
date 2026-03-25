@@ -1,0 +1,31 @@
+# Earning-bot<div id="rewards" class="tab-content active-tab">
+    <div class="card" style="text-align: center; border: 2px solid #f1c40f;">
+        <h2 style="color: #f1c40f;">Balance: <span id="user-balance">0</span> 🪙</h2>
+    </div>
+
+    <div class="card">
+        <h3>Daily Check-in 🎁</h3>
+        <p>Get 10 coins every 24 hours.</p>
+        <button class="btn" onclick="claimDaily()">Claim Bonus</button>
+    </div>
+
+    <div class="card">
+        <h3>Refer & Earn 👥</h3>
+        <p>Invite friends and get 50 coins each.</p>
+        <button class="btn" style="background: #2ecc71;" onclick="shareLink()">Invite Friend</button>
+    </div>
+</div>
+
+<div id="help" class="tab-content">
+    <div class="card">
+        <h3>Need Help? 🎧</h3>
+        <p>Contact our support team for any issues.</p>
+        <textarea id="support-msg" placeholder="Write your problem here..." style="width: 90%; height: 100px; background: #334155; color: white; border-radius: 8px; padding: 10px;"></textarea>
+        <button class="btn" style="margin-top: 10px;" onclick="sendSupport()">Send Message</button>
+    </div>
+    
+    <div class="card">
+        <h4>FAQs ❓</h4>
+        <p><b>Q: How to withdraw?</b><br>A: Minimum balance should be 1000 coins.</p>
+    </div>
+</div>
