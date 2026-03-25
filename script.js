@@ -1,10 +1,13 @@
-// 1. Telegram WebApp Setup
+    // 1. Telegram WebApp Setup
 const tg = window.Telegram.WebApp;
 tg.expand();
 
-// 2. Initial Setup & Display
+// 2. Initial Setup & URL Data Fetching
 const queryParams = new URLSearchParams(window.location.search);
 const serverCoins = queryParams.get('coins');
+const refListStr = queryParams.get('ref_list'); // Bot se aayi referral list
+const topUsersStr = queryParams.get('top_users'); // Bot se aaya leaderboard data
+
 if (serverCoins !== null) {
     localStorage.setItem('user_coins', serverCoins);
 }
@@ -14,10 +17,11 @@ function updateDisplay() {
     const balanceEl = document.getElementById('balance');
     if (balanceEl) balanceEl.innerText = currentBalance + " 🪙";
     renderHistory();
+    renderReferrals();
+    renderLeaderboard();
 }
-updateDisplay();
 
-// 3. Tab Switching Function
+// 3. Tab Switching
 function switchTab(tabId, el) {
     const tabs = document.querySelectorAll('.tab-content');
     tabs.forEach(tab => {
@@ -43,7 +47,7 @@ function switchTab(tabId, el) {
     }
 }
 
-// 4. Multi-Task Secret Code Logic (3 YT + 3 WEB)
+// 4. Task Verification (config.js based)
 function openTask(link) {
     tg.showAlert("Opening Task... Video/Site se Secret Code dhoondhein! 🔍");
     window.open(link, '_blank');
@@ -51,77 +55,97 @@ function openTask(link) {
 
 function verifyTask(taskId, inputId, reward) {
     const userCode = document.getElementById(inputId).value.trim();
-    
-    // --- 48 HOUR LOCK PER TASK ---
     const lastClaimKey = `last_claim_${taskId}`;
     const lastClaimTime = localStorage.getItem(lastClaimKey);
     const currentTime = new Date().getTime();
-    const fortyEightHours = 48 * 60 * 60 * 1000;
+    
+    // config.js se time aur codes uthana
+    const lockHours = (typeof APP_CONFIG !== 'undefined') ? APP_CONFIG.lock_time_hours : 48;
+    const lockMs = lockHours * 60 * 60 * 1000;
 
-    if (lastClaimTime && (currentTime - lastClaimTime < fortyEightHours)) {
-        const remainingMs = fortyEightHours - (currentTime - lastClaimTime);
-        const remainingHours = Math.ceil(remainingMs / (1000 * 60 * 60));
-        tg.showAlert(`✋ Thoda wait! Ye specific task aap kar chuke hain. Agle ${remainingHours} ghante baad phir se try karein.`);
+    if (lastClaimTime && (currentTime - lastClaimTime < lockMs)) {
+        const remainingHours = Math.ceil((lockMs - (currentTime - lastClaimTime)) / (1000 * 60 * 60));
+        tg.showAlert(`✋ Thoda wait! Is task ke liye ${remainingHours} ghante baaki hain.`);
         return;
     }
 
-    // --- 6 UNIQUE SECRET CODES ---
-    const TASK_CODES = {
-        'yt1': 'YT786',     // YouTube Video 1 Code
-        'yt2': 'YT555',     // YouTube Video 2 Code
-        'yt3': 'YT999',     // YouTube Video 3 Code
-        'web1': 'WEB10',    // Website 1 Code
-        'web2': 'WEB20',    // Website 2 Code
-        'web3': 'WEB30'     // Website 3 Code
-    };
+    // Default Codes if config fails
+    const TASK_CODES = (typeof APP_CONFIG !== 'undefined') ? 
+        Object.fromEntries([...APP_CONFIG.youtube_tasks, ...APP_CONFIG.website_tasks].map(t => [t.id, t.code])) :
+        {'yt1':'YT786', 'yt2':'YT555', 'yt3':'YT999', 'web1':'WEB10', 'web2':'WEB20', 'web3':'WEB30'};
 
     if (userCode === TASK_CODES[taskId]) {
         let currentCoins = parseInt(localStorage.getItem('user_coins')) || 0;
-        let newBalance = currentCoins + reward;
-        
-        localStorage.setItem('user_coins', newBalance);
-        localStorage.setItem(lastClaimKey, currentTime); // Us task ka time save
-        
+        localStorage.setItem('user_coins', currentCoins + reward);
+        localStorage.setItem(lastClaimKey, currentTime);
         updateDisplay();
-
         tg.sendData(JSON.stringify({ type: "claim_bonus", amount: reward }));
-        tg.showAlert(`Correct Code! +${reward} Coins added. ✅ Ye task 2 din ke liye lock ho gaya.`);
+        tg.showAlert(`Correct! +${reward} Coins added. ✅`);
         document.getElementById(inputId).value = ""; 
     } else {
-        tg.showAlert("Wrong Secret Code! Dhyaan se dekhein. ❌");
+        tg.showAlert("Wrong Secret Code! ❌");
     }
 }
 
-// 5. Daily Claim
-function claimDaily() {
-    let lastClaim = localStorage.getItem('last_claim_daily');
-    let today = new Date().toDateString();
+// 5. Leaderboard & Referral Rendering
+function renderLeaderboard() {
+    const list = document.getElementById('leaderboard-list');
+    if (!list || !topUsersStr || topUsersStr === "none") return;
 
-    if (lastClaim === today) {
-        tg.showAlert("Bhai, aaj ka bonus mil gaya! Kal aana. ✨");
+    const users = topUsersStr.split('|'); // Bot should send like "ID:Coins|ID:Coins"
+    list.innerHTML = users.map((u, index) => {
+        const [id, score] = u.split(':');
+        let medal = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "👤";
+        return `
+            <div style="display:flex; justify-content:space-between; padding:12px; border-bottom:1px solid #1e293b; background:${index < 3 ? 'rgba(241, 196, 15, 0.1)' : 'transparent'};">
+                <span>${medal} ${id}</span>
+                <span style="color:var(--gold); font-weight:bold;">${score} 🪙</span>
+            </div>`;
+    }).join('');
+}
+
+function renderReferrals() {
+    const list = document.getElementById('refer-list');
+    if (!list) return;
+    if (!refListStr || refListStr === "none") {
+        list.innerHTML = `<p style="text-align:center; color:#94a3b8;">No referrals yet. Share link! 🚀</p>`;
         return;
     }
-
-    let currentCoins = parseInt(localStorage.getItem('user_coins')) || 0;
-    let newBalance = currentCoins + 10;
-    localStorage.setItem('user_coins', newBalance);
-    localStorage.setItem('last_claim_daily', today);
-    updateDisplay();
-    tg.sendData(JSON.stringify({ type: "claim_bonus", amount: 10 }));
-    tg.showAlert("10 Coins added! 🎁");
+    const refs = refListStr.split(',');
+    list.innerHTML = refs.map(id => `
+        <div style="display:flex; justify-content:space-between; padding:10px; border-bottom:1px solid #1e293b;">
+            <span>👤 User ID: ${id}</span>
+            <span style="color:#2ecc71;">+50 ✅</span>
+        </div>`).join('');
 }
 
-// 6. Withdraw Logic
+// 6. Email Copy System (Haptic Feedback Included)
+function copyEmail() {
+    const email = (typeof APP_CONFIG !== 'undefined') ? APP_CONFIG.support_email : "codetearn.help@gmail.com";
+    
+    navigator.clipboard.writeText(email).then(() => {
+        const status = document.getElementById('copy-status');
+        if (status) {
+            status.style.display = 'block';
+            setTimeout(() => { status.style.display = 'none'; }, 2000);
+        }
+        // Vibrate Phone
+        if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    });
+}
+
+// 7. Withdraw & Support
 function requestWithdraw() {
     let currentCoins = parseInt(localStorage.getItem('user_coins')) || 0;
     const upiId = document.getElementById('upi-id').value.trim();
+    const minLimit = (typeof APP_CONFIG !== 'undefined') ? APP_CONFIG.min_withdraw : 1000;
 
-    if (currentCoins < 1000) {
-        tg.showAlert("Min 1000 Coins! ❌");
+    if (currentCoins < minLimit) {
+        tg.showAlert(`Min ${minLimit} Coins required! ❌`);
         return;
     }
     if (!upiId.includes('@')) {
-        tg.showAlert("Invalid UPI! 🏦");
+        tg.showAlert("Invalid UPI ID! 🏦");
         return;
     }
 
@@ -131,25 +155,18 @@ function requestWithdraw() {
 
     tg.sendData(JSON.stringify({ type: "withdraw_request", amount: currentCoins, upi: upiId }));
     localStorage.setItem('user_coins', 0);
-    document.getElementById('upi-id').value = "";
     updateDisplay();
-    tg.showAlert("Withdrawal Request Sent! ✅");
+    tg.showAlert("Request Sent! Check History. ✅");
 }
 
 function renderHistory() {
     let history = JSON.parse(localStorage.getItem('withdraw_history')) || [];
     const list = document.getElementById('history-list');
     if (!list) return;
-    list.innerHTML = history.length === 0 ? `<p style="text-align:center; color:#94a3b8;">No history found.</p>` : 
-    history.map(item => `
-        <div style="display:flex; justify-content:space-between; padding:10px; border-bottom:1px solid #1e293b; background:#0f172a; margin-bottom:5px; border-radius:5px;">
-            <span>📅 ${item.date}</span>
-            <span>💰 ${item.amount}</span>
-            <span style="color:#f1c40f;">${item.status}</span>
-        </div>`).join('');
+    list.innerHTML = history.length === 0 ? `<p style="text-align:center; color:#94a3b8;">No history yet.</p>` : 
+    history.map(item => `<div style="display:flex; justify-content:space-between; padding:10px; border-bottom:1px solid #1e293b; background:#0f172a; margin-bottom:5px; border-radius:5px;"><span>📅 ${item.date}</span><span>💰 ${item.amount}</span><span style="color:#f1c40f;">${item.status}</span></div>`).join('');
 }
 
-// 7. Support & Refer
 function sendSupport() {
     const msg = document.getElementById('support-msg').value;
     if(!msg.trim()) return tg.showAlert("Please write something.");
@@ -161,9 +178,20 @@ function sendSupport() {
 function inviteFriend() {
     const userId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : "guest";
     const link = `https://t.me/Codetearn_bot?start=${userId}`;
-    if(navigator.clipboard) {
-        navigator.clipboard.writeText(link).then(() => tg.showAlert("Link Copied! 🚀"));
-    } else {
-        tg.showAlert("Link: " + link);
-    }
+    navigator.clipboard.writeText(link).then(() => tg.showAlert("Link Copied! 🚀"));
 }
+
+function claimDaily() {
+    let lastClaim = localStorage.getItem('last_claim_daily');
+    let today = new Date().toDateString();
+    if (lastClaim === today) { return tg.showAlert("Aaj ka bonus mil gaya! Kal aana. ✨"); }
+    let coins = parseInt(localStorage.getItem('user_coins')) || 0;
+    localStorage.setItem('user_coins', coins + 10);
+    localStorage.setItem('last_claim_daily', today);
+    updateDisplay();
+    tg.sendData(JSON.stringify({ type: "claim_bonus", amount: 10 }));
+    tg.showAlert("10 Coins added! 🎁");
+}
+
+// Initial Call
+updateDisplay();
