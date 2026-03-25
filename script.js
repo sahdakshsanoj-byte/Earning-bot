@@ -60,7 +60,7 @@ function inviteFriend() {
     
     // Yahan '@' hata diya hai kyunki URL mein seedha naam aata hai
     const botUsername = "Cdotern_bot"; 
-    const link = `https://t.me/$Codetern_bot?start=${userId}`;
+    const link = `https://t.me/Codetern_bot?start=${userId}`;
     
     if(navigator.clipboard) {
         navigator.clipboard.writeText(link).then(() => {
