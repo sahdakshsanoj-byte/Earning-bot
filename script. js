@@ -1,56 +1,23 @@
+// Testing Script
 const tg = window.Telegram.WebApp;
-tg.expand(); // App ko full screen karne ke liye
+tg.expand();
 
-// Coins Initialization
-let coins = parseInt(localStorage.getItem('user_coins')) || 0;
-const balanceEl = document.getElementById('balance');
-if(balanceEl) balanceEl.innerText = coins + " 🪙";
+alert("Script Load Ho Gayi! ✅"); // Agar ye alert nahi aata, toh file connect nahi hai.
 
 function switchTab(tabId, el) {
-    // 1. Saare tabs ko hide karo (Logic: display = 'none')
-    const tabs = document.querySelectorAll('.tab-content');
-    tabs.forEach(tab => {
-        tab.style.display = 'none'; // Ye sabse zaroori line hai
-        tab.classList.remove('active-tab');
+    alert("Button Click Hua: " + tabId); // Agar ye nahi aata, toh onclick mein galti hai.
+
+    // Sabko hide karo
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.style.display = 'none';
     });
 
-    // 2. Saare buttons se active class hatao
-    const buttons = document.querySelectorAll('.nav-item');
-    buttons.forEach(btn => btn.classList.remove('active'));
-
-    // 3. Target tab ko dhoondo aur dikhao
+    // Target ko dikhao
     const target = document.getElementById(tabId);
     if (target) {
-        target.style.display = 'block'; // Forcefully show
-        target.classList.add('active-tab');
-        el.classList.add('active');
-        
-        // Header title update
-        const titleHeader = document.getElementById('tab-title');
-        if(titleHeader) titleHeader.innerText = tabId.charAt(0).toUpperCase() + tabId.slice(1);
+        target.style.setProperty('display', 'block', 'important');
+        alert("Tab '" + tabId + "' ab dikhna chahiye!");
     } else {
-        console.error("Bhai, id='" + tabId + "' nahi mili HTML mein!");
+        alert("Galti: HTML mein id='" + tabId + "' nahi mili!");
     }
-}
-
-function claimDaily() {
-    coins += 10;
-    localStorage.setItem('user_coins', coins);
-    if(balanceEl) balanceEl.innerText = coins + " 🪙";
-    tg.showAlert("Congrats! 10 Coins added. 🎁");
-}
-
-function sendSupport() {
-    const msgEl = document.getElementById('support-msg');
-    const msg = msgEl ? msgEl.value : "";
-    
-    if(!msg.trim()) {
-        tg.showAlert("Kuch toh likho bhai!");
-        return;
-    }
-    
-    // Python bot ko data bhejna
-    tg.sendData(JSON.stringify({type: "support", message: msg}));
-    tg.showAlert("Message sent to Admin! ✅");
-    if(msgEl) msgEl.value = "";
 }
