@@ -1,4 +1,4 @@
-import telebot
+   import telebot
 import sqlite3
 import json
 from telebot import types
@@ -9,7 +9,7 @@ BOT_TOKEN = "bot_token" # Apna asli token yahan dalo
 ADMIN_ID = 6613528513  
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# 2. Database Initializing (New Table for Withdrawals)
+# 2. Database Initializing
 def init_db():
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
@@ -21,7 +21,7 @@ def init_db():
             referred_by INTEGER
         )
     ''')
-    # Withdrawals Table (Permanent History)
+    # Withdrawals Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS withdrawals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,6 +37,25 @@ def init_db():
 
 init_db()
 
+# Function to get Leaderboard Data
+def get_leaderboard():
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id, coins FROM users ORDER BY coins DESC LIMIT 10")
+    top_users = cursor.fetchall()
+    conn.close()
+    # Format: ID:Coins|ID:Coins
+    return "|".join([f"{u[0]}:{u[1]}" for u in top_users]) if top_users else "none"
+
+# Function to get Referral List
+def get_referral_list(user_id):
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users WHERE referred_by=?", (user_id,))
+    refs = cursor.fetchall()
+    conn.close()
+    return ",".join([str(r[0]) for r in refs]) if refs else "none"
+
 # 3. Start Command
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -51,7 +70,7 @@ def start(message):
     user_data = cursor.fetchone()
 
     if not user_data:
-        current_coins = 0
+        # New User logic
         if referrer_id and str(referrer_id) != str(user_id):
             cursor.execute("UPDATE users SET coins = coins + 50 WHERE user_id=?", (referrer_id,))
             try: bot.send_message(referrer_id, "🎊 Referral Bonus! You received 50 coins!")
@@ -60,19 +79,47 @@ def start(message):
         else:
             cursor.execute("INSERT INTO users (user_id, coins) VALUES (?, ?)", (user_id, 0))
         conn.commit()
+        current_coins = 0
     else:
         current_coins = user_data[0]
     conn.close()
 
+    # Get Dynamic Data for WebApp
+    top_users = get_leaderboard()
+    ref_list = get_referral_list(user_id)
+
     base_url = "https://sahdakshsanoj-byte.github.io/Earning-bot/"
-    web_app_url = f"{base_url}?coins={current_coins}"
+    # Sending Coins, Leaderboard, and Referrals in URL
+    web_app_url = f"{base_url}?coins={current_coins}&top_users={top_users}&ref_list={ref_list}"
     
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("💰 Open Earning Hub", web_app=types.WebAppInfo(web_app_url)))
     
-    bot.send_message(user_id, f"Hello {username}!\nBalance: {current_coins} 🪙", reply_markup=markup)
+    bot.send_message(user_id, f"Hello {username}!\nBalance: {current_coins} 🪙\n\nInvite friends and earn 50 coins each!", reply_markup=markup)
 
-# 4. ADMIN COMMANDS (/stats and /approve)
+# 4. ADMIN COMMANDS
+@bot.message_handler(commands=['broadcast'])
+def broadcast(message):
+    if message.from_user.id == ADMIN_ID:
+        msg_text = message.text.replace('/broadcast ', '')
+        if not msg_text or msg_text == '/broadcast':
+            bot.reply_to(message, "Usage: /broadcast [Message]")
+            return
+        
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users")
+        users = cursor.fetchall()
+        conn.close()
+
+        sent = 0
+        for u in users:
+            try:
+                bot.send_message(u[0], msg_text)
+                sent += 1
+            except: pass
+        bot.reply_to(message, f"📢 Sent to {sent} users!")
+
 @bot.message_handler(commands=['stats'])
 def get_stats(message):
     if message.from_user.id == ADMIN_ID:
@@ -80,26 +127,10 @@ def get_stats(message):
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM users")
         total_u = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM withdrawals WHERE status='Pending ⏳'")
+        cursor.execute("SELECT COUNT(*) FROM withdrawals WHERE status LIKE 'Pending%'")
         pending_w = cursor.fetchone()[0]
         conn.close()
         bot.reply_to(message, f"📊 **Bot Stats**\n\nTotal Users: {total_u}\nPending Withdraws: {pending_w}")
-
-@bot.message_handler(commands=['approve'])
-def approve_payment(message):
-    if message.from_user.id == ADMIN_ID:
-        try:
-            # Command: /approve [user_id]
-            u_id = message.text.split()[1]
-            conn = sqlite3.connect('users.db')
-            cursor = conn.cursor()
-            cursor.execute("UPDATE withdrawals SET status='Success ✅' WHERE user_id=? AND status='Pending ⏳'", (u_id,))
-            conn.commit()
-            conn.close()
-            bot.send_message(u_id, "✅ Your withdrawal has been approved! Payment sent.")
-            bot.reply_to(message, f"Done! Payment for {u_id} marked as Success.")
-        except:
-            bot.reply_to(message, "Usage: /approve [user_id]")
 
 # 5. Handle Mini App Data
 @bot.message_handler(content_types=['web_app_data'])
@@ -114,36 +145,20 @@ def handle_web_app_data(message):
             amount = data.get('amount', 10)
             cursor.execute("UPDATE users SET coins = coins + ? WHERE user_id=?", (amount, user_id))
             conn.commit()
-            bot.send_message(user_id, f"✅ +{amount} coins saved!")
 
         elif data.get('type') == 'withdraw_request':
             amount = data.get('amount')
             upi = data.get('upi')
             date_now = datetime.now().strftime("%d/%m/%Y")
-            
-            # 1. Update User Balance
             cursor.execute("UPDATE users SET coins = 0 WHERE user_id=?", (user_id,))
-            # 2. Save to Permanent History
             cursor.execute("INSERT INTO withdrawals (user_id, amount, upi, date) VALUES (?, ?, ?, ?)", 
                            (user_id, amount, upi, date_now))
             conn.commit()
-            
-            bot.send_message(ADMIN_ID, f"💰 **Withdrawal Request**\nID: `{user_id}`\nUPI: `{upi}`\nAmt: {amount} 🪙")
-            bot.send_message(user_id, "✅ Request Sent! Check history in 3-dot menu.")
-
-        elif data.get('type') == 'support':
-            bot.send_message(ADMIN_ID, f"📩 **Support**\nFrom: {message.from_user.first_name}\nMsg: {data.get('message')}")
-            bot.reply_to(message, "Sent to Admin! ✅")
+            bot.send_message(ADMIN_ID, f"💰 **Withdrawal Request**\nID: `{user_id}`\nUPI: `{upi}`\nAmt: {amount} 🪙\n/approve_{user_id}")
 
         conn.close()
     except Exception as e:
         print(f"Error: {e}")
 
-# 6. Forwarding
-@bot.message_handler(func=lambda m: True)
-def handle_text(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.forward_message(ADMIN_ID, message.chat.id, message.message_id)
-        bot.reply_to(message, "Forwarded to Support Team. ✅")
-
 bot.polling()
+     
