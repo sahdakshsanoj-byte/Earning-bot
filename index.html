@@ -1,31 +1,56 @@
-# Earning-bot<div id="rewards" class="tab-content active-tab">
-    <div class="card" style="text-align: center; border: 2px solid #f1c40f;">
-        <h2 style="color: #f1c40f;">Balance: <span id="user-balance">0</span> 🪙</h2>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daksh Earning Hub</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="header">
+        <h3 id="tab-title">Rewards</h3>
     </div>
 
-    <div class="card">
-        <h3>Daily Check-in 🎁</h3>
-        <p>Get 10 coins every 24 hours.</p>
-        <button class="btn" onclick="claimDaily()">Claim Bonus</button>
+    <div id="rewards" class="tab-content active-tab">
+        <div class="card balance-card">
+            <p>Your Balance</p>
+            <h1 id="balance">0 🪙</h1>
+        </div>
+        <div class="card">
+            <h4>Daily Bonus 🎁</h4>
+            <p>Claim 10 coins every day!</p>
+            <button class="btn" onclick="claimDaily()">Claim Now</button>
+        </div>
+        <div class="card">
+            <h4>Refer & Earn 👥</h4>
+            <p>Get 50 coins for each friend.</p>
+            <button class="btn" style="background:#2ecc71;" onclick="inviteFriend()">Invite</button>
+        </div>
     </div>
 
-    <div class="card">
-        <h3>Refer & Earn 👥</h3>
-        <p>Invite friends and get 50 coins each.</p>
-        <button class="btn" style="background: #2ecc71;" onclick="shareLink()">Invite Friend</button>
+    <div id="help" class="tab-content">
+        <div class="card">
+            <h4>Support Center 🎧</h4>
+            <p>Face any issue? Tell us!</p>
+            <textarea id="support-msg" placeholder="Write your message..."></textarea>
+            <button class="btn" onclick="sendSupport()">Send to Admin</button>
+        </div>
+        <div class="card">
+            <h4>FAQ ❓</h4>
+            <p><b>Withdraw limit:</b> 1000 Coins</p>
+        </div>
     </div>
-</div>
 
-<div id="help" class="tab-content">
-    <div class="card">
-        <h3>Need Help? 🎧</h3>
-        <p>Contact our support team for any issues.</p>
-        <textarea id="support-msg" placeholder="Write your problem here..." style="width: 90%; height: 100px; background: #334155; color: white; border-radius: 8px; padding: 10px;"></textarea>
-        <button class="btn" style="margin-top: 10px;" onclick="sendSupport()">Send Message</button>
-    </div>
-    
-    <div class="card">
-        <h4>FAQs ❓</h4>
-        <p><b>Q: How to withdraw?</b><br>A: Minimum balance should be 1000 coins.</p>
-    </div>
-</div>
+    <nav class="nav-bar">
+        <button class="nav-item active" onclick="switchTab('rewards', this)">
+            <span>💰</span> Rewards
+        </button>
+        <button class="nav-item" onclick="switchTab('help', this)">
+            <span>🎧</span> Support
+        </button>
+    </nav>
+
+    <script src="script.js"></script>
+</body>
+</html>
