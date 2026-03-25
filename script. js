@@ -1,1 +1,38 @@
+const tg = window.Telegram.WebApp;
+let coins = parseInt(localStorage.getItem('user_coins')) || 0;
+
+// Update UI on load
+document.getElementById('balance').innerText = coins + " 🪙";
+
+function switchTab(tabId, el) {
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active-tab'));
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+    document.getElementById(tabId).classList.add('active-tab');
+    el.classList.add('active');
+    document.getElementById('tab-title').innerText = tabId.charAt(0).toUpperCase() + tabId.slice(1);
+}
+
+function claimDaily() {
+    // Basic logic: Har click pe 10 coin (Baad mein 24h timer lagayenge)
+    coins += 10;
+    localStorage.setItem('user_coins', coins);
+    document.getElementById('balance').innerText = coins + " 🪙";
+    tg.showAlert("Congrats! 10 Coins added. 🎁");
+}
+
+function sendSupport() {
+    const msg = document.getElementById('support-msg').value;
+    if(msg.trim() === "") {
+        tg.showAlert("Kuch toh likho bhai!");
+        return;
+    }
+    // Ye message tumhare Python Bot ko jayega
+    tg.sendData(JSON.stringify({type: "support", message: msg}));
+    tg.showAlert("Message sent to Admin! ✅");
+    document.getElementById('support-msg').value = "";
+}
+
+function inviteFriend() {
+    tg.showAlert("Referral link copied! (Feature coming soon)");
+}
 
