@@ -4,8 +4,8 @@ import json
 from telebot import types
 
 # 1. Setup
-BOT_TOKEN = "bot_token"
-ADMIN_ID =   6613528513  # Replace with your actual numerical ID (No quotes)
+BOT_TOKEN = "bot_token" # Apna naya token yahan dalo
+ADMIN_ID = 6613528513  
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # 2. Database Initializing
@@ -24,7 +24,7 @@ def init_db():
 
 init_db()
 
-# 3. Start Command with Referral Detection
+# 3. Start Command with Referral & Balance Fetching
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -38,30 +38,44 @@ def start(message):
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
     
-    cursor.execute("SELECT user_id FROM users WHERE user_id=?", (user_id,))
-    user_exists = cursor.fetchone()
+    # Check if user exists
+    cursor.execute("SELECT coins FROM users WHERE user_id=?", (user_id,))
+    user_data = cursor.fetchone()
 
-    if not user_exists:
+    if not user_data:
+        # Naya user register ho raha hai
+        current_coins = 0
         if referrer_id and str(referrer_id) != str(user_id):
-            # Credit 50 coins to the referrer
+            # Referrer ko 50 coins dena
             cursor.execute("UPDATE users SET coins = coins + 50 WHERE user_id=?", (referrer_id,))
-            bot.send_message(referrer_id, f"🎊 Congratulations! A new user joined via your link. You have received 50 coins!")
+            try:
+                bot.send_message(referrer_id, f"🎊 Congratulations! A new user joined via your link. You received 50 coins!")
+            except:
+                pass
             
             cursor.execute("INSERT INTO users (user_id, coins, referred_by) VALUES (?, ?, ?)", (user_id, 0, referrer_id))
         else:
             cursor.execute("INSERT INTO users (user_id, coins) VALUES (?, ?)", (user_id, 0))
-        
         conn.commit()
+    else:
+        # Purana user hai, database se uske coins lo
+        current_coins = user_data[0]
+    
     conn.close()
 
-    # Mini App Button
+    # Mini App Button with Dynamic Coins URL
+    # Replace the URL below with your actual GitHub Pages link
+    base_url = "https://sahdakshsanoj-byte.github.io/Earning-bot/"
+    web_app_url = f"{base_url}?coins={current_coins}"
+    
     markup = types.InlineKeyboardMarkup()
-    # Replace with your actual GitHub Pages URL
-    web_app = types.WebAppInfo("https://YOUR_GITHUB_USERNAME.github.io/YOUR_REPO/")
+    web_app = types.WebAppInfo(web_app_url)
     markup.add(types.InlineKeyboardButton("💰 Open Earning Hub", web_app=web_app))
     
-    welcome_text = (f"Hello {username}!\n\nWelcome to the Earning Hub Bot. "
-                   "Click the button below to start earning coins and rewards!")
+    welcome_text = (f"Hello {username}!\n\n"
+                   f"Your current balance: {current_coins} 🪙\n\n"
+                   "Click the button below to start earning more rewards!")
+    
     bot.send_message(user_id, welcome_text, reply_markup=markup)
 
 # 4. Handle Support Messages (Mini App Data)
@@ -76,9 +90,9 @@ def handle_web_app_data(message):
             
             # Forward to Admin
             bot.send_message(ADMIN_ID, f"📩 **New Support Request**\n\n{user_info}\n💬 Message: {user_msg}")
-            bot.reply_to(message, "Your message has been sent to the Admin! ✅ You will receive a response within 5-6 hours.")
+            bot.reply_to(message, "Your message has been sent to the Admin! ✅")
     except Exception as e:
-        print(f"Error parsing WebApp data: {e}")
+        print(f"Error: {e}")
 
 # 5. Direct Message Forwarding
 @bot.message_handler(func=lambda m: True)
