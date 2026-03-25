@@ -1,4 +1,4 @@
-  <!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -11,7 +11,10 @@
 
     <div class="header" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 20px;">
         <h3 id="tab-title">Rewards</h3>
-        <div onclick="switchTab('history', this)" style="cursor: pointer; font-size: 24px; color: var(--gold);">⋮</div>
+        <div style="display: flex; gap: 15px;">
+            <div onclick="switchTab('leaderboard', this)" style="cursor: pointer; font-size: 20px;">🏆</div>
+            <div onclick="switchTab('history', this)" style="cursor: pointer; font-size: 24px; color: var(--gold);">⋮</div>
+        </div>
     </div>
 
     <div id="rewards" class="tab-content active-tab">
@@ -39,73 +42,38 @@
             <p>Scroll down to complete all tasks!</p>
         </div>
 
-        <div class="card" style="max-height: 450px; overflow-y: auto; padding-right: 10px;">
+        <div class="card" style="max-height: 400px; overflow-y: auto; padding-right: 10px;">
             <h4 style="color: #ff0000; border-bottom: 1px solid #ff0000; padding-bottom: 5px;">YouTube Tasks 📺</h4>
-            <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
-                <p style="font-size: 13px;">Task 1: Watch & Verify (+20)</p>
-                <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('YT_LINK_1')">Watch Video 1</button>
-                <div style="display: flex; gap: 5px;">
-                    <input type="text" id="yt-1" placeholder="Code" style="flex:1; padding:8px;">
-                    <button class="btn-sm" onclick="verifyTask('yt1', 'yt-1', 20)">Verify</button>
-                </div>
-            </div>
-            <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
-                <p style="font-size: 13px;">Task 2: Watch & Verify (+20)</p>
-                <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('YT_LINK_2')">Watch Video 2</button>
-                <div style="display: flex; gap: 5px;">
-                    <input type="text" id="yt-2" placeholder="Code" style="flex:1; padding:8px;">
-                    <button class="btn-sm" onclick="verifyTask('yt2', 'yt-2', 20)">Verify</button>
-                </div>
-            </div>
-            <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
-                <p style="font-size: 13px;">Task 3: Watch & Verify (+20)</p>
-                <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('YT_LINK_3')">Watch Video 3</button>
-                <div style="display: flex; gap: 5px;">
-                    <input type="text" id="yt-3" placeholder="Code" style="flex:1; padding:8px;">
-                    <button class="btn-sm" onclick="verifyTask('yt3', 'yt-3', 20)">Verify</button>
+            <div id="yt-tasks-list">
+                <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
+                    <p style="font-size: 13px;">Task 1: Watch & Verify (+20)</p>
+                    <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('YT_LINK_1')">Watch Video 1</button>
+                    <div style="display: flex; gap: 5px;">
+                        <input type="text" id="yt-1" placeholder="Code" style="flex:1; padding:8px;">
+                        <button class="btn-sm" onclick="verifyTask('yt1', 'yt-1', 20)">Verify</button>
+                    </div>
                 </div>
             </div>
 
             <h4 style="color: #3498db; border-bottom: 1px solid #3498db; padding-bottom: 5px; margin-top: 20px;">Website Tasks 🌐</h4>
-            <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
-                <p style="font-size: 13px;">Task 1: Visit Site (+15)</p>
-                <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('WEB_LINK_1')">Visit Site 1</button>
-                <div style="display: flex; gap: 5px;">
-                    <input type="text" id="web-1" placeholder="Code" style="flex:1; padding:8px;">
-                    <button class="btn-sm" onclick="verifyTask('web1', 'web-1', 15)">Verify</button>
+            <div id="web-tasks-list">
                 </div>
-            </div>
-            <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
-                <p style="font-size: 13px;">Task 2: Visit Site (+15)</p>
-                <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('WEB_LINK_2')">Visit Site 2</button>
-                <div style="display: flex; gap: 5px;">
-                    <input type="text" id="web-2" placeholder="Code" style="flex:1; padding:8px;">
-                    <button class="btn-sm" onclick="verifyTask('web2', 'web-2', 15)">Verify</button>
-                </div>
-            </div>
-            <div style="margin: 15px 0; padding-bottom: 10px;">
-                <p style="font-size: 13px;">Task 3: Visit Site (+15)</p>
-                <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('WEB_LINK_3')">Visit Site 3</button>
-                <div style="display: flex; gap: 5px;">
-                    <input type="text" id="web-3" placeholder="Code" style="flex:1; padding:8px;">
-                    <button class="btn-sm" onclick="verifyTask('web3', 'web-3', 15)">Verify</button>
-                </div>
-            </div>
         </div>
 
         <div class="card">
             <h4 style="color: #0088cc; margin-bottom: 10px;">Join Channels 📢</h4>
-            <button class="btn" style="background:#0088cc; margin-bottom:10px; font-size: 14px;" onclick="openTask('https://t.me/OfficialChannel')">📢 Join Official Channel (+30)</button>
-            <button class="btn" style="background:#28a745; margin-bottom:10px; font-size: 14px;" onclick="openTask('https://t.me/BackupChannel')">🚀 Join Backup Channel (+20)</button>
-            <button class="btn" style="background:#28a745; font-size: 14px;" onclick="openTask('https://t.me/PaymentProof')">🔥 Join Payment Proofs (+20)</button>
+            <button class="btn" style="background:#0088cc; margin-bottom:10px; font-size: 14px;" onclick="openTask('https://t.me/OfficialChannel')">📢 Official Channel (+30)</button>
         </div>
     </div>
 
-    <div id="history" class="tab-content" style="display: none;">
+    <div id="leaderboard" class="tab-content" style="display: none;">
+        <div class="card balance-card" style="background: linear-gradient(135deg, #6366f1, #a855f7);">
+            <h4>Top 10 Earners 🏆</h4>
+            <p>Be the best to earn more!</p>
+        </div>
         <div class="card">
-            <h4>Withdrawal History 📜</h4>
-            <div id="history-list" style="margin-top:15px; font-size: 14px;">
-                <p style="color: #94a3b8; text-align: center;">No history found.</p>
+            <div id="leaderboard-list">
+                <p style="text-align: center; color: #94a3b8;">Loading ranking...</p>
             </div>
         </div>
     </div>
@@ -122,6 +90,21 @@
             </div>
             <button class="btn" onclick="inviteFriend()">Copy & Invite</button>
         </div>
+        <div class="card" style="margin-top: 15px; background: rgba(0,0,0,0.2);">
+            <h4 style="font-size: 14px; border-bottom: 1px solid #334155; padding-bottom: 5px;">My Referrals 👥</h4>
+            <div id="refer-list" style="margin-top: 10px; font-size: 13px; max-height: 150px; overflow-y: auto;">
+                <p style="color: #94a3b8; text-align: center;">No referrals yet.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="history" class="tab-content" style="display: none;">
+        <div class="card">
+            <h4>Withdrawal History 📜</h4>
+            <div id="history-list" style="margin-top:15px; font-size: 14px;">
+                <p style="color: #94a3b8; text-align: center;">No history found.</p>
+            </div>
+        </div>
     </div>
 
     <div id="help" class="tab-content" style="display: none;">
@@ -130,14 +113,17 @@
             <textarea id="support-msg" placeholder="Write your issue here..."></textarea>
             <button class="btn" onclick="sendSupport()">Send to Admin</button>
         </div>
-        <div class="card" style="border: 1px solid var(--accent);">
-            <h4>Official Email Support 📧</h4>
-            <a href="mailto:support@yourdomain.com" style="text-decoration: none;">
-                <div style="background: #1e293b; padding: 12px; border-radius: 8px; text-align: center; color: var(--accent); border: 1px dashed var(--accent);">
-                    support@yourdomain.com
-                </div>
-            </a>
-            <button class="btn" style="background: var(--accent); color: white; margin-top: 10px;" onclick="window.location.href='mailto:support@yourdomain.com'">Open Gmail ✉️</button>
+
+        <div class="card" style="border: 1px solid #38bdf8; text-align: center;">
+            <h4 style="color: #38bdf8; margin-bottom: 10px;">Official Email Support 📧</h4>
+            <p style="font-size: 12px; color: #94a3b8; margin-bottom: 12px;">Tap the box below to copy email address:</p>
+            
+            <div id="email-copy-box" onclick="copyEmail()" style="background: #0f172a; padding: 15px; border-radius: 10px; color: #38bdf8; border: 1px dashed #38bdf8; font-weight: bold; cursor: pointer; transition: 0.3s;">
+                codetearn.help@gmail.com
+                <div style="font-size: 10px; margin-top: 5px; color: #94a3b8; font-weight: normal;">(Click to Copy)</div>
+            </div>
+            
+            <p id="copy-status" style="color: #2ecc71; font-size: 12px; margin-top: 10px; display: none; font-weight: bold;">Email Copied! ✅</p>
         </div>
     </div>
 
@@ -148,7 +134,8 @@
         <button class="nav-item" onclick="switchTab('help', this)"><span>🎧</span> Support</button>
     </nav>
 
+    <script src="config.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
-     
+                              
