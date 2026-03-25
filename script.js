@@ -41,7 +41,7 @@ function switchTab(tabId, el) {
         
         if(tabId === 'refer') {
             const userId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : "guest";
-            const inviteLink = `https://t.me/Codetearn_bot?start=${userId}`;
+            const inviteLink = `https://t.me/Cdotern_bot?start=${userId}`;
             document.getElementById('display-link').innerText = inviteLink;
         }
     }
