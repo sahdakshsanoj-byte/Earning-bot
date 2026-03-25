@@ -28,6 +28,23 @@
             <button class="btn" style="background:#2ecc71;" onclick="inviteFriend()">Invite</button>
         </div>
     </div>
+    
+<div id="refer" class="tab-content">
+    <div class="card balance-card">
+        <h4>Refer & Earn 🚀</h4>
+        <p>Har referral par paayein <b>50 Coins</b>!</p>
+    </div>
+
+    <div class="card">
+        <p>Tera Referral Link:</p>
+        <div id="display-link" style="background:#0f172a; padding:10px; border-radius:8px; font-size:12px; word-break:break-all; border:1px dashed var(--gold); margin-bottom:10px; color: var(--gold);">
+            Loading link...
+        </div>
+        <button class="btn" onclick="inviteFriend()">Copy & Invite Friends</button>
+    </div>
+</div>
+<div id="help" class="tab-content">
+    
 
     <div id="help" class="tab-content">
         <div class="card">
@@ -54,3 +71,17 @@
     <script src="script.js"></script>
 </body>
 </html>
+<nav class="nav-bar">
+    <button class="nav-item active" onclick="switchTab('rewards', this)">
+        <span>💰</span> Rewards
+    </button>
+    
+    <button class="nav-item" onclick="switchTab('refer', this)">
+        <span>👥</span> Refer
+    </button>
+
+    <button class="nav-item" onclick="switchTab('help', this)">
+        <span>🎧</span> Support
+    </button>
+</nav>
+
