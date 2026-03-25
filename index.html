@@ -1,9 +1,9 @@
-     <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Daksh Earning Hub</title>
+    <title>Earning Hub Bot</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -18,28 +18,62 @@
             <p>Your Balance</p>
             <h1 id="balance">0 🪙</h1>
         </div>
+
         <div class="card">
             <h4>Daily Bonus 🎁</h4>
             <p>Claim 10 coins every day!</p>
             <button class="btn" onclick="claimDaily()">Claim Now</button>
         </div>
+
+        <div class="card">
+            <h4>Withdraw 💸</h4>
+            <p>Min. Limit: 1000 Coins</p>
+            <input type="text" id="upi-id" placeholder="Enter UPI ID (name@apl)" 
+                style="width: 90%; padding: 10px; margin: 10px 0; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: white;">
+            <button class="btn" style="background: #e74c3c;" onclick="requestWithdraw()">Withdraw Now</button>
+        </div>
     </div>
 
-    <div id="refer" class="tab-content">
+    <div id="tasks" class="tab-content" style="display: none;">
+        <div class="card balance-card" style="background: linear-gradient(135deg, #f1c40f, #f39c12);">
+            <h4>Extra Tasks 🌟</h4>
+            <p>Complete tasks to earn huge coins!</p>
+        </div>
+
+        <div class="card">
+            <h4>Watch YouTube 📺</h4>
+            <p>Watch for 60s to get 20 Coins</p>
+            <button class="btn" style="background:#ff0000;" onclick="completeTask('youtube', 'https://youtube.com/@YOUR_CHANNEL', 20)">Watch Video</button>
+        </div>
+
+        <div class="card">
+            <h4>Visit Website 🌐</h4>
+            <p>Stay for 60s to get 15 Coins</p>
+            <button class="btn" style="background:#3498db;" onclick="completeTask('website', 'https://google.com', 15)">Visit Site</button>
+        </div>
+
+        <div class="card">
+            <h4>Join Channel 📢</h4>
+            <p>Join for 30 Coins</p>
+            <button class="btn" style="background:#0088cc;" onclick="completeTask('join', 'https://t.me/YOUR_CHANNEL', 30)">Join Now</button>
+        </div>
+    </div>
+
+    <div id="refer" class="tab-content" style="display: none;">
         <div class="card balance-card">
             <h4>Refer & Earn 🚀</h4>
-            <p>Har referral par paayein <b>50 Coins</b>!</p>
+            <p>Get <b>50 Coins</b> for every friend!</p>
         </div>
         <div class="card">
-            <p>Tera Referral Link:</p>
+            <p>Your Referral Link:</p>
             <div id="display-link" style="background:#0f172a; padding:10px; border-radius:8px; font-size:12px; word-break:break-all; border:1px dashed var(--gold); margin-bottom:10px; color: var(--gold);">
                 Loading link...
             </div>
-            <button class="btn" onclick="inviteFriend()">Copy & Invite Friends</button>
+            <button class="btn" onclick="inviteFriend()">Copy & Invite</button>
         </div>
     </div>
 
-    <div id="help" class="tab-content">
+    <div id="help" class="tab-content" style="display: none;">
         <div class="card">
             <h4>Support Center 🎧</h4>
             <p>Face any issue? Tell us!</p>
@@ -48,13 +82,17 @@
         </div>
         <div class="card">
             <h4>FAQ ❓</h4>
-            <p><b>Withdraw limit:</b> 1000 Coins</p>
+            <p><b>Payments:</b> Sent within 24 hours.<br>
+               <b>Withdraw:</b> 1000 Coins = ₹10 (Example)</p>
         </div>
     </div>
 
     <nav class="nav-bar">
         <button class="nav-item active" onclick="switchTab('rewards', this)">
             <span>💰</span> Rewards
+        </button>
+        <button class="nav-item" onclick="switchTab('tasks', this)">
+            <span>🌟</span> Tasks
         </button>
         <button class="nav-item" onclick="switchTab('refer', this)">
             <span>👥</span> Refer
@@ -68,4 +106,3 @@
 
 </body>
 </html>
-   
