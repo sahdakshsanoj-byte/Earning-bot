@@ -177,14 +177,14 @@ function sendSupport() {
 
 function inviteFriend() {
     const userId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : "guest";
-    const link = `https://t.me/Codetearn_bot?start=${userId}`;
+    const link = `https://t.me/Cdotern_bot?start=${userId}`;
     navigator.clipboard.writeText(link).then(() => tg.showAlert("Link Copied! 🚀"));
 }
 
 function claimDaily() {
     let lastClaim = localStorage.getItem('last_claim_daily');
     let today = new Date().toDateString();
-    if (lastClaim === today) { return tg.showAlert("Aaj ka bonus mil gaya! Kal aana. ✨"); }
+    if (lastClaim === today) { return tg.showAlert("Aaj ka bonus mil gaya! Kal Aaj. ✨"); }
     let coins = parseInt(localStorage.getItem('user_coins')) || 0;
     localStorage.setItem('user_coins', coins + 10);
     localStorage.setItem('last_claim_daily', today);
