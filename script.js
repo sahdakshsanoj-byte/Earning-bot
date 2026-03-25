@@ -38,7 +38,7 @@ function switchTab(tabId, el) {
         el.classList.add('active');
         document.getElementById('tab-title').innerText = tabId.charAt(0).toUpperCase() + tabId.slice(1);
         
-        // Agar Refer tab khule toh link dikhao
+        // Refer link logic
         if(tabId === 'refer') {
             const userId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : "guest";
             const inviteLink = `https://t.me/Codetearn_bot?start=${userId}`;
@@ -48,17 +48,16 @@ function switchTab(tabId, el) {
     }
 }
 
-// 4. Daily Claim Function (With Database Sync)
+// 4. Daily Claim Function
 function claimDaily() {
     let lastClaim = localStorage.getItem('last_claim');
     let today = new Date().toDateString();
 
     if (lastClaim === today) {
-        tg.showAlert("You have already claimed your bonus today! ✨");
+        tg.showAlert("Already claimed today! ✨");
         return;
     }
 
-    // Local update
     let currentCoins = parseInt(localStorage.getItem('user_coins')) || 0;
     let newBalance = currentCoins + 10;
     localStorage.setItem('user_coins', newBalance);
@@ -66,31 +65,66 @@ function claimDaily() {
     
     updateDisplay();
 
-    // 🚀 Bot ko signal bhejo database update ke liye
-    tg.sendData(JSON.stringify({
-        type: "claim_bonus",
-        amount: 10
-    }));
-
-    tg.showAlert("Congratulations! 10 Coins added to your account. 🎁");
+    tg.sendData(JSON.stringify({ type: "claim_bonus", amount: 10 }));
+    tg.showAlert("10 Coins added! 🎁");
 }
 
-// 5. Support Logic
+// 5. NEW: Extra Tasks Logic (Timer based)
+function completeTask(type, link, reward) {
+    tg.showAlert(`Opening ${type}. Wait 60s for ${reward} coins! Don't close the App. ⏳`);
+    window.open(link, '_blank');
+
+    setTimeout(() => {
+        let currentCoins = parseInt(localStorage.getItem('user_coins')) || 0;
+        let newBalance = currentCoins + reward;
+        
+        localStorage.setItem('user_coins', newBalance);
+        updateDisplay();
+
+        tg.sendData(JSON.stringify({ type: "claim_bonus", amount: reward }));
+        tg.showAlert(`Task Verified! ${reward} coins added. ✅`);
+    }, 60000); // 60 Seconds timer
+}
+
+// 6. NEW: Withdraw Logic
+function requestWithdraw() {
+    let currentCoins = parseInt(localStorage.getItem('user_coins')) || 0;
+    const upiId = document.getElementById('upi-id').value;
+
+    if (currentCoins < 1000) {
+        tg.showAlert("Minimum 1000 coins required to withdraw! ❌");
+        return;
+    }
+
+    if (!upiId.includes('@')) {
+        tg.showAlert("Please enter a valid UPI ID! 🏦");
+        return;
+    }
+
+    tg.sendData(JSON.stringify({
+        type: "withdraw_request",
+        amount: currentCoins,
+        upi: upiId
+    }));
+
+    // Reset coins local me (Database bot.py handle karega)
+    localStorage.setItem('user_coins', 0);
+    updateDisplay();
+    tg.showAlert("Withdrawal Request Sent! Admin will pay within 24h. ✅");
+}
+
+// 7. Support Logic
 function sendSupport() {
     const msgInput = document.getElementById('support-msg');
     const msg = msgInput.value;
-    
-    if(!msg.trim()) {
-        tg.showAlert("Please write your message here.");
-        return;
-    }
+    if(!msg.trim()) return tg.showAlert("Please write something.");
     
     tg.sendData(JSON.stringify({type: 'support', message: msg}));
-    tg.showAlert("Message sent! Admin will reply in 5-6 hours. ✅");
+    tg.showAlert("Sent to Admin! ✅");
     msgInput.value = "";
 }
 
-// 6. Referral Logic
+// 8. Referral Logic
 function inviteFriend() {
     const userId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : "guest";
     const link = `https://t.me/Codetearn_bot?start=${userId}`;
