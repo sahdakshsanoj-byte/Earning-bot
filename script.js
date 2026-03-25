@@ -57,12 +57,12 @@ function sendSupport() {
 
 function inviteFriend() {
     const userId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : "guest";
-    const botUsername = "YOUR_BOT_USERNAME"; // Apna bot username yahan daalna
-    const link = `https://t.me/${botUsername}?start=${userId}`;
+    const botUsername = "@Cdotern_bot"; // Apna bot username yahan daalna
+    const link = `https://t.me/${@Cdotern_bot}?start=${userId}`;
     
     if(navigator.clipboard) {
         navigator.clipboard.writeText(link);
-        tg.showAlert("Referral Link Copy Ho Gaya! 🚀");
+        tg.showAlert("Referral Link Copy successfully! 🚀");
     } else {
         tg.showAlert("Link: " + link);
     }
