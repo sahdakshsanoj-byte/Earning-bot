@@ -43,75 +43,93 @@ function switchTab(tabId, el) {
     }
 }
 
-// 4. Secret Code Task Logic with 48-Hour Lock
+// 4. Multi-Task Secret Code Logic (3 YT + 3 WEB)
 function openTask(link) {
-    tg.showAlert("Video/Website khul rahi hai. Secret Code dhoondhein aur wapas aakar enter karein! 🔍");
+    tg.showAlert("Opening Task... Video/Site se Secret Code dhoondhein! 🔍");
     window.open(link, '_blank');
 }
 
-function verifyTask(type, inputId, reward) {
+function verifyTask(taskId, inputId, reward) {
     const userCode = document.getElementById(inputId).value.trim();
     
-    // --- 48 HOUR LOCK LOGIC ---
-    const lastClaimKey = `last_claim_${type}`;
+    // --- 48 HOUR LOCK PER TASK ---
+    const lastClaimKey = `last_claim_${taskId}`;
     const lastClaimTime = localStorage.getItem(lastClaimKey);
     const currentTime = new Date().getTime();
-    const fortyEightHours = 48 * 60 * 60 * 1000; // 48 ghante milliseconds mein
+    const fortyEightHours = 48 * 60 * 60 * 1000;
 
     if (lastClaimTime && (currentTime - lastClaimTime < fortyEightHours)) {
         const remainingMs = fortyEightHours - (currentTime - lastClaimTime);
         const remainingHours = Math.ceil(remainingMs / (1000 * 60 * 60));
-        tg.showAlert(`Bhai, thoda sabar! ✋ Ye task aap kar chuke hain. Agle ${remainingHours} ghante baad phir se try karein.`);
+        tg.showAlert(`✋ Thoda wait! Ye specific task aap kar chuke hain. Agle ${remainingHours} ghante baad phir se try karein.`);
         return;
     }
 
-    // --- SECRET CODES ---
-    const SECRET_YT = "YT786"; 
-    const SECRET_WEB = "WEB99";
-    let correctCode = (type === 'youtube') ? SECRET_YT : SECRET_WEB;
+    // --- 6 UNIQUE SECRET CODES ---
+    const TASK_CODES = {
+        'yt1': 'YT786',     // YouTube Video 1 Code
+        'yt2': 'YT555',     // YouTube Video 2 Code
+        'yt3': 'YT999',     // YouTube Video 3 Code
+        'web1': 'WEB10',    // Website 1 Code
+        'web2': 'WEB20',    // Website 2 Code
+        'web3': 'WEB30'     // Website 3 Code
+    };
 
-    if (userCode === correctCode) {
+    if (userCode === TASK_CODES[taskId]) {
         let currentCoins = parseInt(localStorage.getItem('user_coins')) || 0;
         let newBalance = currentCoins + reward;
         
-        // Data Save Karo
         localStorage.setItem('user_coins', newBalance);
-        localStorage.setItem(lastClaimKey, currentTime); // Time stamp save karo
+        localStorage.setItem(lastClaimKey, currentTime); // Us task ka time save
         
         updateDisplay();
 
         tg.sendData(JSON.stringify({ type: "claim_bonus", amount: reward }));
-        tg.showAlert(`Correct Code! +${reward} Coins added. ✅ Ab ye task 2 din baad hi khulega.`);
+        tg.showAlert(`Correct Code! +${reward} Coins added. ✅ Ye task 2 din ke liye lock ho gaya.`);
         document.getElementById(inputId).value = ""; 
     } else {
-        tg.showAlert("Wrong Secret Code! Video dhyaan se dekhein. ❌");
+        tg.showAlert("Wrong Secret Code! Dhyaan se dekhein. ❌");
     }
 }
 
-// 5. Withdraw Logic
+// 5. Daily Claim
+function claimDaily() {
+    let lastClaim = localStorage.getItem('last_claim_daily');
+    let today = new Date().toDateString();
+
+    if (lastClaim === today) {
+        tg.showAlert("Bhai, aaj ka bonus mil gaya! Kal aana. ✨");
+        return;
+    }
+
+    let currentCoins = parseInt(localStorage.getItem('user_coins')) || 0;
+    let newBalance = currentCoins + 10;
+    localStorage.setItem('user_coins', newBalance);
+    localStorage.setItem('last_claim_daily', today);
+    updateDisplay();
+    tg.sendData(JSON.stringify({ type: "claim_bonus", amount: 10 }));
+    tg.showAlert("10 Coins added! 🎁");
+}
+
+// 6. Withdraw Logic
 function requestWithdraw() {
     let currentCoins = parseInt(localStorage.getItem('user_coins')) || 0;
     const upiId = document.getElementById('upi-id').value.trim();
 
     if (currentCoins < 1000) {
-        tg.showAlert("Minimum 1000 coins required! ❌");
+        tg.showAlert("Min 1000 Coins! ❌");
         return;
     }
     if (!upiId.includes('@')) {
-        tg.showAlert("Invalid UPI ID! 🏦");
+        tg.showAlert("Invalid UPI! 🏦");
         return;
     }
 
     let history = JSON.parse(localStorage.getItem('withdraw_history')) || [];
-    history.unshift({ 
-        date: new Date().toLocaleDateString(), 
-        amount: currentCoins, 
-        status: "Pending ⏳" 
-    });
+    history.unshift({ date: new Date().toLocaleDateString(), amount: currentCoins, status: "Pending ⏳" });
     localStorage.setItem('withdraw_history', JSON.stringify(history));
 
     tg.sendData(JSON.stringify({ type: "withdraw_request", amount: currentCoins, upi: upiId }));
-
     localStorage.setItem('user_coins', 0);
     document.getElementById('upi-id').value = "";
     updateDisplay();
@@ -122,21 +140,16 @@ function renderHistory() {
     let history = JSON.parse(localStorage.getItem('withdraw_history')) || [];
     const list = document.getElementById('history-list');
     if (!list) return;
-
-    if (history.length === 0) {
-        list.innerHTML = `<p style="text-align:center; color:#94a3b8;">No history yet.</p>`;
-    } else {
-        list.innerHTML = history.map(item => `
-            <div style="display:flex; justify-content:space-between; padding:10px; border-bottom:1px solid #1e293b; background:#0f172a; margin-bottom:5px; border-radius:5px;">
-                <span>📅 ${item.date}</span>
-                <span>💰 ${item.amount}</span>
-                <span style="color:#f1c40f;">${item.status}</span>
-            </div>
-        `).join('');
-    }
+    list.innerHTML = history.length === 0 ? `<p style="text-align:center; color:#94a3b8;">No history found.</p>` : 
+    history.map(item => `
+        <div style="display:flex; justify-content:space-between; padding:10px; border-bottom:1px solid #1e293b; background:#0f172a; margin-bottom:5px; border-radius:5px;">
+            <span>📅 ${item.date}</span>
+            <span>💰 ${item.amount}</span>
+            <span style="color:#f1c40f;">${item.status}</span>
+        </div>`).join('');
 }
 
-// 6. Support & Refer
+// 7. Support & Refer
 function sendSupport() {
     const msg = document.getElementById('support-msg').value;
     if(!msg.trim()) return tg.showAlert("Please write something.");
