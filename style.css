@@ -5,94 +5,135 @@
     --gold: #f1c40f;
     --accent: #38bdf8;
     --red: #ef4444;
+    --silver: #cbd5e1;
+    --bronze: #cd7f32;
 }
 
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    -webkit-tap-highlight-color: transparent; /* Mobile tap highlight remove */
 }
 
 body {
     background-color: var(--bg-color);
     color: var(--text-color);
-    padding-bottom: 70px; /* Space for Nav Bar */
+    padding-bottom: 80px; 
     overflow-x: hidden;
+    line-height: 1.5;
 }
 
-/* Header Style */
+/* --- Header Style --- */
 .header {
-    background: linear-gradient(to bottom, #1e293b, #0f172a);
-    padding: 20px;
-    text-align: center;
-    border-bottom: 2px solid var(--gold);
+    background: rgba(30, 41, 59, 0.8);
+    backdrop-filter: blur(10px);
+    padding: 15px 20px;
+    border-bottom: 1px solid rgba(241, 196, 15, 0.3);
     position: sticky;
     top: 0;
-    z-index: 100;
+    z-index: 1000;
 }
 
-/* Card Style (Glassmorphism) */
+/* --- Card Style --- */
 .card {
     background: var(--card-bg);
-    margin: 15px;
-    padding: 20px;
-    border-radius: 15px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    margin: 12px;
+    padding: 18px;
+    border-radius: 16px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.05);
-    animation: fadeIn 0.5s ease;
+    animation: fadeIn 0.4s ease-out;
 }
 
 .balance-card {
     text-align: center;
-    border: 2px solid var(--gold);
+    border: 1px solid var(--gold);
     background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
 }
 
 .balance-card h1 {
     color: var(--gold);
-    font-size: 2.5rem;
+    font-size: 2.8rem;
     margin-top: 5px;
+    text-shadow: 0 0 15px rgba(241, 196, 15, 0.3);
 }
 
-/* Buttons */
+/* --- Custom Scrollbar (Tasks & Referrals) --- */
+div::-webkit-scrollbar {
+    width: 4px;
+}
+div::-webkit-scrollbar-track {
+    background: transparent;
+}
+div::-webkit-scrollbar-thumb {
+    background: var(--gold);
+    border-radius: 10px;
+}
+
+/* --- Leaderboard Special Styling --- */
+#leaderboard-list .leader-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    margin-bottom: 8px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.rank-1 { border: 1px solid var(--gold) !important; background: rgba(241, 196, 15, 0.1) !important; }
+.rank-2 { border: 1px solid var(--silver) !important; background: rgba(203, 213, 225, 0.1) !important; }
+.rank-3 { border: 1px solid var(--bronze) !important; background: rgba(205, 127, 50, 0.1) !important; }
+
+/* --- Email Copy Box --- */
+#email-copy-box:active {
+    transform: scale(0.98);
+    background: #1e293b;
+}
+
+/* --- Buttons --- */
 .btn {
     width: 100%;
-    padding: 12px;
+    padding: 14px;
     border: none;
-    border-radius: 10px;
+    border-radius: 12px;
     background: var(--gold);
     color: #000;
     font-weight: bold;
     cursor: pointer;
-    transition: transform 0.2s, opacity 0.2s;
+    transition: all 0.2s;
     font-size: 16px;
     margin-top: 10px;
+    box-shadow: 0 4px 10px rgba(241, 196, 15, 0.2);
 }
 
-.btn:active {
-    transform: scale(0.95);
-}
+.btn:active { transform: scale(0.97); opacity: 0.9; }
 
 .btn-sm {
-    padding: 8px 15px;
+    padding: 10px 18px;
     background: var(--accent);
     color: #fff;
     border: none;
-    border-radius: 5px;
+    border-radius: 8px;
+    font-weight: 600;
     font-size: 14px;
+    cursor: pointer;
 }
 
-/* Navigation Bar */
+/* --- Navigation Bar --- */
 .nav-bar {
     position: fixed;
     bottom: 0;
     width: 100%;
-    background: #1e293b;
+    background: rgba(30, 41, 59, 0.95);
+    backdrop-filter: blur(15px);
     display: flex;
     justify-content: space-around;
-    padding: 10px 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 12px 0 20px 0; /* Extra padding for bottom safe area */
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
     z-index: 1000;
 }
 
@@ -103,51 +144,51 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    font-size: 12px;
-    cursor: pointer;
-    transition: color 0.3s;
+    font-size: 11px;
+    font-weight: 500;
+    transition: all 0.3s;
+    width: 25%;
 }
 
 .nav-item span {
-    font-size: 20px;
+    font-size: 22px;
     margin-bottom: 4px;
 }
 
 .nav-item.active {
     color: var(--gold);
+    transform: translateY(-2px);
 }
 
-/* Inputs & Textarea */
+/* --- Inputs --- */
 input, textarea {
     width: 100%;
     background: #0f172a;
     border: 1px solid #334155;
-    color: white;
-    padding: 12px;
-    border-radius: 8px;
-    margin-top: 10px;
-    outline: none;
+    color: #f8fafc;
+    padding: 14px;
+    border-radius: 10px;
+    margin-top: 8px;
+    font-size: 15px;
+    transition: border 0.3s;
 }
 
-input:focus {
-    border-color: var(--gold);
-}
+input:focus { border-color: var(--gold); }
 
-/* Tab Animation */
+/* --- Animations --- */
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
+    from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }
 }
 
-.tab-content {
-    display: none;
-}
+.tab-content { display: none; }
+.active-tab { display: block; animation: fadeIn 0.4s ease-out; }
 
-.active-tab {
-    display: block;
-}
-
-/* History List Item */
+/* History List Styling */
 #history-list div {
-    animation: fadeIn 0.3s ease;
+    background: #0f172a;
+    padding: 12px;
+    border-radius: 10px;
+    margin-bottom: 8px;
+    border-left: 3px solid var(--gold);
 }
