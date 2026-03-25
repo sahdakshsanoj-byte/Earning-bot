@@ -13,7 +13,7 @@ function updateDisplay() {
     let currentBalance = localStorage.getItem('user_coins') || 0;
     const balanceEl = document.getElementById('balance');
     if (balanceEl) balanceEl.innerText = currentBalance + " 🪙";
-    renderHistory(); // Har baar balance update pe history bhi refresh ho
+    renderHistory();
 }
 updateDisplay();
 
@@ -32,7 +32,7 @@ function switchTab(tabId, el) {
     if (target) {
         target.style.display = 'block';
         target.classList.add('active-tab');
-        if (el.classList) el.classList.add('active'); // Nav buttons ke liye
+        if (el && el.classList) el.classList.add('active');
         document.getElementById('tab-title').innerText = tabId.charAt(0).toUpperCase() + tabId.slice(1);
         
         if(tabId === 'refer') {
@@ -43,7 +43,7 @@ function switchTab(tabId, el) {
     }
 }
 
-// 4. Secret Code Task Logic (No Timer, Just Code Verification)
+// 4. Secret Code Task Logic with 48-Hour Lock
 function openTask(link) {
     tg.showAlert("Video/Website khul rahi hai. Secret Code dhoondhein aur wapas aakar enter karein! 🔍");
     window.open(link, '_blank');
@@ -52,28 +52,43 @@ function openTask(link) {
 function verifyTask(type, inputId, reward) {
     const userCode = document.getElementById(inputId).value.trim();
     
-    // YAHAN APNA SECRET CODE SET KARO (Video me jo dikhaoge)
+    // --- 48 HOUR LOCK LOGIC ---
+    const lastClaimKey = `last_claim_${type}`;
+    const lastClaimTime = localStorage.getItem(lastClaimKey);
+    const currentTime = new Date().getTime();
+    const fortyEightHours = 48 * 60 * 60 * 1000; // 48 ghante milliseconds mein
+
+    if (lastClaimTime && (currentTime - lastClaimTime < fortyEightHours)) {
+        const remainingMs = fortyEightHours - (currentTime - lastClaimTime);
+        const remainingHours = Math.ceil(remainingMs / (1000 * 60 * 60));
+        tg.showAlert(`Bhai, thoda sabar! ✋ Ye task aap kar chuke hain. Agle ${remainingHours} ghante baad phir se try karein.`);
+        return;
+    }
+
+    // --- SECRET CODES ---
     const SECRET_YT = "YT786"; 
     const SECRET_WEB = "WEB99";
-
     let correctCode = (type === 'youtube') ? SECRET_YT : SECRET_WEB;
 
     if (userCode === correctCode) {
         let currentCoins = parseInt(localStorage.getItem('user_coins')) || 0;
         let newBalance = currentCoins + reward;
         
+        // Data Save Karo
         localStorage.setItem('user_coins', newBalance);
+        localStorage.setItem(lastClaimKey, currentTime); // Time stamp save karo
+        
         updateDisplay();
 
         tg.sendData(JSON.stringify({ type: "claim_bonus", amount: reward }));
-        tg.showAlert(`Correct Code! +${reward} Coins added. ✅`);
+        tg.showAlert(`Correct Code! +${reward} Coins added. ✅ Ab ye task 2 din baad hi khulega.`);
         document.getElementById(inputId).value = ""; 
     } else {
         tg.showAlert("Wrong Secret Code! Video dhyaan se dekhein. ❌");
     }
 }
 
-// 5. Withdraw Logic with History Logging
+// 5. Withdraw Logic
 function requestWithdraw() {
     let currentCoins = parseInt(localStorage.getItem('user_coins')) || 0;
     const upiId = document.getElementById('upi-id').value.trim();
@@ -87,7 +102,6 @@ function requestWithdraw() {
         return;
     }
 
-    // History update
     let history = JSON.parse(localStorage.getItem('withdraw_history')) || [];
     history.unshift({ 
         date: new Date().toLocaleDateString(), 
@@ -96,16 +110,12 @@ function requestWithdraw() {
     });
     localStorage.setItem('withdraw_history', JSON.stringify(history));
 
-    tg.sendData(JSON.stringify({
-        type: "withdraw_request",
-        amount: currentCoins,
-        upi: upiId
-    }));
+    tg.sendData(JSON.stringify({ type: "withdraw_request", amount: currentCoins, upi: upiId }));
 
     localStorage.setItem('user_coins', 0);
     document.getElementById('upi-id').value = "";
     updateDisplay();
-    tg.showAlert("Withdrawal Request Sent! Check History (3-dots). ✅");
+    tg.showAlert("Withdrawal Request Sent! ✅");
 }
 
 function renderHistory() {
