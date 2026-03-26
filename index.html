@@ -1,4 +1,4 @@
-  <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -6,6 +6,15 @@
     <title>Daksh Grand Earn</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="style.css">
+    <style>
+        /* Naye Sections ke liye thodi styling */
+        .ads-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+        .ad-box { background: #1e293b; padding: 15px; border-radius: 12px; text-align: center; border: 1px solid #334155; cursor: pointer; transition: 0.3s; }
+        .ad-box:active { transform: scale(0.95); }
+        .progress-container { background: #0f172a; border-radius: 20px; height: 10px; margin: 10px 0; overflow: hidden; }
+        .progress-bar { background: #f1c40f; height: 100%; width: 0%; transition: 0.5s; }
+        .sponsor-card { display: flex; align-items: center; justify-content: space-between; background: rgba(0, 136, 204, 0.1); border: 1px solid #0088cc; padding: 12px; border-radius: 12px; margin-bottom: 10px; }
+    </style>
 </head>
 <body>
 
@@ -18,153 +27,48 @@
     </div>
 
     <div id="rewards" class="tab-content active-tab">
+        
+        <div class="card" style="border-left: 4px solid #f1c40f;">
+            <h4 style="display: flex; justify-content: space-between;">
+                Telegram Ads ⚡ <span id="ad-count-text" style="color: #f1c40f;">0/5</span>
+            </h4>
+            <div class="progress-container">
+                <div id="ad-progress" class="progress-bar"></div>
+            </div>
+            <p style="font-size: 11px; color: #94a3b8;">Watch 5 ads daily to earn extra 50 coins!</p>
+            <button class="btn" style="background: #f1c40f; color: #000; font-weight: bold;" onclick="watchAd()">Watch Ad & Earn (+10)</button>
+        </div>
+
+        <div class="card">
+            <h4 style="color: #0088cc; margin-bottom: 10px;">Partnership & Sponsors 🤝</h4>
+            <div id="sponsor-list">
+                <div class="sponsor-card">
+                    <div>
+                        <p style="font-size: 14px; margin: 0;">Join Official Partner</p>
+                        <span style="font-size: 11px; color: #0088cc;">+100 Coins</span>
+                    </div>
+                    <button class="btn-sm" style="background: #0088cc; padding: 5px 15px;" onclick="checkSponsor('@YourPartnerChannel')">Join & Verify</button>
+                </div>
+            </div>
+        </div>
+
         <div class="card balance-card">
             <p>Your Balance</p>
             <h1 id="balance">0 🪙</h1>
         </div>
+
         <div class="card">
             <h4>Daily Bonus 🎁</h4>
             <p>Claim 10 coins every day!</p>
             <button class="btn" onclick="claimDaily()">Claim Now</button>
         </div>
+
         <div class="card">
             <h4>Withdraw 💸</h4>
             <p>Min. Limit: 1000 Coins</p>
             <input type="text" id="upi-id" placeholder="Enter UPI ID (name@apl)" 
                 style="width: 90%; padding: 12px; margin: 10px 0; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: white;">
             <button class="btn" style="background: #e74c3c;" onclick="requestWithdraw()">Withdraw Now</button>
-        </div>
-    </div>
-
-    <div id="tasks" class="tab-content" style="display: none;">
-        <div class="card balance-card" style="background: linear-gradient(135deg, #f1c40f, #f39c12); margin-bottom: 10px;">
-            <h4>Extra Rewards 🌟</h4>
-            <p>Scroll down to complete all tasks!</p>
-        </div>
-
-        <div class="card" style="max-height: 380px; overflow-y: auto !important; -webkit-overflow-scrolling: touch; padding-right: 10px;">
-            
-            <h4 style="color: #ff0000; border-bottom: 1px solid #ff0000; padding-bottom: 5px; position: sticky; top: 0; background: var(--card-bg); z-index: 10;">YouTube Tasks 📺</h4>
-            <div id="yt-tasks-list">
-                <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
-                    <p style="font-size: 13px;">Task 1: Watch & Verify (+20)</p>
-                    <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('YT_LINK_1')">Watch Video 1</button>
-                    <div style="display: flex; gap: 5px;">
-                        <input type="text" id="yt-1" placeholder="Code" style="flex:1; padding:8px;">
-                        <button class="btn-sm" onclick="verifyTask('yt1', 'yt-1', 20)">Verify</button>
-                    </div>
-                </div>
-                <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
-                    <p style="font-size: 13px;">Task 2: Watch & Verify (+20)</p>
-                    <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('YT_LINK_2')">Watch Video 2</button>
-                    <div style="display: flex; gap: 5px;">
-                        <input type="text" id="yt-2" placeholder="Code" style="flex:1; padding:8px;">
-                        <button class="btn-sm" onclick="verifyTask('yt2', 'yt-2', 20)">Verify</button>
-                    </div>
-                </div>
-                <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
-                    <p style="font-size: 13px;">Task 3: Watch & Verify (+20)</p>
-                    <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('YT_LINK_3')">Watch Video 3</button>
-                    <div style="display: flex; gap: 5px;">
-                        <input type="text" id="yt-3" placeholder="Code" style="flex:1; padding:8px;">
-                        <button class="btn-sm" onclick="verifyTask('yt3', 'yt-3', 20)">Verify</button>
-                    </div>
-                </div>
-            </div>
-
-            <h4 style="color: #3498db; border-bottom: 1px solid #3498db; padding-bottom: 5px; margin-top: 20px; position: sticky; top: 0; background: var(--card-bg); z-index: 10;">Website Tasks 🌐</h4>
-            <div id="web-tasks-list">
-                <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
-                    <p style="font-size: 13px;">Task 1: Visit Site (+15)</p>
-                    <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('WEB_LINK_1')">Visit Site 1</button>
-                    <div style="display: flex; gap: 5px;">
-                        <input type="text" id="web-1" placeholder="Code" style="flex:1; padding:8px;">
-                        <button class="btn-sm" onclick="verifyTask('web1', 'web-1', 15)">Verify</button>
-                    </div>
-                </div>
-                <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
-                    <p style="font-size: 13px;">Task 2: Visit Site (+15)</p>
-                    <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('WEB_LINK_2')">Visit Site 2</button>
-                    <div style="display: flex; gap: 5px;">
-                        <input type="text" id="web-2" placeholder="Code" style="flex:1; padding:8px;">
-                        <button class="btn-sm" onclick="verifyTask('web2', 'web-2', 15)">Verify</button>
-                    </div>
-                </div>
-                <div style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
-                    <p style="font-size: 13px;">Task 3: Visit Site (+15)</p>
-                    <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('WEB_LINK_3')">Visit Site 3</button>
-                    <div style="display: flex; gap: 5px;">
-                        <input type="text" id="web-3" placeholder="Code" style="flex:1; padding:8px;">
-                        <button class="btn-sm" onclick="verifyTask('web3', 'web-3', 15)">Verify</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <h4 style="color: #0088cc; margin-bottom: 10px;">Join Channels 📢</h4>
-            <button class="btn" style="background:#0088cc; margin-bottom:10px; font-size: 14px;" onclick="openTask('https://t.me/OfficialChannel')">📢 Official Channel (+30)</button>
-            <button class="btn" style="background:#0088cc; margin-bottom:10px; font-size: 14px;" onclick="openTask('https://t.me/Channel2')">📢 Join Channel 2 (+20)</button>
-            <button class="btn" style="background:#0088cc; font-size: 14px;" onclick="openTask('https://t.me/Channel3')">📢 Join Channel 3 (+20)</button>
-        </div>
-    </div>
-
-    <div id="leaderboard" class="tab-content" style="display: none;">
-        <div class="card balance-card" style="background: linear-gradient(135deg, #6366f1, #a855f7);">
-            <h4>Top 10 Earners 🏆</h4>
-            <p>Be the best to earn more!</p>
-        </div>
-        <div class="card">
-            <div id="leaderboard-list">
-                <p style="text-align: center; color: #94a3b8;">Loading ranking...</p>
-            </div>
-        </div>
-    </div>
-
-    <div id="refer" class="tab-content" style="display: none;">
-        <div class="card balance-card">
-            <h4>Refer & Earn 🚀</h4>
-            <p>Get <b>50 Coins</b> for every friend!</p>
-        </div>
-        <div class="card">
-            <p>Your Referral Link:</p>
-            <div id="display-link" style="background:#0f172a; padding:10px; border-radius:8px; font-size:12px; word-break:break-all; border:1px dashed #f1c40f; margin-bottom:10px; color: #f1c40f;">
-                Loading link...
-            </div>
-            <button class="btn" onclick="inviteFriend()">Copy & Invite</button>
-        </div>
-        <div class="card" style="margin-top: 15px; background: rgba(0,0,0,0.2);">
-            <h4 style="font-size: 14px; border-bottom: 1px solid #334155; padding-bottom: 5px;">My Referrals 👥</h4>
-            <div id="refer-list" style="margin-top: 10px; font-size: 13px; max-height: 150px; overflow-y: auto;">
-                <p style="color: #94a3b8; text-align: center;">No referrals yet.</p>
-            </div>
-        </div>
-    </div>
-
-    <div id="history" class="tab-content" style="display: none;">
-        <div class="card">
-            <h4>Withdrawal History 📜</h4>
-            <div id="history-list" style="margin-top:15px; font-size: 14px;">
-                <p style="color: #94a3b8; text-align: center;">No history found.</p>
-            </div>
-        </div>
-    </div>
-
-    <div id="help" class="tab-content" style="display: none;">
-        <div class="card">
-            <h4>Support Center 🎧</h4>
-            <textarea id="support-msg" placeholder="Write your issue here..."></textarea>
-            <button class="btn" onclick="sendSupport()">Send to Admin</button>
-        </div>
-
-        <div class="card" style="border: 1px solid #38bdf8; text-align: center;">
-            <h4 style="color: #38bdf8; margin-bottom: 10px;">Official Email Support 📧</h4>
-            <p style="font-size: 12px; color: #94a3b8; margin-bottom: 12px;">Tap the box below to copy email address:</p>
-            <div id="email-copy-box" onclick="copyEmail()" style="background: #0f172a; padding: 15px; border-radius: 10px; color: #38bdf8; border: 1px dashed #38bdf8; font-weight: bold; cursor: pointer; transition: 0.3s;">
-                codetearn.help@gmail.com
-                <div style="font-size: 10px; margin-top: 5px; color: #94a3b8; font-weight: normal;">(Click to Copy)</div>
-            </div>
-            <p id="copy-status" style="color: #2ecc71; font-size: 12px; margin-top: 10px; display: none; font-weight: bold;">Email Copied! ✅</p>
         </div>
     </div>
 
@@ -179,5 +83,3 @@
     <script src="script.js"></script>
 </body>
 </html>
-                           
-            
