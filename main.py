@@ -1,3 +1,4 @@
+import os
 import telebot
 import sqlite3
 import json
@@ -7,8 +8,9 @@ from keep_alive import keep_alive
 keep_alive()
 
 # 1. Setup
-BOT_TOKEN = "bot_token" # Apna asli token yahan dalo
-ADMIN_ID = 6613528513  
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
+# Apna asli token yahan dalo
+ADMIN_ID = int(os.environ.get('ADMIN_ID', 6613528513))  
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # 2. Database Initializing
