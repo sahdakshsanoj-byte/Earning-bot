@@ -1,148 +1,165 @@
-import os
 import telebot
+import sqlite3
 import json
 from telebot import types
 from datetime import datetime
-from pymongo import MongoClient
 from keep_alive import keep_alive
-
-# 1. Setup & Keep Alive
 keep_alive()
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
-MONGO_URL = os.environ.get('MONGO_URL')
+# 1. Setup
+BOT_TOKEN = "bot_token" # Apna asli token yahan dalo
 ADMIN_ID = 6613528513  
-
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# 2. MongoDB Connection
-client = MongoClient(MONGO_URL)
-db = client['earning_app_db']
-users_col = db['users']
-withdraws_col = db['withdrawals']
-
-print("✅ MongoDB Connected & Ready for Ads Section!")
-
-# --- Helper Functions ---
-
-def get_user(user_id):
-    user = users_col.find_one({"user_id": user_id})
-    today = datetime.now().strftime("%d/%m/%Y")
-    
-    if not user:
-        new_user = {
-            "user_id": user_id, 
-            "coins": 0, 
-            "referred_by": None,
-            "daily_ads_done": 0,
-            "last_ad_date": today,
-            "joined_sponsors": [],
-            "completed_tasks": [] # Konsa YT/Web task ho gaya hai
-        }
-        users_col.insert_one(new_user)
-        return new_user
-    
-    if user.get('last_ad_date') != today:
-        users_col.update_one(
-            {"user_id": user_id}, 
-            {"$set": {"daily_ads_done": 0, "last_ad_date": today}}
+# 2. Database Initializing
+def init_db():
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    # Users Table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            coins INTEGER DEFAULT 0,
+            referred_by INTEGER
         )
-        user['daily_ads_done'] = 0
-        
-    return user
+    ''')
+    # Withdrawals Table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS withdrawals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            amount INTEGER,
+            upi TEXT,
+            status TEXT DEFAULT 'Pending ⏳',
+            date TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-# --- 3. Start Command ---
+init_db()
+
+# Function to get Leaderboard Data
+def get_leaderboard():
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id, coins FROM users ORDER BY coins DESC LIMIT 10")
+    top_users = cursor.fetchall()
+    conn.close()
+    # Format: ID:Coins|ID:Coins
+    return "|".join([f"{u[0]}:{u[1]}" for u in top_users]) if top_users else "none"
+
+# Function to get Referral List
+def get_referral_list(user_id):
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users WHERE referred_by=?", (user_id,))
+    refs = cursor.fetchall()
+    conn.close()
+    return ",".join([str(r[0]) for r in refs]) if refs else "none"
+
+# 3. Start Command
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
     username = message.from_user.first_name
     params = message.text.split()
-    referrer_id = int(params[1]) if len(params) > 1 and params[1].isdigit() else None
+    referrer_id = params[1] if len(params) > 1 else None
 
-    user_data = get_user(user_id)
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT coins FROM users WHERE user_id=?", (user_id,))
+    user_data = cursor.fetchone()
 
-    # Referral Logic
-    if user_data['coins'] == 0 and not user_data['referred_by']:
-        if referrer_id and referrer_id != user_id:
-            users_col.update_one({"user_id": referrer_id}, {"$inc": {"coins": 50}})
-            users_col.update_one({"user_id": user_id}, {"$set": {"referred_by": referrer_id}})
-            try: bot.send_message(referrer_id, f"🎊 Referral Bonus! {username} joined. +50 coins!")
+    if not user_data:
+        # New User logic
+        if referrer_id and str(referrer_id) != str(user_id):
+            cursor.execute("UPDATE users SET coins = coins + 50 WHERE user_id=?", (referrer_id,))
+            try: bot.send_message(referrer_id, "🎊 Referral Bonus! You received 50 coins!")
             except: pass
+            cursor.execute("INSERT INTO users (user_id, coins, referred_by) VALUES (?, ?, ?)", (user_id, 0, referrer_id))
+        else:
+            cursor.execute("INSERT INTO users (user_id, coins) VALUES (?, ?)", (user_id, 0))
+        conn.commit()
+        current_coins = 0
+    else:
+        current_coins = user_data[0]
+    conn.close()
 
-    # Leaderboard Data
-    top_users = users_col.find().sort("coins", -1).limit(10)
-    leaderboard_str = "|".join([f"{u['user_id']}:{u['coins']}" for u in top_users])
-    
-    # Refer List (User ne kis kis ko refer kiya)
-    refs = users_col.find({"referred_by": user_id})
-    ref_list_str = ",".join([str(r['user_id']) for r in refs]) if refs else "none"
+    # Get Dynamic Data for WebApp
+    top_users = get_leaderboard()
+    ref_list = get_referral_list(user_id)
 
-    # Mini App URL
     base_url = "https://sahdakshsanoj-byte.github.io/Earning-bot/"
-    web_app_url = f"{base_url}?coins={user_data['coins']}&ads={user_data['daily_ads_done']}&top={leaderboard_str}&ref_list={ref_list_str}"
+    # Sending Coins, Leaderboard, and Referrals in URL
+    web_app_url = f"{base_url}?coins={current_coins}&top_users={top_users}&ref_list={ref_list}"
     
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("💰 Open Earning Hub", web_app=types.WebAppInfo(web_app_url)))
     
-    bot.send_message(user_id, f"Hello {username}!\nBalance: {user_data['coins']} 🪙\n\nComplete 3+3 Tasks & Join Sponsors to earn!", reply_markup=markup)
+    bot.send_message(user_id, f"Hello {username}!\nBalance: {current_coins} 🪙\n\nInvite friends and earn 50 coins each!", reply_markup=markup)
 
-# --- 4. Handle Mini App Actions ---
+# 4. ADMIN COMMANDS
+@bot.message_handler(commands=['broadcast'])
+def broadcast(message):
+    if message.from_user.id == ADMIN_ID:
+        msg_text = message.text.replace('/broadcast ', '')
+        if not msg_text or msg_text == '/broadcast':
+            bot.reply_to(message, "Usage: /broadcast [Message]")
+            return
+        
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users")
+        users = cursor.fetchall()
+        conn.close()   
+         sent = 0
+        for u in users:
+            try:
+                bot.send_message(u[0], msg_text)
+                sent += 1
+            except: pass
+        bot.reply_to(message, f"📢 Sent to {sent} users!")
+
+@bot.message_handler(commands=['stats'])
+def get_stats(message):
+    if message.from_user.id == ADMIN_ID:
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users")
+        total_u = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM withdrawals WHERE status LIKE 'Pending%'")
+        pending_w = cursor.fetchone()[0]
+        conn.close()
+        bot.reply_to(message, f"📊 Bot Stats\n\nTotal Users: {total_u}\nPending Withdraws: {pending_w}")
+
+# 5. Handle Mini App Data
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     try:
         data = json.loads(message.web_app_data.data)
         user_id = message.from_user.id
-        user = get_user(user_id)
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
 
-        # Action 1: Ads Reward (+10)
-        if data.get('type') == 'ad_click':
-            if user['daily_ads_done'] < 5:
-                users_col.update_one({"user_id": user_id}, {"$inc": {"coins": 10, "daily_ads_done": 1}})
-                bot.send_message(user_id, f"✅ Ad Reward: +10 Coins!")
-            else:
-                bot.send_message(user_id, "⚠️ Limit reached (5/5). Kal aana!")
-
-        # Action 2: YT/Web Task Reward (+20 or any)
-        elif data.get('type') == 'claim_bonus':
+        if data.get('type') == 'claim_bonus':
             amount = data.get('amount', 10)
-            users_col.update_one({"user_id": user_id}, {"$inc": {"coins": amount}})
-            bot.send_message(user_id, f"🎁 Task Complete! +{amount} Coins Added.")
+            cursor.execute("UPDATE users SET coins = coins + ? WHERE user_id=?", (amount, user_id))
+            conn.commit()
 
-        # Action 3: Sponsor Join Check
-        elif data.get('type') == 'check_sponsor':
-            channel_id = data.get('channel_id')
-            try:
-                member = bot.get_chat_member(channel_id, user_id)
-                if member.status in ['member', 'administrator', 'creator']:
-                    if channel_id not in user.get('joined_sponsors', []):
-                        users_col.update_one({"user_id": user_id}, {
-                            "$inc": {"coins": 50}, # Fixed reward for sponsors
-                            "$push": {"joined_sponsors": channel_id}
-                        })
-                        bot.send_message(user_id, f"✅ Sponsor Join: +50 Coins!")
-                    else:
-                        bot.send_message(user_id, "⚠️ Already claimed.")
-                else:
-                    bot.send_message(user_id, f"❌ Join {channel_id} first!")
-            except:
-                bot.send_message(user_id, "❌ Error: Bot ko channel mein Admin banayein!")
-
-        # Action 4: Withdraw Request
         elif data.get('type') == 'withdraw_request':
             amount = data.get('amount')
             upi = data.get('upi')
-            withdraws_col.insert_one({
-                "user_id": user_id,
-                "amount": amount,
-                "upi": upi,
-                "status": "Pending",
-                "date": datetime.now().strftime("%d/%m/%Y")
-            })
-            bot.send_message(ADMIN_ID, f"🔔 NEW WITHDRAW!\nUser: {user_id}\nAmount: {amount}\nUPI: {upi}")
-            bot.send_message(user_id, "🚀 Withdraw request sent! Status: Pending.")
+            date_now = datetime.now().strftime("%d/%m/%Y")
+            cursor.execute("UPDATE users SET coins = 0 WHERE user_id=?", (user_id,))
+            cursor.execute("INSERT INTO withdrawals (user_id, amount, upi, date) VALUES (?, ?, ?, ?)", 
+                           (user_id, amount, upi, date_now))
+            conn.commit()
+            bot.send_message(ADMIN_ID, f"💰 Withdrawal Request\nID: {user_id}\nUPI: {upi}\nAmt: {amount} 🪙\n/approve_{user_id}")
 
+        conn.close()
     except Exception as e:
-        print(f"Error handling web_app_data: {e}")
+        print(f"Error: {e}")
 
-bot.polling(none_stop=True)
-            
+bot.polling()
+     
