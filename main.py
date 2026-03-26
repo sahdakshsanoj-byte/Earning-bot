@@ -3,6 +3,8 @@ import sqlite3
 import json
 from telebot import types
 from datetime import datetime
+from keep_alive import keep_alive
+keep_alive()
 
 # 1. Setup
 BOT_TOKEN = "bot_token" # Apna asli token yahan dalo
