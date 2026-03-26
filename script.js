@@ -162,5 +162,59 @@ function claimDaily() {
     tg.showAlert("🎁 10 Coins added!");
 }
 
-// Start
-updateDisplay();
+// script.js ke sabse niche ye dalo ya pura replace karo
+function updateDisplay() {
+    try {
+        // Balance & Ads
+        document.getElementById('balance').innerText = (localStorage.getItem('user_coins') || 0) + " 🪙";
+        const adsDone = localStorage.getItem('daily_ads_count') || 0;
+        document.getElementById('ad-count-text').innerText = `${adsDone}/5`;
+        document.getElementById('ad-progress').style.width = (adsDone * 20) + "%";
+
+        // Yahan se Tasks Load honge
+        renderAllTasks(); 
+    } catch (e) { console.log("Display Error:", e); }
+}
+
+function renderAllTasks() {
+    // Check agar config load hui hai
+    if (typeof APP_CONFIG === 'undefined') {
+        console.error("Config file not found!");
+        return;
+    }
+
+    const ytList = document.getElementById('yt-tasks-list');
+    const webList = document.getElementById('web-tasks-list');
+
+    // YouTube Tasks
+    if (ytList) {
+        ytList.innerHTML = APP_CONFIG.youtube_tasks.map(task => `
+            <div class="task-item" style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
+                <p style="font-size: 13px;">Watch & Earn (+${task.reward})</p>
+                <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('${task.link}')">Watch Video</button>
+                <div style="display: flex; gap: 5px;">
+                    <input type="text" id="input-${task.id}" placeholder="Code" style="flex:1; padding:8px; background:#0f172a; color:white; border:1px solid #334155; border-radius:5px;">
+                    <button class="btn-sm" onclick="verifyTask('${task.id}', 'input-${task.id}', ${task.reward})">Verify</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // Website Tasks
+    if (webList) {
+        webList.innerHTML = APP_CONFIG.website_tasks.map(task => `
+            <div class="task-item" style="margin: 15px 0; padding-bottom: 10px; border-bottom: 1px solid #334155;">
+                <p style="font-size: 13px;">Visit & Earn (+${task.reward})</p>
+                <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('${task.link}')">Visit Site</button>
+                <div style="display: flex; gap: 5px;">
+                    <input type="text" id="input-${task.id}" placeholder="Code" style="flex:1; padding:8px; background:#0f172a; color:white; border:1px solid #334155; border-radius:5px;">
+                    <button class="btn-sm" onclick="verifyTask('${task.id}', 'input-${task.id}', ${task.reward})">Verify</button>
+                </div>
+            </div>
+        `).join('');
+    }
+}
+
+// Ye line sabse zaroori hai!
+window.onload = updateDisplay; 
+
