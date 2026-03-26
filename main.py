@@ -9,11 +9,10 @@ from keep_alive import keep_alive
 keep_alive()
 
 # --- 1. Setup & Database Connection ---
-BOT_TOKEN = "bot_token" # Token yahan dalo
-ADMIN_ID = 6613528513  
+BOT_TOKEN = os.getenv("BOT_TOKEN") 
+ADMIN_ID = int(os.getenv("ADMIN_ID", 6613528513))
 
-# Render par Environment Variable set karna: MONGO_URI
-MONGO_URI = os.getenv("MONGO_URI") 
+MONGO_URI = os.getenv("MONGO_URI") # Ye bhi Render se aayega
 client = pymongo.MongoClient(MONGO_URI)
 db = client['earning_bot_db'] # Database Name
 users_col = db['users']       # Collection for User Data
