@@ -112,8 +112,9 @@ def broadcast(message):
         cursor = conn.cursor()
         cursor.execute("SELECT user_id FROM users")
         users = cursor.fetchall()
-        conn.close()   
-         sent = 0
+        conn.close()
+
+        sent = 0
         for u in users:
             try:
                 bot.send_message(u[0], msg_text)
@@ -131,7 +132,7 @@ def get_stats(message):
         cursor.execute("SELECT COUNT(*) FROM withdrawals WHERE status LIKE 'Pending%'")
         pending_w = cursor.fetchone()[0]
         conn.close()
-        bot.reply_to(message, f"📊 Bot Stats\n\nTotal Users: {total_u}\nPending Withdraws: {pending_w}")
+        bot.reply_to(message, f"📊 **Bot Stats**\n\nTotal Users: {total_u}\nPending Withdraws: {pending_w}")
 
 # 5. Handle Mini App Data
 @bot.message_handler(content_types=['web_app_data'])
@@ -155,7 +156,7 @@ def handle_web_app_data(message):
             cursor.execute("INSERT INTO withdrawals (user_id, amount, upi, date) VALUES (?, ?, ?, ?)", 
                            (user_id, amount, upi, date_now))
             conn.commit()
-            bot.send_message(ADMIN_ID, f"💰 Withdrawal Request\nID: {user_id}\nUPI: {upi}\nAmt: {amount} 🪙\n/approve_{user_id}")
+            bot.send_message(ADMIN_ID, f"💰 **Withdrawal Request**\nID: `{user_id}`\nUPI: `{upi}`\nAmt: {amount} 🪙\n/approve_{user_id}")
 
         conn.close()
     except Exception as e:
