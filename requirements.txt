@@ -1,3 +1,4 @@
+pymongo[srv]
+dnspython
 pyTelegramBotAPI
 flask
-pymongo[srv]
