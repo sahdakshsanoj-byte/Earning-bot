@@ -162,5 +162,5 @@ def handle_web_app_data(message):
     except Exception as e:
         print(f"Error: {e}")
 
-bot.polling()
+bot.polling(none_stop=True)
      
