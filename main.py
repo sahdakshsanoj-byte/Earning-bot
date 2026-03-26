@@ -4,6 +4,8 @@ import os
 import pymongo
 import time
 from flask import Flask, jsonify, request
+from flask_cors import CORS # Ye nayi line hai
+
 from threading import Thread
 from telebot import types
 from datetime import datetime
@@ -21,6 +23,7 @@ withdrawals_col = db['withdrawals']
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
+CORS(app) 
 
 # --- 2. Flask API for Fast Data (Live Sync) ---
 
