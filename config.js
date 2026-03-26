@@ -27,4 +27,3 @@ const APP_CONFIG = {
     daily_bonus: 10,
     lock_time_hours: 48 // 2 din ka lock
 };
-
