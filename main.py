@@ -120,6 +120,10 @@ def run_flask():
     app.run(host="0.0.0.0", port=8080)
 
 if __name__ == "__main__":
+    # Flask thread start karo
     t = Thread(target=run_flask)
+    t.daemon = True # Isse thread main program ke saath band hogi
     t.start()
-    bot.polling(none_stop=True)
+
+    # Infinity polling use karo (Better Stability)
+    bot.infinity_polling(timeout=20, long_polling_timeout=10)
