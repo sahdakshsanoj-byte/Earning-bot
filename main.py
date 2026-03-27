@@ -440,7 +440,7 @@ def handle_web_app_data(message):
 
 
 # ============================================================
-# 5. THREADING — Flask + Bot dono saath chalenge
+# 5. THREADING
 # ============================================================
 
 def run_flask():
@@ -451,12 +451,14 @@ def run_flask():
 if __name__ == "__main__":
     print("🚀 Bot starting...")
 
+    # === 409 FIX — Forcefully purana session band karo ===
     try:
-        bot.remove_webhook()
-        time.sleep(1)
-        print("✅ Webhook cleared.")
+        bot.delete_webhook(drop_pending_updates=True)
+        print("✅ Webhook deleted.")
     except Exception as e:
-        print(f"Webhook clear error (ignore): {e}")
+        print(f"Webhook delete error (ignore): {e}")
+
+    time.sleep(3)  # Purana process band hone ka wait karo
 
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
@@ -464,9 +466,19 @@ if __name__ == "__main__":
     print("✅ Flask server started.")
 
     print("✅ Bot polling started...")
-    bot.infinity_polling(
-        timeout=20,
-        long_polling_timeout=10,
-        skip_pending=True,
-        allowed_updates=['message', 'web_app_data']
-    )    
+    while True:
+        try:
+            bot.infinity_polling(
+                timeout=20,
+                long_polling_timeout=10,
+                skip_pending=True,
+                allowed_updates=['message', 'web_app_data']
+            )
+        except Exception as e:
+            print(f"Polling error: {e}. Restarting in 5 seconds...")
+            time.sleep(5)
+            try:
+                bot.delete_webhook(drop_pending_updates=True)
+            except:
+                pass
+            time.sleep(3)
