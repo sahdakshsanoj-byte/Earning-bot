@@ -1,6 +1,6 @@
 const CONFIG = {
-    API_BASE_URL: "https://earning-bot-b27x.onrender.com",
-    BOT_USERNAME: "YourBotUsername",
+    API_BASE_URL:"https://earning-bot-b27x.onrender.com",
+    BOT_USERNAME:"Cdotern_bot",
 
     YT_LINKS: {
         yt1: "https://youtu.be/YOUR_VIDEO_1",
