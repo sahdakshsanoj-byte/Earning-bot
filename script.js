@@ -215,7 +215,7 @@ async function loadHistory() {
 
 async function sendSupport() {
     const msg = document.getElementById('support-msg').value.trim();
-    if (!msg) return showToast("Message likho!", "error");
+    if (!msg) return showToast("any issu write here !", "error");
     try {
         const res = await fetch(`${CONFIG.API_BASE_URL}/send_support`, {
             method: 'POST',
@@ -235,7 +235,7 @@ async function sendSupport() {
 }
 
 function copyEmail() {
-    navigator.clipboard.writeText('codetearn.help@gmail.com');
+    navigator.clipboard.writeText('cdoternsupport@gmail.com');
     const status = document.getElementById('copy-status');
     status.style.display = 'block';
     setTimeout(() => { status.style.display = 'none'; }, 2000);
