@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Daksh Grand Earn</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -17,183 +18,339 @@
         </div>
     </div>
 
-    <!-- REWARDS TAB -->
+    <!-- ===================== REWARDS TAB ===================== -->
     <div id="rewards" class="tab-content active-tab">
-        <div class="card balance-card">
-            <p>Your Balance</p>
-            <h1 id="balance">0 🪙</h1>
+
+        <!-- Block 1: Your Balance -->
+        <div class="card balance-card" style="text-align:center;">
+            <p style="font-size:12px; color:#94a3b8; margin-bottom:6px;">Your Balance</p>
+            <h1 id="balance" style="font-size:40px; color:#f1c40f;">0 🪙</h1>
         </div>
+
+        <!-- Block 2: Daily Bonus -->
+        <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <h4 style="margin-bottom:4px;">Daily Bonus 🎁</h4>
+                <p style="font-size:12px; color:#94a3b8;">Claim 10 coins every day!</p>
+            </div>
+            <button class="btn" id="daily-btn" onclick="claimDaily()" style="width:auto; padding:10px 20px;">Claim</button>
+        </div>
+
+        <!-- Block 3: Watch Ad -->
+        <div class="card" style="text-align:center;">
+            <p style="font-size:11px; color:#64748b; margin-bottom:8px;">Advertisement</p>
+            <div id="adsgram-container">
+                <button class="btn" style="background:linear-gradient(135deg,#f1c40f,#f39c12); color:#000; font-weight:700;" onclick="showAd()">
+                    📺 Watch Ad & Earn 5 Coins
+                </button>
+            </div>
+        </div>
+
+        <!-- Block 4: Partnership & Sponsors -->
+        <div class="card" style="background:linear-gradient(135deg,#0f2027,#203a43,#2c5364); border:1px solid #38bdf8;">
+            <h4 style="color:#38bdf8; margin-bottom:12px;">🤝 Partnership & Sponsors</h4>
+
+            <div style="display:flex; align-items:center; gap:12px; padding:10px; background:rgba(255,255,255,0.05); border-radius:10px; margin-bottom:8px;">
+                <div style="font-size:26px;">💼</div>
+                <div style="flex:1;">
+                    <p style="font-size:13px; font-weight:600; color:#e2e8f0; margin:0;">Sponsor Slot 1</p>
+                    <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Contact us to advertise here</p>
+                </div>
+                <button class="btn-sm" style="background:#38bdf8; color:#000;" onclick="window.open('https://t.me/Cdotern_bot','_blank')">Join</button>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:12px; padding:10px; background:rgba(255,255,255,0.05); border-radius:10px; margin-bottom:12px;">
+                <div style="font-size:26px;">🌟</div>
+                <div style="flex:1;">
+                    <p style="font-size:13px; font-weight:600; color:#e2e8f0; margin:0;">Sponsor Slot 2</p>
+                    <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Contact us to advertise here</p>
+                </div>
+                <button class="btn-sm" style="background:#38bdf8; color:#000;" onclick="window.open('https://t.me/Cdotern_bot','_blank')">Join</button>
+            </div>
+
+            <button class="btn" style="background:transparent; border:1px solid #38bdf8; color:#38bdf8; font-size:13px;" onclick="window.open('https://t.me/Cdotern_bot','_blank')">
+                📩 Contact For Partnership
+            </button>
+        </div>
+
+        <!-- Block 5: Withdraw -->
         <div class="card">
-            <h4>Daily Bonus 🎁</h4>
-            <p>Claim 10 coins every day!</p>
-            <button class="btn" id="daily-btn" onclick="claimDaily()">Claim Now</button>
+            <h4 style="margin-bottom:14px;">Withdraw 💸</h4>
+
+            <div style="background:#0f172a; border-radius:10px; padding:12px; margin-bottom:10px; border:1px solid #334155;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="font-size:13px; color:#94a3b8;">🪙 Coins Required</span>
+                    <span style="font-size:13px; font-weight:700;" id="coins-progress-text">0 / 4000</span>
+                </div>
+                <div style="background:#1e293b; border-radius:20px; height:8px; overflow:hidden;">
+                    <div id="coins-progress-bar" style="height:100%; background:linear-gradient(90deg,#f1c40f,#f39c12); border-radius:20px; width:0%; transition:width 0.5s;"></div>
+                </div>
+            </div>
+
+            <div style="background:#0f172a; border-radius:10px; padding:12px; margin-bottom:14px; border:1px solid #334155;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="font-size:13px; color:#94a3b8;">👥 Referrals Required</span>
+                    <span style="font-size:13px; font-weight:700;" id="ref-progress-text">0 / 5</span>
+                </div>
+                <div style="background:#1e293b; border-radius:20px; height:8px; overflow:hidden;">
+                    <div id="ref-progress-bar" style="height:100%; background:linear-gradient(90deg,#2ecc71,#27ae60); border-radius:20px; width:0%; transition:width 0.5s;"></div>
+                </div>
+            </div>
+
+            <input type="text" id="upi-id" placeholder="Enter UPI ID (name@upi)" style="margin-bottom:10px;">
+            <button class="btn" style="background:#e74c3c;" onclick="requestWithdraw()">Withdraw Now</button>
         </div>
-        <div class="card">
-            <h4>Withdraw 💸</h4>
-            <p>Min. Limit: 1000 Coins</p>
-            <input type="text" id="upi-id" placeholder="Enter UPI ID (name@upi)">
-            <button class="btn withdraw-btn" style="background:#e74c3c;" onclick="requestWithdraw()">Withdraw Now</button>
-        </div>
+
     </div>
 
-    <!-- TASKS TAB -->
+    <!-- ===================== TASKS TAB ===================== -->
     <div id="tasks" class="tab-content" style="display:none;">
-        <div class="card balance-card" style="background:linear-gradient(135deg,#f1c40f,#f39c12); margin-bottom:10px;">
-            <h4>Extra Rewards 🌟</h4>
-            <p>Complete tasks and earn more coins!</p>
+
+        <!-- Block: Header -->
+        <div class="card balance-card" style="background:linear-gradient(135deg,#f1c40f,#f39c12); text-align:center;">
+            <h4 style="color:#000;">Extra Rewards 🌟</h4>
+            <p style="color:#1a1a1a; font-size:13px;">Complete tasks and earn more coins!</p>
         </div>
 
-        <div class="card" style="max-height:400px; overflow-y:auto; -webkit-overflow-scrolling:touch; padding-right:8px;">
-
-            <h4 style="color:#ff0000; border-bottom:1px solid #ff0000; padding-bottom:5px; position:sticky; top:0; background:var(--card-bg); z-index:10;">
-                YouTube Tasks 📺
-            </h4>
-
-            <div class="task-item" data-task="yt1">
-                <p style="font-size:13px;">Task 1: Watch & Verify (+20 coins)</p>
-                <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('yt1', 'yt')">Watch Video 1</button>
-                <div class="task-input-row">
-                    <input type="text" id="yt-1" placeholder="Enter Code">
-                    <button class="btn-sm" onclick="verifyTask('yt1', 'yt-1', 20)">Verify</button>
-                </div>
-            </div>
-
-            <div class="task-item" data-task="yt2">
-                <p style="font-size:13px;">Task 2: Watch & Verify (+20 coins)</p>
-                <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('yt2', 'yt')">Watch Video 2</button>
-                <div class="task-input-row">
-                    <input type="text" id="yt-2" placeholder="Enter Code">
-                    <button class="btn-sm" onclick="verifyTask('yt2', 'yt-2', 20)">Verify</button>
-                </div>
-            </div>
-
-            <div class="task-item" data-task="yt3">
-                <p style="font-size:13px;">Task 3: Watch & Verify (+20 coins)</p>
-                <button class="btn-sm" style="background:#ff0000; width:100%; margin:5px 0;" onclick="openTask('yt3', 'yt')">Watch Video 3</button>
-                <div class="task-input-row">
-                    <input type="text" id="yt-3" placeholder="Enter Code">
-                    <button class="btn-sm" onclick="verifyTask('yt3', 'yt-3', 20)">Verify</button>
-                </div>
-            </div>
-
-            <h4 style="color:#3498db; border-bottom:1px solid #3498db; padding-bottom:5px; margin-top:20px; position:sticky; top:0; background:var(--card-bg); z-index:10;">
-                Website Tasks 🌐
-            </h4>
-
-            <div class="task-item" data-task="web1">
-                <p style="font-size:13px;">Task 1: Visit Site (+15 coins)</p>
-                <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('web1', 'web')">Visit Site 1</button>
-                <div class="task-input-row">
-                    <input type="text" id="web-1" placeholder="Enter Code">
-                    <button class="btn-sm" onclick="verifyTask('web1', 'web-1', 15)">Verify</button>
-                </div>
-            </div>
-
-            <div class="task-item" data-task="web2">
-                <p style="font-size:13px;">Task 2: Visit Site (+15 coins)</p>
-                <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('web2', 'web')">Visit Site 2</button>
-                <div class="task-input-row">
-                    <input type="text" id="web-2" placeholder="Enter Code">
-                    <button class="btn-sm" onclick="verifyTask('web2', 'web-2', 15)">Verify</button>
-                </div>
-            </div>
-
-            <div class="task-item" data-task="web3">
-                <p style="font-size:13px;">Task 3: Visit Site (+15 coins)</p>
-                <button class="btn-sm" style="background:#3498db; width:100%; margin:5px 0;" onclick="openTask('web3', 'web')">Visit Site 3</button>
-                <div class="task-input-row">
-                    <input type="text" id="web-3" placeholder="Enter Code">
-                    <button class="btn-sm" onclick="verifyTask('web3', 'web-3', 15)">Verify</button>
-                </div>
-            </div>
-
+        <!-- Block: YouTube Section Label -->
+        <div style="padding:8px 14px 4px 14px;">
+            <p style="font-size:12px; font-weight:700; color:#ff0000; text-transform:uppercase; letter-spacing:1px;">📺 YouTube Tasks</p>
         </div>
 
-        <div class="card">
-            <h4 style="color:#0088cc; margin-bottom:10px;">Join Channels 📢</h4>
-            <button class="btn" style="background:#0088cc; margin-bottom:10px;" onclick="window.open(CONFIG.CHANNELS.official, '_blank')">📢 Official Channel (+30)</button>
-            <button class="btn" style="background:#0088cc; margin-bottom:10px;" onclick="window.open(CONFIG.CHANNELS.channel2, '_blank')">📢 Join Channel 2 (+20)</button>
-            <button class="btn" style="background:#0088cc;" onclick="window.open(CONFIG.CHANNELS.channel3, '_blank')">📢 Join Channel 3 (+20)</button>
+        <!-- Block: YT Task 1 -->
+        <div class="card task-item" data-task="yt1">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <p style="font-size:13px; font-weight:600; margin:0;">Task 1: Watch & Verify</p>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+20 🪙</span>
+            </div>
+            <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt1', 'yt')">▶ Watch Video 1</button>
+            <div class="task-input-row">
+                <input type="text" id="yt-1" placeholder="Enter Code">
+                <button class="btn-sm" onclick="verifyTask('yt1', 'yt-1', 20)">Verify</button>
+            </div>
         </div>
+
+        <!-- Block: YT Task 2 -->
+        <div class="card task-item" data-task="yt2">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <p style="font-size:13px; font-weight:600; margin:0;">Task 2: Watch & Verify</p>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+20 🪙</span>
+            </div>
+            <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt2', 'yt')">▶ Watch Video 2</button>
+            <div class="task-input-row">
+                <input type="text" id="yt-2" placeholder="Enter Code">
+                <button class="btn-sm" onclick="verifyTask('yt2', 'yt-2', 20)">Verify</button>
+            </div>
+        </div>
+
+        <!-- Block: YT Task 3 -->
+        <div class="card task-item" data-task="yt3">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <p style="font-size:13px; font-weight:600; margin:0;">Task 3: Watch & Verify</p>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+20 🪙</span>
+            </div>
+            <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt3', 'yt')">▶ Watch Video 3</button>
+            <div class="task-input-row">
+                <input type="text" id="yt-3" placeholder="Enter Code">
+                <button class="btn-sm" onclick="verifyTask('yt3', 'yt-3', 20)">Verify</button>
+            </div>
+        </div>
+
+        <!-- Block: Website Section Label -->
+        <div style="padding:8px 14px 4px 14px;">
+            <p style="font-size:12px; font-weight:700; color:#3498db; text-transform:uppercase; letter-spacing:1px;">🌐 Website Tasks</p>
+        </div>
+
+        <!-- Block: Web Task 1 -->
+        <div class="card task-item" data-task="web1">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <p style="font-size:13px; font-weight:600; margin:0;">Task 1: Visit Site</p>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+15 🪙</span>
+            </div>
+            <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web1', 'web')">🌐 Visit Site 1</button>
+            <div class="task-input-row">
+                <input type="text" id="web-1" placeholder="Enter Code">
+                <button class="btn-sm" onclick="verifyTask('web1', 'web-1', 15)">Verify</button>
+            </div>
+        </div>
+
+        <!-- Block: Web Task 2 -->
+        <div class="card task-item" data-task="web2">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <p style="font-size:13px; font-weight:600; margin:0;">Task 2: Visit Site</p>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+15 🪙</span>
+            </div>
+            <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web2', 'web')">🌐 Visit Site 2</button>
+            <div class="task-input-row">
+                <input type="text" id="web-2" placeholder="Enter Code">
+                <button class="btn-sm" onclick="verifyTask('web2', 'web-2', 15)">Verify</button>
+            </div>
+        </div>
+
+        <!-- Block: Web Task 3 -->
+        <div class="card task-item" data-task="web3">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <p style="font-size:13px; font-weight:600; margin:0;">Task 3: Visit Site</p>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+15 🪙</span>
+            </div>
+            <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web3', 'web')">🌐 Visit Site 3</button>
+            <div class="task-input-row">
+                <input type="text" id="web-3" placeholder="Enter Code">
+                <button class="btn-sm" onclick="verifyTask('web3', 'web-3', 15)">Verify</button>
+            </div>
+        </div>
+
+        <!-- Block: Telegram Section Label -->
+        <div style="padding:8px 14px 4px 14px;">
+            <p style="font-size:12px; font-weight:700; color:#0088cc; text-transform:uppercase; letter-spacing:1px;">📢 Telegram Channels</p>
+        </div>
+
+        <!-- Block: Official Channel -->
+        <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <p style="font-size:13px; font-weight:600; margin:0;">Official Channel</p>
+                <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Join & earn coins</p>
+            </div>
+            <button class="btn-sm" style="background:#0088cc;" onclick="window.open(CONFIG.CHANNELS.official, '_blank')">+30 🪙 Join</button>
+        </div>
+
+        <!-- Block: Channel 2 -->
+        <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <p style="font-size:13px; font-weight:600; margin:0;">Channel 2</p>
+                <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Join & earn coins</p>
+            </div>
+            <button class="btn-sm" style="background:#0088cc;" onclick="window.open(CONFIG.CHANNELS.channel2, '_blank')">+20 🪙 Join</button>
+        </div>
+
+        <!-- Block: Channel 3 -->
+        <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <p style="font-size:13px; font-weight:600; margin:0;">Channel 3</p>
+                <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Join & earn coins</p>
+            </div>
+            <button class="btn-sm" style="background:#0088cc;" onclick="window.open(CONFIG.CHANNELS.channel3, '_blank')">+20 🪙 Join</button>
+        </div>
+
     </div>
 
-    <!-- LEADERBOARD TAB -->
+    <!-- ===================== LEADERBOARD TAB ===================== -->
     <div id="leaderboard" class="tab-content" style="display:none;">
-        <div class="card balance-card" style="background:linear-gradient(135deg,#6366f1,#a855f7);">
+
+        <div class="card balance-card" style="background:linear-gradient(135deg,#6366f1,#a855f7); text-align:center;">
             <h4>Top 10 Earners 🏆</h4>
-            <p>Be the best to earn more!</p>
+            <p style="font-size:13px; color:#e2e8f0;">Be the best to earn more!</p>
         </div>
+
         <div class="card">
             <div id="leaderboard-list">
                 <p class="spinner">Loading ranking...</p>
             </div>
         </div>
+
     </div>
 
-    <!-- REFER TAB -->
+    <!-- ===================== REFER TAB ===================== -->
     <div id="refer" class="tab-content" style="display:none;">
-        <div class="card balance-card">
+
+        <!-- Block: Header -->
+        <div class="card balance-card" style="text-align:center;">
             <h4>Refer & Earn 🚀</h4>
-            <p>Get <b>50 Coins</b> for every friend you invite!</p>
+            <p style="font-size:13px; color:#94a3b8; margin-top:4px;">Get <b style="color:#f1c40f;">50 Coins</b> for every friend you invite!</p>
         </div>
+
+        <!-- Block: Referral Link -->
         <div class="card">
-            <p>Your Referral Link:</p>
+            <p style="font-size:13px; color:#94a3b8; margin-bottom:8px;">Your Referral Link:</p>
             <div id="display-link" style="background:#0f172a; padding:12px; border-radius:8px; font-size:12px; word-break:break-all; border:1px dashed #f1c40f; margin-bottom:12px; color:#f1c40f;">
                 Loading...
             </div>
             <button class="btn" onclick="inviteFriend()">📤 Copy & Invite Friend</button>
         </div>
+
+        <!-- Block: My Referrals -->
         <div class="card">
-            <h4 style="font-size:14px; border-bottom:1px solid #334155; padding-bottom:8px;">My Referrals 👥</h4>
-            <div id="refer-list" style="margin-top:10px; max-height:150px; overflow-y:auto;">
+            <h4 style="font-size:14px; border-bottom:1px solid #334155; padding-bottom:8px; margin-bottom:10px;">My Referrals 👥</h4>
+            <div id="refer-list" style="max-height:200px; overflow-y:auto;">
                 <p style="color:#94a3b8; text-align:center; font-size:13px;">No referrals yet.</p>
             </div>
         </div>
+
     </div>
 
-    <!-- HISTORY TAB -->
+    <!-- ===================== HISTORY TAB ===================== -->
     <div id="history" class="tab-content" style="display:none;">
-        <div class="card">
+
+        <div class="card balance-card" style="text-align:center;">
             <h4>Withdrawal History 📜</h4>
-            <div id="history-list" style="margin-top:12px;">
+            <p style="font-size:13px; color:#94a3b8; margin-top:4px;">All your past requests</p>
+        </div>
+
+        <div class="card">
+            <div id="history-list">
                 <p class="spinner">Loading...</p>
             </div>
         </div>
+
     </div>
 
-    <!-- HELP TAB -->
+    <!-- ===================== HELP TAB ===================== -->
     <div id="help" class="tab-content" style="display:none;">
+
+        <!-- Block 1: Notice Board -->
+        <div class="card" style="background:linear-gradient(135deg,#1a1a2e,#16213e); border:2px solid #f1c40f; padding:0; overflow:hidden;">
+            <div style="background:#f1c40f; padding:10px 16px; display:flex; align-items:center; gap:8px;">
+                <span style="font-size:18px;">📋</span>
+                <h4 style="color:#000; margin:0; font-size:15px; font-weight:700;">Notice Board</h4>
+            </div>
+            <div style="padding:16px;">
+
+                <div style="background:rgba(241,196,15,0.08); border-left:3px solid #f1c40f; border-radius:0 8px 8px 0; padding:10px 14px; margin-bottom:10px;">
+                    <p style="font-size:13px; font-weight:700; color:#f1c40f; margin:0 0 4px 0;">💰 Coin Value</p>
+                    <p style="font-size:15px; font-weight:600; color:#e2e8f0; margin:0;">1000 🪙 = ₹25</p>
+                </div>
+
+                <div style="background:rgba(46,204,113,0.08); border-left:3px solid #2ecc71; border-radius:0 8px 8px 0; padding:10px 14px; margin-bottom:10px;">
+                    <p style="font-size:13px; font-weight:700; color:#2ecc71; margin:0 0 8px 0;">📤 Withdrawal Rules</p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Min Withdrawal: <b style="color:#f1c40f;">4000 🪙</b></p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0;">• Requirement: Refer atleast <b style="color:#f1c40f;">5 new users</b></p>
+                </div>
+
+                <div style="background:rgba(231,76,60,0.12); border:1px solid #e74c3c; border-radius:10px; padding:12px 14px;">
+                    <p style="font-size:14px; font-weight:700; color:#e74c3c; text-align:center; margin:0 0 8px 0;">⚠️ Warning ⚠️</p>
+                    <p style="font-size:12px; color:#e2e8f0; text-align:center; margin:0 0 4px 0;">Using multiple IDs is <b style="color:#e74c3c;">strictly prohibited.</b></p>
+                    <p style="font-size:12px; color:#e2e8f0; text-align:center; margin:0 0 8px 0;">If detected, your ID will be <b style="color:#e74c3c;">suspended.</b></p>
+                    <div style="background:rgba(231,76,60,0.2); border-radius:8px; padding:8px; text-align:center;">
+                        <p style="font-size:15px; font-weight:700; color:#e74c3c; margin:0;">Penalty: -100 🪙</p>
+                    </div>
+                    <p style="font-size:11px; color:#94a3b8; text-align:center; margin:8px 0 0 0;">Please don't do this 🙏</p>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Block 2: Support Message -->
         <div class="card">
-            <h4>Support Center 🎧</h4>
-            <p>If you face any problems, please mail us here. We will try to finish quickly.</p>
+            <h4 style="margin-bottom:6px;">Support Center 🎧</h4>
+            <p style="font-size:13px; color:#94a3b8; margin-bottom:12px;">Apni problem likhkar bhejo, hum jald jawab denge.</p>
             <textarea id="support-msg" placeholder="Write your issue here..."></textarea>
             <button class="btn" onclick="sendSupport()">Send to Admin</button>
         </div>
 
-        <div class="card" style="border:1px solid #38bdf8; text-align:center; margin-top:5px;">
-            <h4 style="color:#38bdf8; margin-bottom:8px;">Official Email Support 📧</h4>
+        <!-- Block 3: Email Support -->
+        <div class="card" style="border:1px solid #38bdf8; text-align:center;">
+            <h4 style="color:#38bdf8; margin-bottom:6px;">Official Email Support 📧</h4>
+            <p style="font-size:12px; color:#94a3b8; margin-bottom:12px;">Tap to copy email:</p>
             <div id="email-copy-box" onclick="copyEmail()" style="background:#0f172a; padding:15px; border-radius:10px; color:#38bdf8; border:1px dashed #38bdf8; font-weight:bold; cursor:pointer;">
-                cdoternsupport@gmail.com
+                cdotern.help@gmail.com
+                <div style="font-size:10px; margin-top:5px; color:#94a3b8; font-weight:normal;">(Tap to Copy)</div>
             </div>
+            <p id="copy-status" style="color:#2ecc71; font-size:12px; margin-top:10px; display:none; font-weight:bold;">Email Copied! ✅</p>
         </div>
 
-        <div class="card" style="border: 1px solid #f1c40f; background: rgba(241, 196, 15, 0.05); margin-top: 15px;">
-            <h4 style="color: #f1c40f; text-align: center; text-decoration: underline; margin-bottom: 10px;">📢 NOTICE</h4>
-            <div style="font-size: 13px; line-height: 1.5; color: #cbd5e1;">
-                <p><b>Available method:</b> <span style="color: #2ecc71;">(UPI)</span></p>
-                <p>💰 <b>1000 🪙 = 25 ₹</b></p>
-                <p>📉 <b>Min. Withdrawal:</b> 4000 🪙 = 100 ₹</p>
-                <p style="color: #a855f7;">🚀 <b>Requirement:</b> Refer atleast 5 new users.</p>
-            </div>
-            <hr style="border: 0; border-top: 1px dashed #334155; margin: 10px 0;">
-            <div style="text-align: center; color: #e74c3c;">
-                <h4 style="margin-bottom: 5px;">⚠️ WARNING ⚠️</h4>
-                <p style="font-size: 11px;">Using multiple IDs is strictly prohibited. If detected, your ID will be suspended.</p>
-            </div>
-        </div>
-    </div> <nav class="nav-bar">
+    </div>
 
-     <!-- NAV BAR -->
+    <!-- NAV BAR -->
     <nav class="nav-bar">
         <button class="nav-item active" onclick="switchTab('rewards', this)"><span>💰</span> Rewards</button>
         <button class="nav-item" onclick="switchTab('tasks', this)"><span>🌟</span> Tasks</button>
@@ -204,4 +361,5 @@
     <script src="config.js"></script>
     <script src="script.js"></script>
 </body>
-</html>              
+</html>
+                        
