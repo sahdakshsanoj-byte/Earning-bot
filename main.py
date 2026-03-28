@@ -14,7 +14,7 @@ from datetime import datetime, date
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 6613528513))
 MONGO_URI = os.getenv("MONGO_URI")
-BOT_USERNAME = os.getenv("BOT_USERNAME", "YourBotUsername")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "YourBotUsername")  # @username bina @
 
 client = pymongo.MongoClient(MONGO_URI, maxPoolSize=50, serverSelectionTimeoutMS=5000)
 db = client['earning_bot_db']
@@ -22,6 +22,7 @@ users_col = db['users']
 withdrawals_col = db['withdrawals']
 support_col = db['support']
 
+# Task verification codes (Admin inhe change kar sakta hai)
 TASK_CODES = {
     "yt1": "CODE1",
     "yt2": "CODE2",
@@ -33,7 +34,7 @@ TASK_CODES = {
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
-CORS(app, origins="*")
+CORS(app, origins="*")  # GitHub Pages se requests allow karne ke liye
 
 
 # ============================================================
@@ -66,7 +67,7 @@ def get_user_data_api(user_id):
     })
 
 
-@app.route('/claim_bonus/<int:user_id>', methods=['POST'])
+@app.route('/claim_daily/<int:user_id>', methods=['POST'])
 def claim_daily_api(user_id):
     user = users_col.find_one({"user_id": user_id})
     if not user:
@@ -97,12 +98,19 @@ def withdraw_api():
         return jsonify({"status": "error", "message": "User not found"}), 404
 
     coins = user.get('coins', 0)
-    if coins < 1000:
-        return jsonify({"status": "error", "message": f"Need 1000 coins. You have {coins}."}), 400
+    referrals = len(user.get('referrals', []))
+
+    if coins < 4000:
+        return jsonify({"status": "error", "message": f"❌ 4000 coins chahiye. Tumhare paas {coins} hain."}), 400
+
+    if referrals < 5:
+        needed = 5 - referrals
+        return jsonify({"status": "error", "message": f"❌ Withdraw ke liye kam se kam 5 referrals chahiye. Abhi {referrals} hain, {needed} aur invite karo!"}), 400
 
     if '@' not in upi_id:
-        return jsonify({"status": "error", "message": "Invalid UPI ID format"}), 400
+        return jsonify({"status": "error", "message": "❌ Invalid UPI ID format (example: name@upi)"}), 400
 
+    # Withdrawal record banana
     withdrawal = {
         "user_id": int(user_id),
         "upi_id": upi_id,
@@ -111,8 +119,11 @@ def withdraw_api():
         "date": str(datetime.now().strftime("%d %b %Y, %I:%M %p"))
     }
     withdrawals_col.insert_one(withdrawal)
+
+    # Coins zero karo
     users_col.update_one({"user_id": int(user_id)}, {"$set": {"coins": 0}})
 
+    # Admin ko notify karo
     try:
         bot.send_message(
             ADMIN_ID,
@@ -153,18 +164,75 @@ def verify_task_api():
     if not user:
         return jsonify({"status": "error", "message": "User not found"}), 404
 
+    # Check already completed
     if task_id in user.get('completed_tasks', []):
         return jsonify({"status": "error", "message": "Task already completed!"}), 400
 
+    # Code verify karo
     correct_code = TASK_CODES.get(task_id, "").upper()
     if user_code != correct_code:
         return jsonify({"status": "error", "message": "Wrong code! Try again."}), 400
 
+    # Reward do aur task mark karo
     users_col.update_one(
         {"user_id": user_id},
         {"$inc": {"coins": reward}, "$push": {"completed_tasks": task_id}}
     )
     return jsonify({"status": "success", "message": f"{reward} coins added!", "reward": reward})
+
+
+@app.route('/watch_ad/<int:user_id>', methods=['POST'])
+def watch_ad_api(user_id):
+    user = users_col.find_one({"user_id": user_id})
+    if not user:
+        return jsonify({"status": "error", "message": "User not found"}), 404
+    users_col.update_one({"user_id": user_id}, {"$inc": {"coins": 5}})
+    return jsonify({"status": "success", "message": "5 coins added!"})
+
+
+@app.route('/check_device', methods=['POST'])
+def check_device_api():
+    data = request.get_json()
+    user_id = int(data.get('user_id'))
+    fingerprint = data.get('fingerprint', '')
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if ip:
+        ip = ip.split(',')[0].strip()
+
+    if not fingerprint:
+        return jsonify({"status": "ok"})
+
+    existing_fp = users_col.find_one({
+        "fingerprint": fingerprint,
+        "user_id": {"$ne": user_id}
+    })
+    existing_ip = users_col.find_one({
+        "ip": ip,
+        "user_id": {"$ne": user_id}
+    })
+
+    current_user = users_col.find_one({"user_id": user_id})
+    if current_user and current_user.get('blocked'):
+        return jsonify({"status": "blocked"})
+
+    if existing_fp or existing_ip:
+        users_col.update_one({"user_id": user_id}, {"$set": {"blocked": True}})
+        try:
+            bot.send_message(
+                ADMIN_ID,
+                f"🚨 *Multi-Account Detected!*\n\nUser ID: `{user_id}` blocked.\nFingerprint match: `{bool(existing_fp)}`\nIP match: `{bool(existing_ip)}`\nIP: `{ip}`",
+                parse_mode="Markdown"
+            )
+        except:
+            pass
+        return jsonify({"status": "blocked"})
+
+    users_col.update_one(
+        {"user_id": user_id},
+        {"$set": {"fingerprint": fingerprint, "ip": ip}},
+        upsert=False
+    )
+    return jsonify({"status": "ok"})
 
 
 @app.route('/send_support', methods=['POST'])
@@ -263,7 +331,7 @@ def start(message):
     ))
     markup.add(types.InlineKeyboardButton(
         "👥 Invite Friends",
-        url=f"https://tt.me/{BOT_USERNAME}?start={user_id}&text=Join+and+earn+free+coins!"
+        url=f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}?start={user_id}&text=Join+and+earn+free+coins!"
     ))
 
     bot.send_message(
@@ -311,6 +379,7 @@ def approve_withdrawal(message):
     parts = message.text.split()
     if len(parts) < 2:
         return bot.reply_to(message, "Usage: /approve <user_id>")
+
     target_id = int(parts[1])
     result = withdrawals_col.update_one(
         {"user_id": target_id, "status": "Pending ⏳"},
@@ -333,9 +402,11 @@ def reject_withdrawal(message):
     parts = message.text.split()
     if len(parts) < 2:
         return bot.reply_to(message, "Usage: /reject <user_id>")
+
     target_id = int(parts[1])
     withdraw = withdrawals_col.find_one({"user_id": target_id, "status": "Pending ⏳"})
     if withdraw:
+        # Coins wapas karo
         users_col.update_one({"user_id": target_id}, {"$inc": {"coins": withdraw['amount']}})
         withdrawals_col.update_one(
             {"user_id": target_id, "status": "Pending ⏳"},
@@ -374,6 +445,7 @@ def broadcast(message):
     msg_text = message.text.replace('/broadcast ', '', 1)
     if not msg_text or msg_text == '/broadcast':
         return bot.reply_to(message, "Usage: /broadcast [Message]")
+
     all_users = list(users_col.find({}, {"user_id": 1}))
     sent, failed = 0, 0
     for u in all_users:
@@ -384,6 +456,22 @@ def broadcast(message):
         except:
             failed += 1
     bot.reply_to(message, f"📢 Sent: {sent} | Failed: {failed}")
+
+
+@bot.message_handler(commands=['unblock'])
+def unblock_user(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /unblock <user_id>")
+    target_id = int(parts[1])
+    users_col.update_one({"user_id": target_id}, {"$set": {"blocked": False}})
+    try:
+        bot.send_message(target_id, "✅ Tumhara account unblock ho gaya!", parse_mode="Markdown")
+    except:
+        pass
+    bot.reply_to(message, f"✅ User {target_id} unblocked!")
 
 
 @bot.message_handler(commands=['settask'])
@@ -401,6 +489,7 @@ def set_task_code(message):
     bot.reply_to(message, f"✅ Task `{task_id}` ka code update ho gaya: `{new_code}`", parse_mode="Markdown")
 
 
+# Web App se aane wala data handle karo
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     import json
@@ -432,7 +521,7 @@ def handle_web_app_data(message):
                 }
                 withdrawals_col.insert_one(withdrawal)
                 users_col.update_one({"user_id": user_id}, {"$set": {"coins": 0}})
-                bot.send_message(user_id, f"💸 *Withdrawal Request Submitted!*\n\nAmount: `{amount}` coins\nUPI: `{upi}`\nStatus: Pending ⏳", parse_mode="Markdown")
+                bot.send_message(user_id, f"💸 *Withdrawal Request Submitted!*\n\nAmount: `{amount}` coins\nUPI: `{upi}`\nStatus: Pending ⏳\n\n24-48 hours mein process hoga.", parse_mode="Markdown")
                 bot.send_message(ADMIN_ID, f"💸 *New Withdrawal*\nUser: `{user_id}`\nUPI: `{upi}`\nAmount: `{amount}`", parse_mode="Markdown")
 
     except Exception as e:
@@ -440,7 +529,7 @@ def handle_web_app_data(message):
 
 
 # ============================================================
-# 5. THREADING
+# 5. THREADING — Flask + Bot dono saath chalenge
 # ============================================================
 
 def run_flask():
@@ -451,34 +540,26 @@ def run_flask():
 if __name__ == "__main__":
     print("🚀 Bot starting...")
 
-    # === 409 FIX — Forcefully purana session band karo ===
+    # === FIX: Error 409 — Purana webhook/session clear karo ===
     try:
-        bot.delete_webhook(drop_pending_updates=True)
-        print("✅ Webhook deleted.")
+        bot.remove_webhook()
+        time.sleep(1)
+        print("✅ Webhook cleared.")
     except Exception as e:
-        print(f"Webhook delete error (ignore): {e}")
+        print(f"Webhook clear error (ignore): {e}")
 
-    time.sleep(3)  # Purana process band hone ka wait karo
-
+    # Flask ko background thread mein chalao
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
     print("✅ Flask server started.")
 
     print("✅ Bot polling started...")
-    while True:
-        try:
-            bot.infinity_polling(
-                timeout=20,
-                long_polling_timeout=10,
-                skip_pending=True,
-                allowed_updates=['message', 'web_app_data']
-            )
-        except Exception as e:
-            print(f"Polling error: {e}. Restarting in 5 seconds...")
-            time.sleep(5)
-            try:
-                bot.delete_webhook(drop_pending_updates=True)
-            except:
-                pass
-            time.sleep(3)
+    # === FIX: skip_pending=True — Purane messages skip karo (no spam on restart) ===
+    bot.infinity_polling(
+        timeout=20,
+        long_polling_timeout=10,
+        skip_pending=True,                              # Restart pe old messages ignore karo
+        allowed_updates=['message', 'web_app_data']     # Sirf zaruri updates lo
+    )
+    
