@@ -1,10 +1,16 @@
+// ============================================================
+// SCRIPT.JS — Complete Frontend Logic
+// ============================================================
+
 const tg = window.Telegram.WebApp;
 tg.expand();
 tg.enableClosingConfirmation();
 
+// User ID safely fetch karo — pehle Telegram se, phir URL se
 const userId = tg.initDataUnsafe?.user?.id || new URLSearchParams(window.location.search).get('user_id');
 let userData = {};
 
+// ---- TOAST NOTIFICATION ----
 function showToast(msg, type = "info") {
     let toast = document.getElementById('toast');
     if (!toast) {
@@ -17,6 +23,7 @@ function showToast(msg, type = "info") {
     setTimeout(() => { toast.className = ''; }, 3000);
 }
 
+// ---- DATA FETCH ----
 async function fetchLiveData() {
     if (!userId) {
         document.getElementById('balance').innerText = "ID Error";
@@ -28,12 +35,48 @@ async function fetchLiveData() {
 
         if (data.status === "success") {
             userData = data;
+
+            // Balance update
             document.getElementById('balance').innerText = `${data.coins} 🪙`;
+
+            // Withdraw Progress Bars
+            const coins = data.coins || 0;
+            const refCount = (data.referrals || []).length;
+
+            const coinsPct = Math.min((coins / 4000) * 100, 100);
+            const refPct = Math.min((refCount / 5) * 100, 100);
+
+            const coinsBar = document.getElementById('coins-progress-bar');
+            const refBar = document.getElementById('ref-progress-bar');
+            const coinsText = document.getElementById('coins-progress-text');
+            const refText = document.getElementById('ref-progress-text');
+
+            if (coinsBar) {
+                coinsBar.style.width = coinsPct + '%';
+                coinsBar.style.background = coins >= 4000
+                    ? 'linear-gradient(90deg,#2ecc71,#27ae60)'
+                    : 'linear-gradient(90deg,#f1c40f,#f39c12)';
+            }
+            if (refBar) {
+                refBar.style.width = refPct + '%';
+            }
+            if (coinsText) coinsText.innerText = `${coins} / 4000 ${coins >= 4000 ? '✅' : ''}`;
+            if (refText) refText.innerText = `${refCount} / 5 ${refCount >= 5 ? '✅' : ''}`;
+
+            // Leaderboard
             updateLeaderboardUI(data.leaderboard);
+
+            // Referral link
             document.getElementById('display-link').innerText =
                 `https://t.me/${CONFIG.BOT_USERNAME}?start=${userId}`;
+
+            // Referrals list
             updateReferralList(data.referrals);
+
+            // Task completion status
             applyCompletedTasks(data.completed_tasks || []);
+
+            // Daily bonus button status
             checkDailyBonus(data.last_claim);
         }
     } catch (err) {
@@ -42,10 +85,11 @@ async function fetchLiveData() {
     }
 }
 
+// ---- DAILY BONUS CHECK ----
 function checkDailyBonus(lastClaim) {
-    const btn = document.getElementById('daily-btn');
+    const btn = document.querySelector('#daily-btn');
     if (!btn) return;
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
     if (lastClaim === today) {
         btn.disabled = true;
         btn.innerText = "✅ Claimed Today";
@@ -55,6 +99,7 @@ function checkDailyBonus(lastClaim) {
     }
 }
 
+// ---- CLAIM DAILY (API se — App close nahi hoga) ----
 async function claimDaily() {
     if (!userId) return;
     const btn = document.getElementById('daily-btn');
@@ -78,6 +123,7 @@ async function claimDaily() {
     }
 }
 
+// ---- WITHDRAW (API se) ----
 async function requestWithdraw() {
     const upi = document.getElementById('upi-id').value.trim();
     const coins = userData.coins || 0;
@@ -110,6 +156,7 @@ async function requestWithdraw() {
     btn.innerText = "Withdraw Now";
 }
 
+// ---- TASK OPEN ----
 function openTask(taskKey, type) {
     const link = type === 'yt' ? CONFIG.YT_LINKS[taskKey] : CONFIG.WEB_LINKS[taskKey];
     if (link && link !== '#') {
@@ -119,6 +166,7 @@ function openTask(taskKey, type) {
     }
 }
 
+// ---- TASK VERIFY (API se) ----
 async function verifyTask(taskId, inputId, reward) {
     const code = document.getElementById(inputId)?.value.trim();
     if (!code) return showToast("Code enter karo!", "error");
@@ -141,6 +189,7 @@ async function verifyTask(taskId, inputId, reward) {
     }
 }
 
+// ---- COMPLETED TASKS MARK ----
 function applyCompletedTasks(completedList) {
     completedList.forEach(taskId => {
         const item = document.querySelector(`[data-task="${taskId}"]`);
@@ -148,6 +197,7 @@ function applyCompletedTasks(completedList) {
     });
 }
 
+// ---- LEADERBOARD UI ----
 function updateLeaderboardUI(leaderboardData) {
     const list = document.getElementById('leaderboard-list');
     if (!list) return;
@@ -171,6 +221,7 @@ function updateLeaderboardUI(leaderboardData) {
     list.innerHTML = html;
 }
 
+// ---- REFERRAL LIST ----
 function updateReferralList(referrals) {
     const list = document.getElementById('refer-list');
     if (!list) return;
@@ -186,6 +237,7 @@ function updateReferralList(referrals) {
     list.innerHTML = html;
 }
 
+// ---- WITHDRAWAL HISTORY ----
 async function loadHistory() {
     const list = document.getElementById('history-list');
     if (!list || !userId) return;
@@ -213,9 +265,10 @@ async function loadHistory() {
     }
 }
 
+// ---- SUPPORT ----
 async function sendSupport() {
     const msg = document.getElementById('support-msg').value.trim();
-    if (!msg) return showToast("any issu write here !", "error");
+    if (!msg) return showToast("Message likho!", "error");
     try {
         const res = await fetch(`${CONFIG.API_BASE_URL}/send_support`, {
             method: 'POST',
@@ -234,13 +287,15 @@ async function sendSupport() {
     }
 }
 
+// ---- COPY EMAIL ----
 function copyEmail() {
-    navigator.clipboard.writeText('cdoternsupport@gmail.com');
+    navigator.clipboard.writeText('codetearn.help@gmail.com');
     const status = document.getElementById('copy-status');
     status.style.display = 'block';
     setTimeout(() => { status.style.display = 'none'; }, 2000);
 }
 
+// ---- INVITE FRIEND ----
 function inviteFriend() {
     const link = `https://t.me/${CONFIG.BOT_USERNAME}?start=${userId}`;
     const shareText = `Join Daksh Grand Earn aur coins kamao! 🚀\n${link}`;
@@ -252,6 +307,7 @@ function inviteFriend() {
     }
 }
 
+// ---- TAB SWITCHING ----
 function switchTab(tabId, el) {
     document.querySelectorAll('.tab-content').forEach(t => {
         t.style.display = 'none';
@@ -263,14 +319,96 @@ function switchTab(tabId, el) {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     if (el && el.classList.contains('nav-item')) el.classList.add('active');
 
-    const titles = {
-        rewards: 'Rewards', tasks: 'Tasks', leaderboard: 'Leaderboard',
-        refer: 'Refer & Earn', history: 'History', help: 'Support'
-    };
+    const titles = { rewards: 'Rewards', tasks: 'Tasks', leaderboard: 'Leaderboard', refer: 'Refer & Earn', history: 'History', help: 'Support' };
     document.getElementById('tab-title').innerText = titles[tabId] || tabId;
 
     if (tabId === 'history') loadHistory();
 }
 
+// ============================================================
+// ADSGRAM — Watch Ad & Earn 5 Coins
+// ============================================================
+
+let AdController = null;
+
+async function initAdsgram() {
+    try {
+        if (window.Adsgram) {
+            AdController = window.Adsgram.init({
+                blockId: CONFIG.ADSGRAM_BLOCK_ID
+            });
+        }
+    } catch (e) {
+        console.log("Adsgram not available:", e);
+    }
+}
+
+async function showAd() {
+    if (!AdController) {
+        showToast("Ad abhi available nahi hai.", "error");
+        return;
+    }
+    try {
+        await AdController.show();
+        const res = await fetch(`${CONFIG.API_BASE_URL}/watch_ad/${userId}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === "success") {
+            showToast("✅ 5 coins mil gaye!", "success");
+            fetchLiveData();
+        }
+    } catch (e) {
+        showToast("Ad skip kiya — koi coins nahi.", "error");
+    }
+}
+
+// ============================================================
+// FINGERPRINT + IP — Device Check (Anti Multi-Account)
+// ============================================================
+
+async function generateFingerprint() {
+    const data = [
+        navigator.userAgent,
+        navigator.language,
+        screen.width + "x" + screen.height,
+        screen.colorDepth,
+        new Date().getTimezoneOffset(),
+        navigator.hardwareConcurrency || "",
+        navigator.platform || ""
+    ].join("|");
+
+    const encoder = new TextEncoder();
+    const buf = await crypto.subtle.digest("SHA-256", encoder.encode(data));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function checkDevice() {
+    if (!userId) return;
+    try {
+        const fingerprint = await generateFingerprint();
+        const res = await fetch(`${CONFIG.API_BASE_URL}/check_device`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, fingerprint: fingerprint })
+        });
+        const data = await res.json();
+        if (data.status === "blocked") {
+            document.body.innerHTML = `
+                <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; background:#0f172a; color:#e2e8f0; text-align:center; padding:20px;">
+                    <div style="font-size:60px;">🚫</div>
+                    <h2 style="color:#e74c3c; margin:15px 0;">Account Blocked</h2>
+                    <p style="color:#94a3b8; font-size:14px;">Is device par ek account already registered hai.<br>Multiple accounts allowed nahi hain.</p>
+                </div>`;
+        }
+    } catch (e) {
+        console.log("Device check error:", e);
+    }
+}
+
+// ============================================================
+// INIT
+// ============================================================
+
+checkDevice();
 fetchLiveData();
+initAdsgram();
 setInterval(fetchLiveData, 10000);
