@@ -106,7 +106,7 @@ async function claimDaily() {
     btn.disabled = true;
     btn.innerText = "Claiming...";
     try {
-        const res = await fetch(`${CONFIG.API_BASE_URL}/claim_bonus/${userId}`, { method: 'POST' });
+        const res = await fetch(`${CONFIG.API_BASE_URL}/claim_daily/${userId}`, { method: 'POST' });
         const data = await res.json();
         if (data.status === "success") {
             showToast("🎁 10 coins claim ho gaye!", "success");
