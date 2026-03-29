@@ -28,7 +28,7 @@ const CONFIG = {
 
     // Telegram Channels (apne dalo)
     CHANNELS: {
-        official: "https://t.me/OfficialChannel",
+        official: "https://t.me/cdoternoffical",
         channel2: "https://t.me/Channel2",
         channel3: "https://t.me/Channel3"
     }
