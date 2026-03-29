@@ -368,4 +368,109 @@
 
                 <div style="background:rgba(231,76,60,0.12); border:1px solid #e74c3c; border-radius:10px; padding:12px 14px;">
                     <p style="font-size:14px; font-weight:700; color:#e74c3c; text-align:center; margin:0 0 8px 0;">⚠️ Warning ⚠️</p>
-                    <p style="font-size:12px; color:#e2e8f0; text-a
+                    <p style="font-size:12px; color:#e2e8f0; text-align:center; margin:0 0 4px 0;">Using multiple IDs is <b style="color:#e74c3c;">strictly prohibited.</b></p>
+                    <p style="font-size:12px; color:#e2e8f0; text-align:center; margin:0 0 8px 0;">If detected, your ID will be <b style="color:#e74c3c;">suspended.</b></p>
+                    <div style="background:rgba(231,76,60,0.2); border-radius:8px; padding:8px; text-align:center;">
+                        <p style="font-size:15px; font-weight:700; color:#e74c3c; margin:0;">Penalty: -100 🪙</p>
+                    </div>
+                    <p style="font-size:11px; color:#94a3b8; text-align:center; margin:8px 0 0 0;">Please don't do this 🙏</p>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="card">
+            <h4 style="margin-bottom:6px;">Support Center 🎧</h4>
+            <p style="font-size:13px; color:#94a3b8; margin-bottom:12px;">Apni problem likhkar bhejo, hum jald jawab denge.</p>
+            <textarea id="support-msg" placeholder="Write your issue here..."></textarea>
+            <button class="btn" onclick="sendSupport()">Send to Admin</button>
+        </div>
+
+        <div class="card" style="border:1px solid #38bdf8; text-align:center;">
+            <h4 style="color:#38bdf8; margin-bottom:6px;">Official Email Support 📧</h4>
+            <p style="font-size:12px; color:#94a3b8; margin-bottom:12px;">Tap to copy email:</p>
+            <div id="email-copy-box" onclick="copyEmail()" style="background:#0f172a; padding:15px; border-radius:10px; color:#38bdf8; border:1px dashed #38bdf8; font-weight:bold; cursor:pointer;">
+                cdotern.help@gmail.com
+                <div style="font-size:10px; margin-top:5px; color:#94a3b8; font-weight:normal;">(Tap to Copy)</div>
+            </div>
+            <p id="copy-status" style="color:#2ecc71; font-size:12px; margin-top:10px; display:none; font-weight:bold;">Email Copied! ✅</p>
+        </div>
+
+    </div>
+
+    <!-- ===================== BOTTOM NAV BAR ===================== -->
+    <div class="bottom-nav" style="
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        background: #0f172a;
+        border-top: 1px solid #1e293b;
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        padding: 8px 0 12px 0;
+        z-index: 999;
+    ">
+        <div class="nav-item active" onclick="switchTab('rewards', this)" style="
+            display: flex; flex-direction: column; align-items: center;
+            cursor: pointer; padding: 4px 12px; border-radius: 10px;
+            font-size: 10px; color: #94a3b8; gap: 2px;
+        ">
+            <span style="font-size: 20px;">🏠</span>
+            <span>Home</span>
+        </div>
+
+        <div class="nav-item" onclick="switchTab('tasks', this)" style="
+            display: flex; flex-direction: column; align-items: center;
+            cursor: pointer; padding: 4px 12px; border-radius: 10px;
+            font-size: 10px; color: #94a3b8; gap: 2px;
+        ">
+            <span style="font-size: 20px;">✅</span>
+            <span>Tasks</span>
+        </div>
+
+        <div class="nav-item" onclick="switchTab('leaderboard', this)" style="
+            display: flex; flex-direction: column; align-items: center;
+            cursor: pointer; padding: 4px 12px; border-radius: 10px;
+            font-size: 10px; color: #94a3b8; gap: 2px;
+        ">
+            <span style="font-size: 20px;">🏆</span>
+            <span>Top</span>
+        </div>
+
+        <div class="nav-item" onclick="switchTab('refer', this)" style="
+            display: flex; flex-direction: column; align-items: center;
+            cursor: pointer; padding: 4px 12px; border-radius: 10px;
+            font-size: 10px; color: #94a3b8; gap: 2px;
+        ">
+            <span style="font-size: 20px;">👥</span>
+            <span>Refer</span>
+        </div>
+
+        <div class="nav-item" onclick="switchTab('help', this)" style="
+            display: flex; flex-direction: column; align-items: center;
+            cursor: pointer; padding: 4px 12px; border-radius: 10px;
+            font-size: 10px; color: #94a3b8; gap: 2px;
+        ">
+            <span style="font-size: 20px;">🎧</span>
+            <span>Support</span>
+        </div>
+    </div>
+
+    <!-- Nav bar ke liye bottom padding taaki content chhup na jaaye -->
+    <div style="height: 70px;"></div>
+
+    <style>
+        /* Active nav item highlight */
+        .nav-item.active span:last-child {
+            color: #f1c40f;
+        }
+        .nav-item.active span:first-child {
+            filter: drop-shadow(0 0 4px rgba(241,196,15,0.6));
+        }
+    </style>
+
+    <script src="config.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
+                        
