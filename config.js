@@ -7,7 +7,7 @@ const CONFIG = {
     API_BASE_URL: "https://earning-bot-b27x.onrender.com",
 
     // Apne bot ka username (@username bina @)
-    BOT_USERNAME: "YourBotUsername",
+    BOT_USERNAME: "Cdotern_bot",
 
     // Adsgram Block ID — adsgram.ai par register karke milega
     ADSGRAM_BLOCK_ID: "YOUR_ADSGRAM_BLOCK_ID",
