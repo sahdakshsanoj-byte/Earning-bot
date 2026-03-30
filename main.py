@@ -729,6 +729,192 @@ def set_task_code(message):
     bot.reply_to(message, f"\u2705 Task `{task_id}` code updated to `{new_code}` — Task reset for all users!", parse_mode="Markdown")
 
 
+@bot.message_handler(commands=['penalty'])
+def penalize_user(message):
+    """Deduct coins from a user. Usage: /penalty <user_id> [amount]  (default: 200)"""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /penalty <user_id> [amount]\nDefault amount: 200 coins")
+    try:
+        target_id = int(parts[1])
+        amount    = int(parts[2]) if len(parts) >= 3 else 200
+        if amount <= 0:
+            return bot.reply_to(message, "Amount must be greater than 0.")
+    except ValueError:
+        return bot.reply_to(message, "Invalid user ID or amount.")
+
+    user = users_col.find_one({"user_id": target_id})
+    if not user:
+        return bot.reply_to(message, f"User {target_id} not found.")
+
+    current = user.get('coins', 0)
+    new_bal = max(0, current - amount)          # coins never go below 0
+    deducted = current - new_bal
+
+    users_col.update_one({"user_id": target_id}, {"$set": {"coins": new_bal}})
+    try:
+        bot.send_message(
+            target_id,
+            f"\u26a0\ufe0f *Penalty Applied!*\n\n"
+            f"`{deducted}` coins have been deducted from your balance.\n"
+            f"New Balance: `{new_bal}` \U0001fa99\n\n"
+            f"Reason: Violation of bot rules. Please follow the rules to avoid account suspension.",
+            parse_mode="Markdown"
+        )
+    except Exception:
+        pass
+    bot.reply_to(
+        message,
+        f"\u26a0\ufe0f Penalty applied!\n"
+        f"User: `{target_id}`\n"
+        f"Deducted: `{deducted}` coins\n"
+        f"Old Balance: `{current}` \u2192 New Balance: `{new_bal}`",
+        parse_mode="Markdown"
+    )
+
+
+@bot.message_handler(commands=['listblocked'])
+def list_blocked(message):
+    """Show all blocked users."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    blocked = list(users_col.find({"blocked": True}, {"user_id": 1, "username": 1, "coins": 1, "_id": 0}).limit(20))
+    if not blocked:
+        return bot.reply_to(message, "\u2705 No blocked users found.")
+    lines = [f"\U0001f6ab *Blocked Users ({len(blocked)})*\n"]
+    for u in blocked:
+        lines.append(f"• `{u['user_id']}` — {u.get('username', 'Unknown')} — {u.get('coins', 0)} \U0001fa99")
+    lines.append(f"\nUse /unblock <user\\_id> to unblock.")
+    bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
+
+
+@bot.message_handler(commands=['userinfo'])
+def user_info(message):
+    """Get full info about a user. Usage: /userinfo <user_id>"""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /userinfo <user_id>")
+    try:
+        target_id = int(parts[1])
+    except ValueError:
+        return bot.reply_to(message, "Invalid user ID.")
+    user = users_col.find_one({"user_id": target_id})
+    if not user:
+        return bot.reply_to(message, f"User {target_id} not found.")
+    ref_count = users_col.count_documents({"referred_by": str(target_id)})
+    status    = "\U0001f6ab Blocked" if user.get('blocked') else ("\u26a0\ufe0f Flagged" if user.get('fp_flagged') else "\u2705 Active")
+    bot.reply_to(
+        message,
+        f"\U0001f464 *User Info*\n\n"
+        f"ID: `{target_id}`\n"
+        f"Name: {user.get('username', 'Unknown')}\n"
+        f"Balance: `{user.get('coins', 0)}` \U0001fa99\n"
+        f"Referrals: `{ref_count}`\n"
+        f"Referred By: `{user.get('referred_by', 'None')}`\n"
+        f"Joined: `{user.get('joined', 'Unknown')}`\n"
+        f"Status: {status}",
+        parse_mode="Markdown"
+    )
+
+
+@bot.message_handler(commands=['adminpanel'])
+def admin_panel(message):
+    """Show admin control panel with inline buttons."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    total_u    = users_col.count_documents({})
+    pending_w  = withdrawals_col.count_documents({"status": "Pending \u23f3"})
+    blocked_u  = users_col.count_documents({"blocked": True})
+    today_j    = users_col.count_documents({"joined": str(date.today())})
+
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("📊 Full Stats",          callback_data="ap_stats"),
+        types.InlineKeyboardButton("🚫 Blocked Users",       callback_data="ap_blocked"),
+        types.InlineKeyboardButton("💸 Pending Withdrawals", callback_data="ap_pending"),
+        types.InlineKeyboardButton("📢 Broadcast",           callback_data="ap_broadcast"),
+    )
+    bot.send_message(
+        message.chat.id,
+        f"\U0001f6e1\ufe0f *Admin Control Panel*\n\n"
+        f"\U0001f465 Total Users: `{total_u}`\n"
+        f"\U0001f195 Joined Today: `{today_j}`\n"
+        f"\U0001f4b8 Pending Withdrawals: `{pending_w}`\n"
+        f"\U0001f6ab Blocked Users: `{blocked_u}`\n\n"
+        f"*Quick Commands:*\n"
+        f"`/unblock <id>` — Unblock user\n"
+        f"`/penalty <id> [amt]` — Deduct coins (default 200)\n"
+        f"`/approve <id>` — Approve withdrawal\n"
+        f"`/reject <id>` — Reject withdrawal\n"
+        f"`/addcoins <id> <amt>` — Add coins\n"
+        f"`/userinfo <id>` — View user details\n"
+        f"`/listblocked` — List all blocked users\n"
+        f"`/settask <task\\_id> <code>` — Update task code\n"
+        f"`/broadcast <msg>` — Send message to all",
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ap_"))
+def admin_panel_callback(call):
+    if int(call.from_user.id) != ADMIN_ID:
+        return bot.answer_callback_query(call.id, "Access denied.")
+
+    if call.data == "ap_stats":
+        total_u   = users_col.count_documents({})
+        pending_w = withdrawals_col.count_documents({"status": "Pending \u23f3"})
+        approved  = withdrawals_col.count_documents({"status": "Approved \u2705"})
+        rejected  = withdrawals_col.count_documents({"status": "Rejected \u274c"})
+        today_j   = users_col.count_documents({"joined": str(date.today())})
+        blocked   = users_col.count_documents({"blocked": True})
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            call.message.chat.id,
+            f"\U0001f4ca *Detailed Stats*\n\n"
+            f"\U0001f465 Total Users: `{total_u}`\n"
+            f"\U0001f195 Joined Today: `{today_j}`\n"
+            f"\U0001f6ab Blocked: `{blocked}`\n\n"
+            f"\U0001f4b8 Withdrawals:\n"
+            f"  ⏳ Pending: `{pending_w}`\n"
+            f"  ✅ Approved: `{approved}`\n"
+            f"  ❌ Rejected: `{rejected}`",
+            parse_mode="Markdown"
+        )
+
+    elif call.data == "ap_blocked":
+        blocked_users = list(users_col.find({"blocked": True}, {"user_id": 1, "username": 1, "_id": 0}).limit(15))
+        bot.answer_callback_query(call.id)
+        if not blocked_users:
+            bot.send_message(call.message.chat.id, "\u2705 No blocked users.")
+            return
+        lines = [f"\U0001f6ab *Blocked Users ({len(blocked_users)})*\n"]
+        for u in blocked_users:
+            lines.append(f"• `{u['user_id']}` — {u.get('username', '?')}")
+        lines.append("\nUse `/unblock <id>` to unblock.")
+        bot.send_message(call.message.chat.id, "\n".join(lines), parse_mode="Markdown")
+
+    elif call.data == "ap_pending":
+        pending = list(withdrawals_col.find({"status": "Pending \u23f3"}).limit(10))
+        bot.answer_callback_query(call.id)
+        if not pending:
+            bot.send_message(call.message.chat.id, "\u2705 No pending withdrawals.")
+            return
+        lines = [f"\U0001f4b8 *Pending Withdrawals ({len(pending)})*\n"]
+        for w in pending:
+            lines.append(f"• User `{w['user_id']}` — `{w['amount']}` coins — `{w['upi_id']}` — {w['date']}")
+        lines.append("\nUse `/approve <id>` or `/reject <id>`.")
+        bot.send_message(call.message.chat.id, "\n".join(lines), parse_mode="Markdown")
+
+    elif call.data == "ap_broadcast":
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "To broadcast, use:\n`/broadcast Your message here`", parse_mode="Markdown")
+
+
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     import json
