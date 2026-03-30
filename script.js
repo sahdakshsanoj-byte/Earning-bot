@@ -1,4 +1,4 @@
-// ============================================================
+            // ============================================================
 // SCRIPT.JS — Secure Frontend Logic (Full Update)
 // ============================================================
 
@@ -9,7 +9,6 @@ tg.enableClosingConfirmation();
 const userId = tg.initDataUnsafe?.user?.id || new URLSearchParams(window.location.search).get('user_id');
 let userData = {};
 
-// Spam protection — ongoing requests tracker
 const _pendingRequests = new Set();
 
 // ---- TOAST NOTIFICATION ----
@@ -22,11 +21,11 @@ function showToast(msg, type = "info") {
     }
     toast.textContent = msg;
     toast.className = `show ${type}`;
-    setTimeout(() => { toast.className = ''; }, 3000);
+    setTimeout(() => { toast.className = ''; }, 3500);
 }
 
 // ============================================================
-// FETCH WITH RETRY — 3 retries, 10s timeout, 2s delay
+// FETCH WITH RETRY — 3 retries, 10s timeout
 // ============================================================
 async function fetchWithRetry(url, options = {}, retries = 3, delayMs = 2000) {
     for (let attempt = 1; attempt <= retries; attempt++) {
@@ -48,6 +47,25 @@ async function fetchWithRetry(url, options = {}, retries = 3, delayMs = 2000) {
 }
 
 // ============================================================
+// COUNTDOWN HELPER — 10s wait before action executes
+// updateFn(seconds) called each tick, doneFn() called when done
+// ============================================================
+function startCountdown(seconds, updateFn, doneFn) {
+    let remaining = seconds;
+    updateFn(remaining);
+    const interval = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) {
+            clearInterval(interval);
+            doneFn();
+        } else {
+            updateFn(remaining);
+        }
+    }, 1000);
+    return interval;
+}
+
+// ============================================================
 // MAIN DATA FETCH
 // ============================================================
 async function fetchLiveData() {
@@ -59,7 +77,6 @@ async function fetchLiveData() {
     try {
         const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_user/${userId}`);
         const data = await res.json();
-
         if (data.status === "success") {
             userData = data;
 
@@ -69,7 +86,6 @@ async function fetchLiveData() {
             const balEl = document.getElementById('balance');
             if (balEl) balEl.innerText = `${coins} 🪙`;
 
-            // Progress bars
             const coinsPct = Math.min((coins / 4000) * 100, 100);
             const refPct   = Math.min((refCount / 5) * 100, 100);
 
@@ -100,19 +116,18 @@ async function fetchLiveData() {
             updateChannelButtons(data.channel_claims || {});
         }
     } catch (err) {
-        showToast("⚠️ Server se connect nahi ho pa raha...", "error");
+        showToast("⚠️ Connection error. Retrying...", "error");
         setTimeout(fetchLiveData, 15000);
     }
 }
 
-// ---- Referral count safely nikalo ----
 function getRefCount(referrals) {
     if (!referrals || referrals === "" || referrals === "none") return 0;
     return referrals.split(',').filter(id => id.trim() !== '').length;
 }
 
 // ============================================================
-// DAILY BONUS — 24h countdown on button
+// DAILY BONUS — 10s countdown then API call
 // ============================================================
 function checkDailyBonus(lastClaimTs) {
     const btn = document.getElementById('daily-btn');
@@ -124,14 +139,14 @@ function checkDailyBonus(lastClaimTs) {
             const remaining = 24 - diffHours;
             const h = Math.floor(remaining);
             const m = Math.floor((remaining - h) * 60);
-            btn.disabled = true;
-            btn.innerText = `✅ ${h}h ${m}m baad`;
+            btn.disabled  = true;
+            btn.innerText = `✅ ${h}h ${m}m left`;
         } else {
-            btn.disabled = false;
+            btn.disabled  = false;
             btn.innerText = "Claim Now";
         }
     } catch (e) {
-        btn.disabled = false;
+        btn.disabled  = false;
         btn.innerText = "Claim Now";
     }
 }
@@ -140,67 +155,53 @@ async function claimDaily() {
     if (!userId) return;
     if (_pendingRequests.has('claimDaily')) return;
     _pendingRequests.add('claimDaily');
+
     const btn = document.getElementById('daily-btn');
-    if (btn) { btn.disabled = true; btn.innerText = "Claiming..."; }
-    try {
-        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_daily/${userId}`, { method: 'POST' });
-        const data = await res.json();
-        if (data.status === "success") {
-            showToast("🎁 10 coins claim ho gaye!", "success");
-            fetchLiveData();
-        } else {
-            showToast(data.message, "error");
-            if (btn) { btn.disabled = false; btn.innerText = "Claim Now"; }
+    if (btn) btn.disabled = true;
+
+    // 10 second countdown before crediting
+    startCountdown(10,
+        (s) => { if (btn) btn.innerText = `Crediting in ${s}s...`; },
+        async () => {
+            try {
+                const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_daily/${userId}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.status === "success") {
+                    showToast("🎁 10 coins added to your balance!", "success");
+                    fetchLiveData();
+                } else {
+                    showToast(data.message, "error");
+                    if (btn) { btn.disabled = false; btn.innerText = "Claim Now"; }
+                }
+            } catch (e) {
+                showToast("⚠️ Error! Please retry.", "error");
+                if (btn) { btn.disabled = false; btn.innerText = "Claim Now"; }
+            } finally {
+                _pendingRequests.delete('claimDaily');
+            }
         }
-    } catch (e) {
-        showToast("⚠️ Error! Retry.", "error");
-        if (btn) { btn.disabled = false; btn.innerText = "Claim Now"; }
-    } finally {
-        _pendingRequests.delete('claimDaily');
-    }
+    );
 }
 
 // ============================================================
-// AD COUNTER — 0/5 display, 10 coins per ad
-// ============================================================
-function updateAdCounter(adsToday, adsDate) {
-    const container = document.getElementById('adsgram-container');
-    if (!container) return;
-
-    const today   = new Date().toISOString().split('T')[0];
-    const done    = (adsDate === today) ? adsToday : 0;
-    const MAX_ADS = 5;
-
-    const counterEl = document.getElementById('ad-counter');
-    if (counterEl) counterEl.innerText = `${done}/${MAX_ADS}`;
-
-    if (done >= MAX_ADS) {
-        container.innerHTML = `
-            <div style="text-align:center; padding:10px 0; color:#64748b; font-size:13px;">
-                ✅ Aaj ke ${MAX_ADS}/5 ads complete! Kal wapas aao.
-            </div>`;
-    }
-}
-
-// ============================================================
-// WITHDRAW
+// WITHDRAW — 3h limit, input styled like UPI field
 // ============================================================
 async function requestWithdraw() {
-    if (!userId) return showToast("User ID nahi mila!", "error");
-    if (_pendingRequests.has('withdraw')) return showToast("Request already processing...", "error");
+    if (!userId) return showToast("User ID not found!", "error");
+    if (_pendingRequests.has('withdraw')) return showToast("Request already in progress...", "error");
 
-    const upi          = document.getElementById('upi-id')?.value.trim();
-    const amountInput  = document.getElementById('withdraw-amount');
-    const rawAmount    = amountInput ? amountInput.value : '';
-    const reqAmount    = parseInt(rawAmount);
-    const totalCoins   = userData.coins || 0;
+    const upi        = document.getElementById('upi-id')?.value.trim();
+    const amountEl   = document.getElementById('withdraw-amount');
+    const rawAmount  = amountEl ? amountEl.value.trim() : '';
+    const reqAmount  = parseInt(rawAmount);
+    const totalCoins = userData.coins || 0;
 
-    if (!rawAmount)             return showToast("Withdrawal amount bharo!", "error");
-    if (isNaN(reqAmount))       return showToast("Valid number enter karo!", "error");
-    if (reqAmount <= 0)         return showToast("Amount zero ya negative nahi ho sakta!", "error");
-    if (reqAmount < 4000)       return showToast(`Minimum 4000 coins chahiye. Aapne ${reqAmount} likha.`, "error");
-    if (reqAmount > totalCoins) return showToast(`Aapke paas sirf ${totalCoins} coins hain!`, "error");
-    if (!upi || !upi.includes('@')) return showToast("Valid UPI ID enter karo! (example: name@upi)", "error");
+    if (!rawAmount)             return showToast("Please enter the coin amount!", "error");
+    if (isNaN(reqAmount))       return showToast("Please enter a valid number!", "error");
+    if (reqAmount <= 0)         return showToast("Amount cannot be zero or negative!", "error");
+    if (reqAmount < 4000)       return showToast(`Minimum 4000 coins required. You entered ${reqAmount}.`, "error");
+    if (reqAmount > totalCoins) return showToast(`Insufficient balance. You have ${totalCoins} coins.`, "error");
+    if (!upi || !upi.includes('@')) return showToast("Please enter a valid UPI ID! (Example: name@upi)", "error");
 
     _pendingRequests.add('withdraw');
     const btn = document.querySelector('[onclick="requestWithdraw()"]');
@@ -214,16 +215,16 @@ async function requestWithdraw() {
         });
         const data = await res.json();
         if (data.status === "success") {
-            showToast(`💸 ${reqAmount} coins ka withdrawal submit ho gaya!`, "success");
+            showToast(`💸 Withdrawal request submitted for ${reqAmount} coins!`, "success");
             const upiEl = document.getElementById('upi-id');
-            if (upiEl) upiEl.value = '';
-            if (amountInput) amountInput.value = '';
+            if (upiEl)    upiEl.value = '';
+            if (amountEl) amountEl.value = '';
             fetchLiveData();
         } else {
-            showToast(data.message || "Error! Retry.", "error");
+            showToast(data.message || "An error occurred. Please retry.", "error");
         }
     } catch (e) {
-        showToast("⚠️ Connection error! Retry.", "error");
+        showToast("⚠️ Connection error! Please retry.", "error");
     } finally {
         _pendingRequests.delete('withdraw');
         if (btn) { btn.disabled = false; btn.innerText = "Withdraw Now"; }
@@ -231,50 +232,60 @@ async function requestWithdraw() {
 }
 
 // ============================================================
-// TASKS — Daily reset + code-change reset
+// TASKS — Daily reset, 10s countdown on verify
 // ============================================================
 function openTask(taskKey, type) {
-    const link = type === 'yt' ? CONFIG.YT_LINKS[taskKey] : CONFIG.WEB_LINKS[taskKey];
+    const link = type === 'yt'      ? CONFIG.YT_LINKS[taskKey]
+               : type === 'partner' ? CONFIG.PARTNER_LINKS?.[taskKey]
+               : CONFIG.WEB_LINKS[taskKey];
     if (link && link !== '#') {
         window.open(link, '_blank');
     } else {
-        showToast("Link update hoga jald!", "error");
+        showToast("Link will be updated soon!", "error");
     }
 }
 
 async function verifyTask(taskId, inputId) {
     const code = document.getElementById(inputId)?.value.trim();
-    if (!code) return showToast("Code enter karo!", "error");
+    if (!code) return showToast("Please enter the code!", "error");
 
     const reqKey = `verify_${taskId}`;
     if (_pendingRequests.has(reqKey)) return;
     _pendingRequests.add(reqKey);
 
-    try {
-        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/verify_task`, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ user_id: userId, task_id: taskId, code: code })
-        });
-        const data = await res.json();
-        if (data.status === "success") {
-            showToast(`✅ ${data.message}`, "success");
-            fetchLiveData();
-        } else {
-            showToast(data.message, "error");
+    const verifyBtn = document.querySelector(`[onclick="verifyTask('${taskId}', '${inputId}')"]`);
+    if (verifyBtn) verifyBtn.disabled = true;
+
+    // 10 second countdown before verifying
+    startCountdown(10,
+        (s) => { if (verifyBtn) verifyBtn.innerText = `Wait ${s}s...`; },
+        async () => {
+            try {
+                const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/verify_task`, {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ user_id: userId, task_id: taskId, code: code })
+                });
+                const data = await res.json();
+                if (data.status === "success") {
+                    showToast(`✅ ${data.message}`, "success");
+                    fetchLiveData();
+                } else {
+                    showToast(data.message, "error");
+                    if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.innerText = "Verify"; }
+                }
+            } catch (e) {
+                showToast("⚠️ Error! Please retry.", "error");
+                if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.innerText = "Verify"; }
+            } finally {
+                _pendingRequests.delete(reqKey);
+            }
         }
-    } catch (e) {
-        showToast("⚠️ Error! Retry.", "error");
-    } finally {
-        _pendingRequests.delete(reqKey);
-    }
+    );
 }
 
-// Mark completed tasks in UI — resets daily (backend controls this)
 function applyCompletedTasks(completedList) {
-    // First un-mark all tasks
     document.querySelectorAll('.task-item').forEach(el => el.classList.remove('done'));
-    // Then mark today's done tasks
     completedList.forEach(taskId => {
         const item = document.querySelector(`[data-task="${taskId}"]`);
         if (item) item.classList.add('done');
@@ -282,57 +293,72 @@ function applyCompletedTasks(completedList) {
 }
 
 // ============================================================
-// TELEGRAM CHANNEL JOIN — One-time coin reward
+// CHANNEL JOIN — 10s countdown then claim
 // ============================================================
 function updateChannelButtons(channelClaims) {
-    const channels = ['official', 'channel2', 'channel3'];
-    channels.forEach(ch => {
+    ['official', 'channel2', 'channel3', 'sponsor1'].forEach(ch => {
         const btn = document.getElementById(`ch-btn-${ch}`);
         if (!btn) return;
         if (channelClaims[ch]) {
-            btn.disabled    = true;
-            btn.innerText   = "✅ Joined";
+            btn.disabled         = true;
+            btn.innerText        = "✅ Joined";
             btn.style.background = "#2ecc71";
         }
     });
 }
 
 async function claimChannel(channelId, channelUrl) {
-    if (!userId) return showToast("User ID nahi mila!", "error");
+    if (!userId) return showToast("User ID not found!", "error");
     const reqKey = `channel_${channelId}`;
     if (_pendingRequests.has(reqKey)) return;
 
-    // Pehle channel open karo
     window.open(channelUrl, '_blank');
 
-    // 2 second baad claim karo (user ko join karne ka time do)
-    setTimeout(async () => {
-        _pendingRequests.add(reqKey);
-        const btn = document.getElementById(`ch-btn-${channelId}`);
-        if (btn) { btn.disabled = true; btn.innerText = "Claiming..."; }
+    _pendingRequests.add(reqKey);
+    const btn = document.getElementById(`ch-btn-${channelId}`);
+    if (btn) btn.disabled = true;
 
-        try {
-            const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_channel`, {
-                method:  'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body:    JSON.stringify({ user_id: userId, channel_id: channelId })
-            });
-            const data = await res.json();
-            if (data.status === "success") {
-                showToast(`🎉 ${data.message}`, "success");
-                if (btn) { btn.disabled = true; btn.innerText = "✅ Joined"; btn.style.background = "#2ecc71"; }
-                fetchLiveData();
-            } else {
-                showToast(data.message, "error");
+    // 10 second countdown
+    startCountdown(10,
+        (s) => { if (btn) btn.innerText = `Claiming in ${s}s...`; },
+        async () => {
+            try {
+                const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_channel`, {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ user_id: userId, channel_id: channelId })
+                });
+                const data = await res.json();
+                if (data.status === "success") {
+                    showToast(`🎉 ${data.message}`, "success");
+                    if (btn) { btn.disabled = true; btn.innerText = "✅ Joined"; btn.style.background = "#2ecc71"; }
+                    fetchLiveData();
+                } else {
+                    showToast(data.message, "error");
+                    if (btn) { btn.disabled = false; btn.innerText = "Join & Claim"; }
+                }
+            } catch (e) {
+                showToast("⚠️ Error! Please retry.", "error");
                 if (btn) { btn.disabled = false; btn.innerText = "Join & Claim"; }
+            } finally {
+                _pendingRequests.delete(reqKey);
             }
-        } catch (e) {
-            showToast("⚠️ Error! Retry.", "error");
-            if (btn) { btn.disabled = false; btn.innerText = "Join & Claim"; }
-        } finally {
-            _pendingRequests.delete(reqKey);
         }
-    }, 2000);
+    );
+}
+
+// ============================================================
+// AD COUNTER — 0/5 display
+// ============================================================
+function updateAdCounter(adsToday, adsDate) {
+    const container = document.getElementById('adsgram-container');
+    const today     = new Date().toISOString().split('T')[0];
+    const done      = (adsDate === today) ? adsToday : 0;
+    const counterEl = document.getElementById('ad-counter');
+    if (counterEl) counterEl.innerText = `${done}/5`;
+    if (done >= 5 && container) {
+        container.innerHTML = `<div style="text-align:center;padding:10px 0;color:#64748b;font-size:13px;">✅ All 5 ads completed for today! Come back tomorrow.</div>`;
+    }
 }
 
 // ============================================================
@@ -369,7 +395,7 @@ function updateReferralList(referrals) {
     if (!list) return;
     const refCount = getRefCount(referrals);
     if (refCount === 0) {
-        list.innerHTML = "<p style='color:#94a3b8;text-align:center;font-size:13px;'>No referrals yet. Invite friends! 🚀</p>";
+        list.innerHTML = "<p style='color:#94a3b8;text-align:center;font-size:13px;'>No referrals yet. Invite your friends! 🚀</p>";
         return;
     }
     const refs = referrals.split(',').filter(id => id.trim() !== '');
@@ -401,7 +427,8 @@ async function loadHistory() {
         if (data.history && data.history.length > 0) {
             let html = "";
             data.history.forEach(h => {
-                const color = h.status.includes('Approved') ? '#22c55e' : h.status.includes('Rejected') ? '#e74c3c' : '#f1c40f';
+                const color = h.status.includes('Approved') ? '#22c55e'
+                            : h.status.includes('Rejected') ? '#e74c3c' : '#f1c40f';
                 html += `
                     <div class="history-item">
                         <div>💸 <b>${h.amount} coins</b> — UPI: ${h.upi_id}</div>
@@ -410,23 +437,23 @@ async function loadHistory() {
             });
             list.innerHTML = html;
         } else {
-            list.innerHTML = "<p style='color:#94a3b8;text-align:center;'>No history found.</p>";
+            list.innerHTML = "<p style='color:#94a3b8;text-align:center;'>No withdrawal history found.</p>";
         }
     } catch (e) {
-        list.innerHTML = "<p style='color:#94a3b8;text-align:center;'>Error loading history.</p>";
+        list.innerHTML = "<p style='color:#94a3b8;text-align:center;'>Failed to load history.</p>";
     }
 }
 
 // ============================================================
-// SUPPORT
+// SUPPORT — 6h/2 message limit, English messages
 // ============================================================
 async function sendSupport() {
     if (_pendingRequests.has('support')) return;
     const msgEl = document.getElementById('support-msg');
     const msg   = msgEl ? msgEl.value.trim() : '';
-    if (!msg)              return showToast("Message likho!", "error");
-    if (!userId)           return showToast("User ID nahi mila!", "error");
-    if (msg.length > 1000) return showToast("Message bahut lamba! (max 1000 chars)", "error");
+    if (!msg)              return showToast("Please write a message!", "error");
+    if (!userId)           return showToast("User ID not found!", "error");
+    if (msg.length > 1000) return showToast("Message too long! Maximum 1000 characters.", "error");
 
     _pendingRequests.add('support');
     const btn = document.querySelector('[onclick="sendSupport()"]');
@@ -440,13 +467,13 @@ async function sendSupport() {
         });
         const data = await res.json();
         if (data.status === "success") {
-            showToast("✅ Support message sent to Admin!", "success");
+            showToast("✅ Your message has been sent to Admin!", "success");
             if (msgEl) msgEl.value = '';
         } else {
-            showToast(data.message || "Error sending message.", "error");
+            showToast(data.message || "Failed to send message.", "error");
         }
     } catch (e) {
-        showToast("⚠️ Message nahi gaya! Connection check karo.", "error");
+        showToast("⚠️ Could not send message. Check your connection.", "error");
     } finally {
         _pendingRequests.delete('support');
         if (btn) { btn.disabled = false; btn.innerText = "Send to Admin"; }
@@ -454,7 +481,7 @@ async function sendSupport() {
 }
 
 // ============================================================
-// ADSGRAM — 10 coins, 0/5 counter
+// ADSGRAM — 10 coins, with countdown
 // ============================================================
 let AdController = null;
 
@@ -468,6 +495,107 @@ async function initAdsgram() {
 
 async function showAd() {
     if (_pendingRequests.has('showAd')) return;
+    if (!AdController) { showToast("Ad not available right now.", "error"); return; }
+    _pendingRequests.add('showAd');
+    try {
+        await AdController.show();
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/watch_ad/${userId}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === "success") {
+            showToast(`✅ ${data.message}`, "success");
+            const counterEl = document.getElementById('ad-counter');
+            if (counterEl && data.ads_done !== undefined) counterEl.innerText = `${data.ads_done}/5`;
+            fetchLiveData();
+        } else {
+            showToast(data.message, "error");
+        }
+    } catch (e) {
+        showToast("Ad skipped — no coins awarded.", "error");
+    } finally {
+        _pendingRequests.delete('showAd');
+    }
+}
+
+// ============================================================
+// DEVICE CHECK
+// ============================================================
+async function generateFingerprint() {
+    try {
+        const data = [navigator.userAgent, navigator.language,
+            screen.width + "x" + screen.height, screen.colorDepth,
+            new Date().getTimezoneOffset(), navigator.hardwareConcurrency || "",
+            navigator.platform || ""].join("|");
+        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data));
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+    } catch (e) { return ""; }
+}
+
+async function checkDevice() {
+    if (!userId) return;
+    try {
+        const fingerprint = await generateFingerprint();
+        const res  = await fetch(`${CONFIG.API_BASE_URL}/check_device`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, fingerprint })
+        });
+        const data = await res.json();
+        if (data.status === "blocked") {
+            document.body.innerHTML = `
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:#0f172a;color:#e2e8f0;text-align:center;padding:20px;">
+                    <div style="font-size:60px;">🚫</div>
+                    <h2 style="color:#e74c3c;margin:15px 0;">Account Blocked</h2>
+                    <p style="color:#94a3b8;font-size:14px;">Multiple accounts are not allowed.</p>
+                </div>`;
+        }
+    } catch (e) {}
+}
+
+// ============================================================
+// UTILITY
+// ============================================================
+function copyEmail() {
+    navigator.clipboard.writeText('cdotern.help@gmail.com').catch(() => {});
+    const status = document.getElementById('copy-status');
+    if (status) { status.style.display = 'block'; setTimeout(() => { status.style.display = 'none'; }, 2000); }
+}
+
+function inviteFriend() {
+    const link = `https://t.me/${CONFIG.BOT_USERNAME}?start=${userId}`;
+    if (tg && tg.openTelegramLink) {
+        tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Join Daksh Grand Earn and earn free coins! 🚀')}`);
+    } else if (navigator.share) {
+        navigator.share({ text: `Join Daksh Grand Earn and earn free coins! 🚀\n${link}` });
+    } else {
+        navigator.clipboard.writeText(link).catch(() => {});
+        showToast("✅ Invite link copied!", "success");
+    }
+}
+
+function switchTab(tabId, el) {
+    document.querySelectorAll('.tab-content').forEach(t => { t.style.display = 'none'; t.classList.remove('active-tab'); });
+    const tab = document.getElementById(tabId);
+    if (tab) { tab.style.display = 'block'; tab.classList.add('active-tab'); }
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    if (el && el.classList.contains('nav-item')) el.classList.add('active');
+    const titles = {
+        rewards: 'Rewards', tasks: 'Tasks', leaderboard: 'Leaderboard',
+        refer: 'Refer & Earn', history: 'History', help: 'Support'
+    };
+    const titleEl = document.getElementById('tab-title');
+    if (titleEl) titleEl.innerText = titles[tabId] || tabId;
+    if (tabId === 'history') loadHistory();
+}
+
+// ============================================================
+// INIT
+// ============================================================
+checkDevice();
+fetchLiveData();
+initAdsgram();
+;
+                        
+                                                        <div>💸 <b>${h.amount} coins</b> — UPI: ${h.upi_id}</div>
+                        <    if (_pendingRequests.has('showAd')) return;
     if (!AdController) { showToast("Ad abhi available nahi hai.", "error"); return; }
     _pendingRequests.add('showAd');
     try {
