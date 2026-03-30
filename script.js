@@ -1,17 +1,22 @@
-            // ============================================================
-// SCRIPT.JS — Secure Frontend Logic (Full Update)
+// ============================================================
+// SCRIPT.JS — Daksh Grand Earn (Secure & Clean)
 // ============================================================
 
 const tg = window.Telegram.WebApp;
 tg.expand();
 tg.enableClosingConfirmation();
 
-const userId = tg.initDataUnsafe?.user?.id || new URLSearchParams(window.location.search).get('user_id');
+const userId = tg.initDataUnsafe?.user?.id
+    || new URLSearchParams(window.location.search).get('user_id');
+
 let userData = {};
 
+// Tracks in-flight requests to prevent duplicate clicks
 const _pendingRequests = new Set();
 
-// ---- TOAST NOTIFICATION ----
+// ============================================================
+// TOAST NOTIFICATION
+// ============================================================
 function showToast(msg, type = "info") {
     let toast = document.getElementById('toast');
     if (!toast) {
@@ -31,13 +36,12 @@ async function fetchWithRetry(url, options = {}, retries = 3, delayMs = 2000) {
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 10000);
-            const res = await fetch(url, { ...options, signal: controller.signal });
+            const timeout    = setTimeout(() => controller.abort(), 10000);
+            const res        = await fetch(url, { ...options, signal: controller.signal });
             clearTimeout(timeout);
-            if (!res.ok) {
-                if (res.status >= 400 && res.status < 500) return res;
-                throw new Error(`HTTP ${res.status}`);
-            }
+            // Don't retry 4xx errors — they are client errors
+            if (!res.ok && res.status >= 400 && res.status < 500) return res;
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res;
         } catch (err) {
             if (attempt === retries) throw err;
@@ -47,8 +51,7 @@ async function fetchWithRetry(url, options = {}, retries = 3, delayMs = 2000) {
 }
 
 // ============================================================
-// COUNTDOWN HELPER — 10s wait before action executes
-// updateFn(seconds) called each tick, doneFn() called when done
+// COUNTDOWN HELPER — calls updateFn(s) every tick, doneFn() at 0
 // ============================================================
 function startCountdown(seconds, updateFn, doneFn) {
     let remaining = seconds;
@@ -132,7 +135,11 @@ function getRefCount(referrals) {
 function checkDailyBonus(lastClaimTs) {
     const btn = document.getElementById('daily-btn');
     if (!btn) return;
-    if (!lastClaimTs) { btn.disabled = false; btn.innerText = "Claim Now"; return; }
+    if (!lastClaimTs) {
+        btn.disabled  = false;
+        btn.innerText = "Claim Now";
+        return;
+    }
     try {
         const diffHours = (new Date() - new Date(lastClaimTs)) / 3600000;
         if (diffHours < 24) {
@@ -159,12 +166,14 @@ async function claimDaily() {
     const btn = document.getElementById('daily-btn');
     if (btn) btn.disabled = true;
 
-    // 10 second countdown before crediting
     startCountdown(10,
         (s) => { if (btn) btn.innerText = `Crediting in ${s}s...`; },
         async () => {
             try {
-                const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_daily/${userId}`, { method: 'POST' });
+                const res  = await fetchWithRetry(
+                    `${CONFIG.API_BASE_URL}/claim_daily/${userId}`,
+                    { method: 'POST' }
+                );
                 const data = await res.json();
                 if (data.status === "success") {
                     showToast("🎁 10 coins added to your balance!", "success");
@@ -184,23 +193,23 @@ async function claimDaily() {
 }
 
 // ============================================================
-// WITHDRAW — 3h limit, input styled like UPI field
+// WITHDRAW
 // ============================================================
 async function requestWithdraw() {
     if (!userId) return showToast("User ID not found!", "error");
     if (_pendingRequests.has('withdraw')) return showToast("Request already in progress...", "error");
 
-    const upi        = document.getElementById('upi-id')?.value.trim();
-    const amountEl   = document.getElementById('withdraw-amount');
-    const rawAmount  = amountEl ? amountEl.value.trim() : '';
-    const reqAmount  = parseInt(rawAmount);
+    const upi       = document.getElementById('upi-id')?.value.trim();
+    const amountEl  = document.getElementById('withdraw-amount');
+    const rawAmount = amountEl ? amountEl.value.trim() : '';
+    const reqAmount = parseInt(rawAmount);
     const totalCoins = userData.coins || 0;
 
-    if (!rawAmount)             return showToast("Please enter the coin amount!", "error");
-    if (isNaN(reqAmount))       return showToast("Please enter a valid number!", "error");
-    if (reqAmount <= 0)         return showToast("Amount cannot be zero or negative!", "error");
-    if (reqAmount < 4000)       return showToast(`Minimum 4000 coins required. You entered ${reqAmount}.`, "error");
-    if (reqAmount > totalCoins) return showToast(`Insufficient balance. You have ${totalCoins} coins.`, "error");
+    if (!rawAmount)              return showToast("Please enter the coin amount!", "error");
+    if (isNaN(reqAmount))        return showToast("Please enter a valid number!", "error");
+    if (reqAmount <= 0)          return showToast("Amount cannot be zero or negative!", "error");
+    if (reqAmount < 4000)        return showToast(`Minimum 4000 coins required.`, "error");
+    if (reqAmount > totalCoins)  return showToast(`Insufficient balance. You have ${totalCoins} coins.`, "error");
     if (!upi || !upi.includes('@')) return showToast("Please enter a valid UPI ID! (Example: name@upi)", "error");
 
     _pendingRequests.add('withdraw');
@@ -249,14 +258,13 @@ async function verifyTask(taskId, inputId) {
     const code = document.getElementById(inputId)?.value.trim();
     if (!code) return showToast("Please enter the code!", "error");
 
-    const reqKey = `verify_${taskId}`;
+    const reqKey    = `verify_${taskId}`;
     if (_pendingRequests.has(reqKey)) return;
     _pendingRequests.add(reqKey);
 
     const verifyBtn = document.querySelector(`[onclick="verifyTask('${taskId}', '${inputId}')"]`);
     if (verifyBtn) verifyBtn.disabled = true;
 
-    // 10 second countdown before verifying
     startCountdown(10,
         (s) => { if (verifyBtn) verifyBtn.innerText = `Wait ${s}s...`; },
         async () => {
@@ -309,6 +317,7 @@ function updateChannelButtons(channelClaims) {
 
 async function claimChannel(channelId, channelUrl) {
     if (!userId) return showToast("User ID not found!", "error");
+
     const reqKey = `channel_${channelId}`;
     if (_pendingRequests.has(reqKey)) return;
 
@@ -318,7 +327,6 @@ async function claimChannel(channelId, channelUrl) {
     const btn = document.getElementById(`ch-btn-${channelId}`);
     if (btn) btn.disabled = true;
 
-    // 10 second countdown
     startCountdown(10,
         (s) => { if (btn) btn.innerText = `Claiming in ${s}s...`; },
         async () => {
@@ -331,7 +339,11 @@ async function claimChannel(channelId, channelUrl) {
                 const data = await res.json();
                 if (data.status === "success") {
                     showToast(`🎉 ${data.message}`, "success");
-                    if (btn) { btn.disabled = true; btn.innerText = "✅ Joined"; btn.style.background = "#2ecc71"; }
+                    if (btn) {
+                        btn.disabled         = true;
+                        btn.innerText        = "✅ Joined";
+                        btn.style.background = "#2ecc71";
+                    }
                     fetchLiveData();
                 } else {
                     showToast(data.message, "error");
@@ -348,7 +360,7 @@ async function claimChannel(channelId, channelUrl) {
 }
 
 // ============================================================
-// AD COUNTER — 0/5 display
+// AD COUNTER
 // ============================================================
 function updateAdCounter(adsToday, adsDate) {
     const container = document.getElementById('adsgram-container');
@@ -424,9 +436,11 @@ async function loadHistory() {
     try {
         const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_history/${userId}`);
         const data = await res.json();
-        if (data.history && data.history.length > 0) {
+        // Support both old format (data.history) and new (data.data.history)
+        const history = data.history || data.data?.history;
+        if (history && history.length > 0) {
             let html = "";
-            data.history.forEach(h => {
+            history.forEach(h => {
                 const color = h.status.includes('Approved') ? '#22c55e'
                             : h.status.includes('Rejected') ? '#e74c3c' : '#f1c40f';
                 html += `
@@ -445,7 +459,7 @@ async function loadHistory() {
 }
 
 // ============================================================
-// SUPPORT — 6h/2 message limit, English messages
+// SUPPORT — 6h/2 message limit
 // ============================================================
 async function sendSupport() {
     if (_pendingRequests.has('support')) return;
@@ -481,7 +495,7 @@ async function sendSupport() {
 }
 
 // ============================================================
-// ADSGRAM — 10 coins, with countdown
+// ADSGRAM — watch ad, earn coins
 // ============================================================
 let AdController = null;
 
@@ -490,7 +504,7 @@ async function initAdsgram() {
         if (window.Adsgram) {
             AdController = window.Adsgram.init({ blockId: CONFIG.ADSGRAM_BLOCK_ID });
         }
-    } catch (e) {}
+    } catch (e) { /* Adsgram not available */ }
 }
 
 async function showAd() {
@@ -499,12 +513,16 @@ async function showAd() {
     _pendingRequests.add('showAd');
     try {
         await AdController.show();
-        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/watch_ad/${userId}`, { method: 'POST' });
+        const res  = await fetchWithRetry(
+            `${CONFIG.API_BASE_URL}/watch_ad/${userId}`,
+            { method: 'POST' }
+        );
         const data = await res.json();
+        const adsDone = data.ads_done || data.data?.ads_done;
         if (data.status === "success") {
             showToast(`✅ ${data.message}`, "success");
             const counterEl = document.getElementById('ad-counter');
-            if (counterEl && data.ads_done !== undefined) counterEl.innerText = `${data.ads_done}/5`;
+            if (counterEl && adsDone !== undefined) counterEl.innerText = `${adsDone}/5`;
             fetchLiveData();
         } else {
             showToast(data.message, "error");
@@ -517,16 +535,20 @@ async function showAd() {
 }
 
 // ============================================================
-// DEVICE CHECK
+// DEVICE CHECK — fingerprint (soft) + IP check (backend)
 // ============================================================
 async function generateFingerprint() {
     try {
-        const data = [navigator.userAgent, navigator.language,
+        const data = [
+            navigator.userAgent, navigator.language,
             screen.width + "x" + screen.height, screen.colorDepth,
-            new Date().getTimezoneOffset(), navigator.hardwareConcurrency || "",
-            navigator.platform || ""].join("|");
+            new Date().getTimezoneOffset(),
+            navigator.hardwareConcurrency || "",
+            navigator.platform || ""
+        ].join("|");
         const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data));
-        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+        return Array.from(new Uint8Array(buf))
+            .map(b => b.toString(16).padStart(2, "0")).join("");
     } catch (e) { return ""; }
 }
 
@@ -535,34 +557,41 @@ async function checkDevice() {
     try {
         const fingerprint = await generateFingerprint();
         const res  = await fetch(`${CONFIG.API_BASE_URL}/check_device`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId, fingerprint })
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ user_id: userId, fingerprint })
         });
         const data = await res.json();
         if (data.status === "blocked") {
             document.body.innerHTML = `
-                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:#0f172a;color:#e2e8f0;text-align:center;padding:20px;">
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+                    height:100vh;background:#0f172a;color:#e2e8f0;text-align:center;padding:20px;">
                     <div style="font-size:60px;">🚫</div>
                     <h2 style="color:#e74c3c;margin:15px 0;">Account Blocked</h2>
                     <p style="color:#94a3b8;font-size:14px;">Multiple accounts are not allowed.</p>
                 </div>`;
         }
-    } catch (e) {}
+    } catch (e) { /* Silent — don't block app on check failure */ }
 }
 
 // ============================================================
-// UTILITY
+// UTILITY FUNCTIONS
 // ============================================================
 function copyEmail() {
     navigator.clipboard.writeText('cdotern.help@gmail.com').catch(() => {});
     const status = document.getElementById('copy-status');
-    if (status) { status.style.display = 'block'; setTimeout(() => { status.style.display = 'none'; }, 2000); }
+    if (status) {
+        status.style.display = 'block';
+        setTimeout(() => { status.style.display = 'none'; }, 2000);
+    }
 }
 
 function inviteFriend() {
     const link = `https://t.me/${CONFIG.BOT_USERNAME}?start=${userId}`;
     if (tg && tg.openTelegramLink) {
-        tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Join Daksh Grand Earn and earn free coins! 🚀')}`);
+        tg.openTelegramLink(
+            `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Join Daksh Grand Earn and earn free coins! 🚀')}`
+        );
     } else if (navigator.share) {
         navigator.share({ text: `Join Daksh Grand Earn and earn free coins! 🚀\n${link}` });
     } else {
@@ -572,115 +601,85 @@ function inviteFriend() {
 }
 
 function switchTab(tabId, el) {
-    document.querySelectorAll('.tab-content').forEach(t => { t.style.display = 'none'; t.classList.remove('active-tab'); });
+    document.querySelectorAll('.tab-content').forEach(t => {
+        t.style.display = 'none';
+        t.classList.remove('active-tab');
+    });
     const tab = document.getElementById(tabId);
     if (tab) { tab.style.display = 'block'; tab.classList.add('active-tab'); }
+
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     if (el && el.classList.contains('nav-item')) el.classList.add('active');
+
     const titles = {
-        rewards: 'Rewards', tasks: 'Tasks', leaderboard: 'Leaderboard',
-        refer: 'Refer & Earn', history: 'History', help: 'Support'
+        rewards:     'Rewards',
+        tasks:       'Tasks',
+        leaderboard: 'Leaderboard',
+        refer:       'Refer & Earn',
+        history:     'History',
+        help:        'Support'
     };
     const titleEl = document.getElementById('tab-title');
     if (titleEl) titleEl.innerText = titles[tabId] || tabId;
+
     if (tabId === 'history') loadHistory();
 }
 
 // ============================================================
-// INIT
+// SPONSOR SLOTS — Auto unlock from CONFIG.SPONSORS
 // ============================================================
-checkDevice();
-fetchLiveData();
-initAdsgram();
-;
-                        
-                                                        <div>💸 <b>${h.amount} coins</b> — UPI: ${h.upi_id}</div>
-                        <    if (_pendingRequests.has('showAd')) return;
-    if (!AdController) { showToast("Ad abhi available nahi hai.", "error"); return; }
-    _pendingRequests.add('showAd');
-    try {
-        await AdController.show();
-        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/watch_ad/${userId}`, { method: 'POST' });
-        const data = await res.json();
-        if (data.status === "success") {
-            showToast(`✅ ${data.message}`, "success");
-            // Update counter immediately
-            const counterEl = document.getElementById('ad-counter');
-            if (counterEl && data.ads_done !== undefined) counterEl.innerText = `${data.ads_done}/5`;
-            fetchLiveData();
-        } else {
-            showToast(data.message, "error");
+function initSlots() {
+    const s = CONFIG.SPONSORS;
+    if (!s) return;
+
+    // ── Slot 1 ──
+    if (s.slot1?.active) {
+        const el = document.getElementById('sponsor-slot-1');
+        if (!el) return;
+        const overlay = el.querySelector('.lock-overlay');
+        if (overlay) overlay.remove();
+        const btn = el.querySelector('button');
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.textContent = 'Join & Claim';
+            btn.onclick = () => claimChannel('sponsor1', s.slot1.link);
         }
-    } catch (e) {
-        showToast("Ad skip kiya — koi coins nahi.", "error");
-    } finally {
-        _pendingRequests.delete('showAd');
+        const nameEl = el.querySelector('p:first-child');
+        if (nameEl && s.slot1.name) nameEl.textContent = s.slot1.name;
     }
-}
 
-// ============================================================
-// DEVICE CHECK — Fingerprint (soft) + IP (hard, backend)
-// ============================================================
-async function generateFingerprint() {
-    try {
-        const data = [navigator.userAgent, navigator.language, screen.width + "x" + screen.height,
-            screen.colorDepth, new Date().getTimezoneOffset(), navigator.hardwareConcurrency || "", navigator.platform || ""].join("|");
-        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data));
-        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
-    } catch (e) { return ""; }
-}
+    // ── Slot 2 ──
+    if (s.slot2?.active) {
+        const el = document.getElementById('sponsor-slot-2');
+        if (!el) return;
+        const overlay = el.querySelector('.lock-overlay');
+        if (overlay) overlay.remove();
+        const btn = document.getElementById('ch-btn-sponsor1');
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.textContent = 'Join & Claim';
+            btn.onclick = () => claimChannel('sponsor1', s.slot2.link);
+        }
+    }
 
-async function checkDevice() {
-    if (!userId) return;
-    try {
-        const fingerprint = await generateFingerprint();
-        const res  = await fetch(`${CONFIG.API_BASE_URL}/check_device`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId, fingerprint })
+    // ── Slot 3 ──
+    if (s.slot3?.active) {
+        const el = document.getElementById('sponsor-slot-3');
+        if (!el) return;
+        const overlay = el.querySelector('.lock-overlay');
+        if (overlay) overlay.remove();
+        el.querySelectorAll('button').forEach(b => {
+            b.disabled = false;
+            b.style.opacity = '1';
         });
-        const data = await res.json();
-        if (data.status === "blocked") {
-            document.body.innerHTML = `
-                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:#0f172a;color:#e2e8f0;text-align:center;padding:20px;">
-                    <div style="font-size:60px;">🚫</div>
-                    <h2 style="color:#e74c3c;margin:15px 0;">Account Blocked</h2>
-                    <p style="color:#94a3b8;font-size:14px;">Multiple accounts allowed nahi hain.</p>
-                </div>`;
-        }
-    } catch (e) {}
-}
-
-// ============================================================
-// UTILITY
-// ============================================================
-function copyEmail() {
-    navigator.clipboard.writeText('cdotern.help@gmail.com').catch(() => {});
-    const status = document.getElementById('copy-status');
-    if (status) { status.style.display = 'block'; setTimeout(() => { status.style.display = 'none'; }, 2000); }
-}
-
-function inviteFriend() {
-    const link = `https://t.me/${CONFIG.BOT_USERNAME}?start=${userId}`;
-    if (tg && tg.openTelegramLink) {
-        tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Join Daksh Grand Earn aur coins kamao! 🚀')}`);
-    } else if (navigator.share) {
-        navigator.share({ text: `Join Daksh Grand Earn! 🚀\n${link}` });
-    } else {
-        navigator.clipboard.writeText(link).catch(() => {});
-        showToast("✅ Link copied!", "success");
+        el.querySelectorAll('input').forEach(i => {
+            i.disabled = false;
+        });
+        const openBtn = el.querySelector('button:first-of-type');
+        if (openBtn) openBtn.onclick = () => window.open(s.slot3.link, '_blank');
     }
-}
-
-function switchTab(tabId, el) {
-    document.querySelectorAll('.tab-content').forEach(t => { t.style.display = 'none'; t.classList.remove('active-tab'); });
-    const tab = document.getElementById(tabId);
-    if (tab) { tab.style.display = 'block'; tab.classList.add('active-tab'); }
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    if (el && el.classList.contains('nav-item')) el.classList.add('active');
-    const titles = { rewards: 'Rewards', tasks: 'Tasks', leaderboard: 'Leaderboard', refer: 'Refer & Earn', history: 'History', help: 'Support' };
-    const titleEl = document.getElementById('tab-title');
-    if (titleEl) titleEl.innerText = titles[tabId] || tabId;
-    if (tabId === 'history') loadHistory();
 }
 
 // ============================================================
@@ -689,3 +688,4 @@ function switchTab(tabId, el) {
 checkDevice();
 fetchLiveData();
 initAdsgram();
+initSlots();
