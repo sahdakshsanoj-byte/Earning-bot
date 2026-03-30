@@ -46,21 +46,27 @@ except ValueError:
 # 3. DATABASE CONNECTION
 # ============================================================
 try:
-    client = pymongo.MongoClient(MONGO_URI, maxPoolSize=50, serverSelectionTimeoutMS=5000, w=1)
+    client = pymongo.MongoClient(
+        MONGO_URI,
+        maxPoolSize=50,
+        serverSelectionTimeoutMS=5000,
+        w=1
+    )
     db              = client['earning_bot_db']
     users_col       = db['users']
     withdrawals_col = db['withdrawals']
     support_col     = db['support']
     rate_col        = db['rate_limits']
-try:
-    rate_col.create_index("expires_at", expireAfterSeconds=0)
-    logger.info("TTL index created on rate_limits.expires_at")
+    try:
+        rate_col.create_index("expires_at", expireAfterSeconds=0)
+        logger.info("TTL index created on rate_limits.expires_at")
     except Exception as idx_err:
-    logger.warning(f"TTL index creation skipped (may already exist): {idx_err}")
+        logger.warning(f"TTL index creation skipped (may already exist): {idx_err}")
     logger.info("MongoDB connected successfully.")
 except Exception as e:
     logger.error(f"MongoDB connection failed: {e}")
     raise
+
 
 # ============================================================
 # 4. CONSTANTS
