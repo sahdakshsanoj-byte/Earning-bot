@@ -62,6 +62,8 @@
             border-radius: 12px;
             padding: 14px;
             margin-bottom: 8px;
+            position: relative;
+            overflow: hidden;
         }
 
         /* ── Section Divider ── */
@@ -111,8 +113,8 @@
         <div class="card" style="background:linear-gradient(135deg,#0f2027,#203a43,#2c5364); border:1px solid #38bdf8;">
             <h4 style="color:#38bdf8; margin-bottom:12px;">🤝 Partnership & Sponsors</h4>
 
-            <!-- Original Locked Slot — Sponsor Slot 1 (Available for purchase) -->
-            <div style="position:relative; display:flex; align-items:center; gap:12px; padding:10px; background:rgba(255,255,255,0.05); border-radius:10px; margin-bottom:8px; overflow:hidden; min-height:58px;">
+            <!-- Sponsor Slot 1 — Locked (Available for purchase) -->
+            <div id="sponsor-slot-1" style="position:relative; display:flex; align-items:center; gap:12px; padding:10px; background:rgba(255,255,255,0.05); border-radius:10px; margin-bottom:8px; overflow:hidden; min-height:58px;">
                 <div class="lock-overlay">
                     <span class="lock-icon">🔒</span>
                     <span class="lock-label">Slot Available</span>
@@ -125,8 +127,12 @@
                 <button class="btn-sm" style="background:#38bdf8; color:#000; opacity:0.5;" disabled>Locked</button>
             </div>
 
-            <!-- Sponsor Slot 2 — Channel Join (No Code, 10 coins) -->
-            <div class="sponsor-card" style="margin-bottom:8px;">
+            <!-- Sponsor Slot 2 — Locked (Available for purchase) -->
+            <div id="sponsor-slot-2" class="sponsor-card" style="margin-bottom:8px; position:relative; overflow:hidden;">
+                <div class="lock-overlay">
+                    <span class="lock-icon">🔒</span>
+                    <span class="lock-label">Slot Available</span>
+                </div>
                 <div style="font-size:26px;">📢</div>
                 <div style="flex:1;">
                     <p style="font-size:13px; font-weight:700; color:#38bdf8; margin:0;">Sponsor Channel</p>
@@ -134,13 +140,16 @@
                 </div>
                 <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
                     <span style="font-size:12px; color:#f1c40f; font-weight:700;">+10 🪙</span>
-                    <button id="ch-btn-sponsor1" class="btn-sm ch-claim-btn" style="background:#38bdf8; color:#000; font-weight:700;"
-                        onclick="claimChannel('sponsor1', CONFIG.CHANNELS.sponsor1)">Join & Claim</button>
+                    <button id="ch-btn-sponsor1" class="btn-sm ch-claim-btn" style="background:#38bdf8; color:#000; font-weight:700; opacity:0.5;" disabled>Locked</button>
                 </div>
             </div>
 
-            <!-- Sponsor Slot 3 — Partner Task with Code Verification (15 coins) -->
-            <div class="partner-card">
+            <!-- Sponsor Slot 3 — Locked (Available for purchase) -->
+            <div id="sponsor-slot-3" class="partner-card">
+                <div class="lock-overlay" style="border-radius:12px;">
+                    <span class="lock-icon">🔒</span>
+                    <span class="lock-label">Slot Available</span>
+                </div>
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
                     <span style="font-size:22px;">🌟</span>
                     <div style="flex:1;">
@@ -150,12 +159,12 @@
                     <span style="font-size:12px; color:#f1c40f; font-weight:700;">+15 🪙</span>
                 </div>
                 <div class="card task-item" data-task="partner1" style="background:transparent; padding:0; border:none; margin:0;">
-                    <button class="btn-sm" style="background:#a855f7; width:100%; margin-bottom:8px;" onclick="openTask('partner1', 'partner')">
+                    <button class="btn-sm" style="background:#a855f7; width:100%; margin-bottom:8px; opacity:0.5;" disabled>
                         🔗 Open Partner Link
                     </button>
                     <div class="task-input-row">
-                        <input type="text" id="partner-1" placeholder="Enter verification code">
-                        <button class="btn-sm" style="background:#a855f7;" onclick="verifyTask('partner1', 'partner-1')">Verify</button>
+                        <input type="text" id="partner-1" placeholder="Enter verification code" disabled>
+                        <button class="btn-sm" style="background:#a855f7; opacity:0.5;" disabled>Verify</button>
                     </div>
                 </div>
             </div>
@@ -189,7 +198,6 @@
                 </div>
             </div>
 
-            <!-- Coin Amount Input — same style as UPI input -->
             <input type="text" id="withdraw-amount" placeholder="Enter coin amount (Min. 4000)"
                 style="margin-bottom:10px;"
                 oninput="this.value = this.value.replace(/[^0-9]/g, '')">
