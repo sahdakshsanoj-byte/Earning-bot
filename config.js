@@ -52,7 +52,7 @@ const CONFIG = {
     SPONSORS: {
 
         slot1: {
-            active: false,
+            active: true,
             icon:   "💼",
             name:   "Sponsor Slot 1",
             desc:   "Contact admin to advertise here",
