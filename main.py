@@ -25,13 +25,12 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # 2. ENVIRONMENT VARIABLES
 # ============================================================
-BOT_TOKEN    = os.getenv("BOT_TOKEN") or "").strip()
-MONGO_URI    = os.getenv("MONGO_URI") or "").strip()
-ADMIN_ID_STR = os.getenv("ADMIN_ID") or "").strip() 
-BOT_USERNAME = os.getenv("BOT_USERNAME", "YourBotUsername") or "").strip()
-RENDER_URL   = os.getenv("RENDER_URL", "") or "").strip()
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://sahdakshsanoj-byte.github.io") or "").strip()
-
+BOT_TOKEN    = (os.getenv("BOT_TOKEN")    or "").strip()
+MONGO_URI    = (os.getenv("MONGO_URI")    or "").strip()
+ADMIN_ID_STR = (os.getenv("ADMIN_ID")    or "").strip()
+BOT_USERNAME = (os.getenv("BOT_USERNAME") or "YourBotUsername").strip()
+RENDER_URL   = (os.getenv("RENDER_URL")   or "").strip()
+FRONTEND_URL = (os.getenv("FRONTEND_URL") or "https://sahdakshsanoj-byte.github.io").strip()
 if not BOT_TOKEN:
     raise EnvironmentError("FATAL: BOT_TOKEN environment variable is not set!")
 if not MONGO_URI:
