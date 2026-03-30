@@ -52,8 +52,7 @@ try:
     withdrawals_col = db['withdrawals']
     support_col     = db['support']
     rate_col        = db['rate_limits']
-    try:
-    
+try:
     rate_col.create_index("expires_at", expireAfterSeconds=0)
     logger.info("TTL index created on rate_limits.expires_at")
     except Exception as idx_err:
