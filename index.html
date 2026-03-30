@@ -9,11 +9,6 @@
     <link rel="stylesheet" href="style.css">
     <style>
         /* ── Sponsor Lock Animation ── */
-        .sponsor-locked {
-            position: relative;
-            pointer-events: none;
-            opacity: 0.5;
-        }
         .lock-overlay {
             position: absolute;
             inset: 0;
@@ -21,48 +16,56 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            background: rgba(15,23,42,0.75);
+            background: rgba(15,23,42,0.80);
             border-radius: 10px;
             z-index: 10;
+            pointer-events: none;
         }
         .lock-icon {
-            font-size: 32px;
+            font-size: 28px;
             animation: lock-pulse 1.8s ease-in-out infinite;
             display: block;
         }
         .lock-label {
             font-size: 11px;
-            color: #94a3b8;
+            color: #64748b;
             margin-top: 4px;
             font-weight: 600;
             letter-spacing: 0.5px;
         }
         @keyframes lock-pulse {
             0%,100% { transform: scale(1);   opacity: 1; }
-            50%      { transform: scale(1.2); opacity: 0.6; }
+            50%      { transform: scale(1.2); opacity: 0.5; }
         }
 
         /* ── Ad Counter Badge ── */
         .ad-counter-badge {
             display: inline-block;
-            background: rgba(241,196,15,0.15);
+            background: rgba(241,196,15,0.12);
             border: 1px solid #f1c40f;
             border-radius: 20px;
-            padding: 2px 12px;
+            padding: 3px 14px;
             font-size: 12px;
             font-weight: 700;
             color: #f1c40f;
             margin-bottom: 8px;
         }
 
-        /* ── Channel Claim Button Transition ── */
-        .ch-claim-btn {
-            transition: background 0.3s, opacity 0.3s;
+        /* ── Channel Claim Button ── */
+        .ch-claim-btn { transition: background 0.3s, opacity 0.3s; }
+        .ch-claim-btn:disabled { cursor: not-allowed; opacity: 0.85; }
+
+        /* ── Partner Task Card ── */
+        .partner-card {
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            border: 1px solid #a855f7;
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 8px;
         }
-        .ch-claim-btn:disabled {
-            cursor: not-allowed;
-            opacity: 0.8;
-        }
+
+        /* ── Section Divider ── */
+        .section-gap { height: 18px; }
     </style>
 </head>
 <body>
@@ -90,10 +93,10 @@
                 <h4 style="margin-bottom:4px;">Daily Bonus 🎁</h4>
                 <p style="font-size:12px; color:#94a3b8;">Claim 10 coins every 24 hours!</p>
             </div>
-            <button class="btn" id="daily-btn" onclick="claimDaily()" style="width:auto; padding:10px 20px;">Claim</button>
+            <button class="btn" id="daily-btn" onclick="claimDaily()" style="width:auto; padding:10px 20px;">Claim Now</button>
         </div>
 
-        <!-- Watch Ad — 10 coins, 0/5 counter -->
+        <!-- Watch Ad -->
         <div class="card" style="text-align:center;">
             <p style="font-size:11px; color:#64748b; margin-bottom:6px;">Advertisement</p>
             <div class="ad-counter-badge">📺 Ads Today: <span id="ad-counter">0</span>/5</div>
@@ -108,35 +111,45 @@
         <div class="card" style="background:linear-gradient(135deg,#0f2027,#203a43,#2c5364); border:1px solid #38bdf8;">
             <h4 style="color:#38bdf8; margin-bottom:12px;">🤝 Partnership & Sponsors</h4>
 
-            <!-- Sponsor Slot 1 — LOCKED (koi sponsor nahi) -->
-            <div style="position:relative; display:flex; align-items:center; gap:12px; padding:10px; background:rgba(255,255,255,0.05); border-radius:10px; margin-bottom:8px;">
-                <div class="lock-overlay">
-                    <span class="lock-icon">🔒</span>
-                    <span class="lock-label">Slot Available</span>
-                </div>
-                <div style="font-size:26px;">💼</div>
+            <!-- Sponsor Slot 1 — Simple Claim (No Code) -->
+            <div class="sponsor-card">
+                <div style="font-size:26px;">📢</div>
                 <div style="flex:1;">
-                    <p style="font-size:13px; font-weight:600; color:#e2e8f0; margin:0;">Sponsor Slot 1</p>
-                    <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Contact us to advertise here</p>
+                    <p style="font-size:13px; font-weight:700; color:#38bdf8; margin:0;">Sponsor Channel</p>
+                    <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Join the channel & earn instantly</p>
                 </div>
-                <button class="btn-sm" style="background:#38bdf8; color:#000;">Join</button>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+                    <span style="font-size:12px; color:#f1c40f; font-weight:700;">+10 🪙</span>
+                    <button id="ch-btn-sponsor1" class="btn-sm ch-claim-btn" style="background:#38bdf8; color:#000; font-weight:700;"
+                        onclick="claimChannel('sponsor1', CONFIG.CHANNELS.sponsor1)">Join & Claim</button>
+                </div>
             </div>
 
-            <!-- Sponsor Slot 2 — LOCKED (koi sponsor nahi) -->
-            <div style="position:relative; display:flex; align-items:center; gap:12px; padding:10px; background:rgba(255,255,255,0.05); border-radius:10px;">
-                <div class="lock-overlay">
-                    <span class="lock-icon">🔒</span>
-                    <span class="lock-label">Slot Available</span>
+            <!-- Sponsor Slot 2 — Partner Task with Code Verification -->
+            <div class="partner-card">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                    <span style="font-size:22px;">🌟</span>
+                    <div style="flex:1;">
+                        <p style="font-size:13px; font-weight:700; color:#a855f7; margin:0;">Partner Task</p>
+                        <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Complete the task & enter the code to earn</p>
+                    </div>
+                    <span style="font-size:12px; color:#f1c40f; font-weight:700;">+15 🪙</span>
                 </div>
-                <div style="font-size:26px;">🌟</div>
-                <div style="flex:1;">
-                    <p style="font-size:13px; font-weight:600; color:#e2e8f0; margin:0;">Sponsor Slot 2</p>
-                    <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Contact us to advertise here</p>
+                <div class="card task-item" data-task="partner1" style="background:transparent; padding:0; border:none; margin:0;">
+                    <button class="btn-sm" style="background:#a855f7; width:100%; margin-bottom:8px;" onclick="openTask('partner1', 'partner')">
+                        🔗 Open Partner Link
+                    </button>
+                    <div class="task-input-row">
+                        <input type="text" id="partner-1" placeholder="Enter verification code">
+                        <button class="btn-sm" style="background:#a855f7;" onclick="verifyTask('partner1', 'partner-1')">Verify</button>
+                    </div>
                 </div>
-                <button class="btn-sm" style="background:#38bdf8; color:#000;">Join</button>
             </div>
 
         </div>
+
+        <!-- Gap before Withdrawal -->
+        <div class="section-gap"></div>
 
         <!-- Withdraw -->
         <div class="card">
@@ -162,15 +175,17 @@
                 </div>
             </div>
 
-            <div style="margin-bottom:10px;">
-                <label style="font-size:12px; color:#94a3b8; margin-bottom:6px; display:block;">💰 filled a value of coin ?</label>
-                <input type="number" id="withdraw-amount" placeholder="Min 4000 coins" min="4000"
-                    style="margin-bottom:0;"
-                    oninput="if(this.value < 0) this.value = Math.abs(this.value);">
-                <p style="font-size:11px; color:#64748b; margin-top:4px;"> 🧑‍💻✍️✅ </p>
-            </div>
+            <!-- Coin Amount Input — same style as UPI input -->
+            <input type="text" id="withdraw-amount" placeholder="Enter coin amount (Min. 4000)"
+                style="margin-bottom:10px;"
+                oninput="this.value = this.value.replace(/[^0-9]/g, '')">
 
             <input type="text" id="upi-id" placeholder="Enter UPI ID (name@upi)" style="margin-bottom:10px;">
+
+            <p style="font-size:11px; color:#64748b; margin-bottom:10px; margin-top:-6px;">
+                ⏳ One withdrawal request allowed every 3 hours.
+            </p>
+
             <button class="btn" style="background:#e74c3c;" onclick="requestWithdraw()">Withdraw Now</button>
         </div>
 
@@ -180,8 +195,8 @@
     <div id="tasks" class="tab-content" style="display:none;">
 
         <div class="card balance-card" style="background:linear-gradient(135deg,#f1c40f,#f39c12); text-align:center;">
-            <h4 style="color:#000;">Extra Rewards 🌟</h4>
-            <p style="color:#1a1a1a; font-size:13px;">Complete tasks daily and earn more coins!</p>
+            <h4 style="color:#000;">Daily Tasks 🌟</h4>
+            <p style="color:#1a1a1a; font-size:13px;">Tasks reset every day. Complete and earn!</p>
         </div>
 
         <!-- YouTube Tasks -->
@@ -266,14 +281,14 @@
             </div>
         </div>
 
-        <!-- Telegram Channels — 1-time coin reward -->
+        <!-- Telegram Channels — 1-time reward -->
         <div style="padding:8px 14px 4px 14px;">
             <p style="font-size:12px; font-weight:700; color:#0088cc; text-transform:uppercase; letter-spacing:1px;">📢 Telegram Channels</p>
         </div>
 
         <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
             <div>
-                <p style="font-size:13px; font-weight:600; margin:0;"> our Official Channel</p>
+                <p style="font-size:13px; font-weight:600; margin:0;">Official Channel</p>
                 <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Join once & earn coins 🎁</p>
             </div>
             <button id="ch-btn-official" class="btn-sm ch-claim-btn" style="background:#0088cc;"
@@ -282,7 +297,7 @@
 
         <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
             <div>
-                <p style="font-size:13px; font-weight:600; margin:0;">payout proof Channel</p>
+                <p style="font-size:13px; font-weight:600; margin:0;">Channel 2</p>
                 <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Join once & earn coins 🎁</p>
             </div>
             <button id="ch-btn-channel2" class="btn-sm ch-claim-btn" style="background:#0088cc;"
@@ -291,7 +306,7 @@
 
         <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
             <div>
-                <p style="font-size:13px; font-weight:600; margin:0;">Chat community</p>
+                <p style="font-size:13px; font-weight:600; margin:0;">Channel 3</p>
                 <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Join once & earn coins 🎁</p>
             </div>
             <button id="ch-btn-channel3" class="btn-sm ch-claim-btn" style="background:#0088cc;"
@@ -304,12 +319,10 @@
     <div id="leaderboard" class="tab-content" style="display:none;">
         <div class="card balance-card" style="background:linear-gradient(135deg,#6366f1,#a855f7); text-align:center;">
             <h4>Top 10 Earners 🏆</h4>
-            <p style="font-size:13px; color:#e2e8f0;">Be the best to earn more!</p>
+            <p style="font-size:13px; color:#e2e8f0;">Compete and climb to the top!</p>
         </div>
         <div class="card">
-            <div id="leaderboard-list">
-                <p class="spinner">Loading ranking...</p>
-            </div>
+            <div id="leaderboard-list"><p class="spinner">Loading ranking...</p></div>
         </div>
     </div>
 
@@ -317,14 +330,14 @@
     <div id="refer" class="tab-content" style="display:none;">
         <div class="card balance-card" style="text-align:center;">
             <h4>Refer & Earn 🚀</h4>
-            <p style="font-size:13px; color:#94a3b8; margin-top:4px;">Get <b style="color:#f1c40f;">50 Coins</b> for every friend you invite!</p>
+            <p style="font-size:13px; color:#94a3b8; margin-top:4px;">Earn <b style="color:#f1c40f;">50 Coins</b> for every friend you invite!</p>
         </div>
         <div class="card">
             <p style="font-size:13px; color:#94a3b8; margin-bottom:8px;">Your Referral Link:</p>
             <div id="display-link" style="background:#0f172a; padding:12px; border-radius:8px; font-size:12px; word-break:break-all; border:1px dashed #f1c40f; margin-bottom:12px; color:#f1c40f;">
                 Loading...
             </div>
-            <button class="btn" onclick="inviteFriend()">📤 Copy & Invite Friend</button>
+            <button class="btn" onclick="inviteFriend()">📤 Share & Invite Friend</button>
         </div>
         <div class="card">
             <h4 style="font-size:14px; border-bottom:1px solid #334155; padding-bottom:8px; margin-bottom:10px;">My Referrals 👥</h4>
@@ -338,7 +351,7 @@
     <div id="history" class="tab-content" style="display:none;">
         <div class="card balance-card" style="text-align:center;">
             <h4>Withdrawal History 📜</h4>
-            <p style="font-size:13px; color:#94a3b8; margin-top:4px;">All your past requests</p>
+            <p style="font-size:13px; color:#94a3b8; margin-top:4px;">All your past withdrawal requests</p>
         </div>
         <div class="card">
             <div id="history-list"><p class="spinner">Loading...</p></div>
@@ -362,18 +375,19 @@
 
                 <div style="background:rgba(46,204,113,0.08); border-left:3px solid #2ecc71; border-radius:0 8px 8px 0; padding:10px 14px; margin-bottom:10px;">
                     <p style="font-size:13px; font-weight:700; color:#2ecc71; margin:0 0 8px 0;">📤 Withdrawal Rules</p>
-                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Min Withdrawal: <b style="color:#f1c40f;">4000 🪙</b></p>
-                    <p style="font-size:13px; color:#e2e8f0; margin:0;">• Requirement: Refer atleast <b style="color:#f1c40f;">5 new users</b></p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Minimum Withdrawal: <b style="color:#f1c40f;">4000 🪙</b></p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Referral Requirement: <b style="color:#f1c40f;">5 Users</b></p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0;">• Cooldown: <b style="color:#f1c40f;">1 Request per 3 Hours</b></p>
                 </div>
 
                 <div style="background:rgba(231,76,60,0.12); border:1px solid #e74c3c; border-radius:10px; padding:12px 14px;">
                     <p style="font-size:14px; font-weight:700; color:#e74c3c; text-align:center; margin:0 0 8px 0;">⚠️ Warning ⚠️</p>
-                    <p style="font-size:12px; color:#e2e8f0; text-align:center; margin:0 0 4px 0;">Using multiple IDs is <b style="color:#e74c3c;">strictly prohibited.</b></p>
-                    <p style="font-size:12px; color:#e2e8f0; text-align:center; margin:0 0 8px 0;">If detected, your ID will be <b style="color:#e74c3c;">suspended.</b></p>
+                    <p style="font-size:12px; color:#e2e8f0; text-align:center; margin:0 0 4px 0;">Using multiple accounts is <b style="color:#e74c3c;">strictly prohibited.</b></p>
+                    <p style="font-size:12px; color:#e2e8f0; text-align:center; margin:0 0 8px 0;">Detected accounts will be <b style="color:#e74c3c;">permanently suspended.</b></p>
                     <div style="background:rgba(231,76,60,0.2); border-radius:8px; padding:8px; text-align:center;">
-                        <p style="font-size:15px; font-weight:700; color:#e74c3c; margin:0;">Penalty: -100 🪙</p>
+                        <p style="font-size:15px; font-weight:700; color:#e74c3c; margin:0;">Penalty: Account Ban</p>
                     </div>
-                    <p style="font-size:11px; color:#94a3b8; text-align:center; margin:8px 0 0 0;">Please don't do this 🙏</p>
+                    <p style="font-size:11px; color:#94a3b8; text-align:center; margin:8px 0 0 0;">Please play fair 🙏</p>
                 </div>
 
             </div>
@@ -381,16 +395,17 @@
 
         <div class="card">
             <h4 style="margin-bottom:6px;">Support Center 🎧</h4>
-            <p style="font-size:13px; color:#94a3b8; margin-bottom:12px;">Write down your problem and we will respond as soon as possible..</p>
+            <p style="font-size:13px; color:#94a3b8; margin-bottom:4px;">Describe your issue and we will respond shortly.</p>
+            <p style="font-size:11px; color:#64748b; margin-bottom:12px;">⏳ Limit: 2 messages per 6 hours.</p>
             <textarea id="support-msg" placeholder="Write your issue here..."></textarea>
             <button class="btn" onclick="sendSupport()">Send to Admin</button>
         </div>
 
         <div class="card" style="border:1px solid #38bdf8; text-align:center;">
             <h4 style="color:#38bdf8; margin-bottom:6px;">Official Email Support 📧</h4>
-            <p style="font-size:12px; color:#94a3b8; margin-bottom:12px;">Tap to copy email:</p>
+            <p style="font-size:12px; color:#94a3b8; margin-bottom:12px;">Tap to copy our email address:</p>
             <div id="email-copy-box" onclick="copyEmail()" style="background:#0f172a; padding:15px; border-radius:10px; color:#38bdf8; border:1px dashed #38bdf8; font-weight:bold; cursor:pointer;">
-                cdoternsupport@gmail.com
+                cdotern.help@gmail.com
                 <div style="font-size:10px; margin-top:5px; color:#94a3b8; font-weight:normal;">(Tap to Copy)</div>
             </div>
             <p id="copy-status" style="color:#2ecc71; font-size:12px; margin-top:10px; display:none; font-weight:bold;">Email Copied! ✅</p>
@@ -400,77 +415,37 @@
 
     <!-- ===================== BOTTOM NAV BAR ===================== -->
     <div class="bottom-nav" style="
-        position: fixed;
-        bottom: 0; left: 0; right: 0;
+        position: fixed; bottom: 0; left: 0; right: 0;
         background: #0f172a;
         border-top: 1px solid #1e293b;
-        display: flex;
-        justify-content: space-around;
-        align-items: center;
-        padding: 8px 0 12px 0;
-        z-index: 999;
+        display: flex; justify-content: space-around; align-items: center;
+        padding: 8px 0 12px 0; z-index: 999;
     ">
-        <div class="nav-item active" onclick="switchTab('rewards', this)" style="
-            display: flex; flex-direction: column; align-items: center;
-            cursor: pointer; padding: 4px 12px; border-radius: 10px;
-            font-size: 10px; color: #94a3b8; gap: 2px;
-        ">
-            <span style="font-size: 20px;">🏠</span>
-            <span>Home</span>
+        <div class="nav-item active" onclick="switchTab('rewards', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 12px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
+            <span style="font-size:20px;">🏠</span><span>Home</span>
         </div>
-
-        <div class="nav-item" onclick="switchTab('tasks', this)" style="
-            display: flex; flex-direction: column; align-items: center;
-            cursor: pointer; padding: 4px 12px; border-radius: 10px;
-            font-size: 10px; color: #94a3b8; gap: 2px;
-        ">
-            <span style="font-size: 20px;">✅</span>
-            <span>Tasks</span>
+        <div class="nav-item" onclick="switchTab('tasks', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 12px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
+            <span style="font-size:20px;">✅</span><span>Tasks</span>
         </div>
-
-        <div class="nav-item" onclick="switchTab('leaderboard', this)" style="
-            display: flex; flex-direction: column; align-items: center;
-            cursor: pointer; padding: 4px 12px; border-radius: 10px;
-            font-size: 10px; color: #94a3b8; gap: 2px;
-        ">
-            <span style="font-size: 20px;">🏆</span>
-            <span>Top</span>
+        <div class="nav-item" onclick="switchTab('leaderboard', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 12px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
+            <span style="font-size:20px;">🏆</span><span>Top</span>
         </div>
-
-        <div class="nav-item" onclick="switchTab('refer', this)" style="
-            display: flex; flex-direction: column; align-items: center;
-            cursor: pointer; padding: 4px 12px; border-radius: 10px;
-            font-size: 10px; color: #94a3b8; gap: 2px;
-        ">
-            <span style="font-size: 20px;">👥</span>
-            <span>Refer</span>
+        <div class="nav-item" onclick="switchTab('refer', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 12px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
+            <span style="font-size:20px;">👥</span><span>Refer</span>
         </div>
-
-        <div class="nav-item" onclick="switchTab('help', this)" style="
-            display: flex; flex-direction: column; align-items: center;
-            cursor: pointer; padding: 4px 12px; border-radius: 10px;
-            font-size: 10px; color: #94a3b8; gap: 2px;
-        ">
-            <span style="font-size: 20px;">🎧</span>
-            <span>Support</span>
+        <div class="nav-item" onclick="switchTab('help', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 12px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
+            <span style="font-size:20px;">🎧</span><span>Support</span>
         </div>
     </div>
 
-    <!-- Nav bar ke liye bottom padding taaki content chhup na jaaye -->
     <div style="height: 70px;"></div>
 
     <style>
-        /* Active nav item highlight */
-        .nav-item.active span:last-child {
-            color: #f1c40f;
-        }
-        .nav-item.active span:first-child {
-            filter: drop-shadow(0 0 4px rgba(241,196,15,0.6));
-        }
+        .nav-item.active span:last-child  { color: #f1c40f; }
+        .nav-item.active span:first-child { filter: drop-shadow(0 0 4px rgba(241,196,15,0.6)); }
     </style>
 
     <script src="config.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
-                        
