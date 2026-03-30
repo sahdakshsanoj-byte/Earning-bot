@@ -25,12 +25,12 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # 2. ENVIRONMENT VARIABLES
 # ============================================================
-BOT_TOKEN    = os.getenv("BOT_TOKEN")
-MONGO_URI    = os.getenv("MONGO_URI")
-ADMIN_ID_STR = os.getenv("ADMIN_ID")
-BOT_USERNAME = os.getenv("BOT_USERNAME", "YourBotUsername")
-RENDER_URL   = os.getenv("RENDER_URL", "")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://sahdakshsanoj-byte.github.io")
+BOT_TOKEN    = os.getenv("BOT_TOKEN") or "").strip()
+MONGO_URI    = os.getenv("MONGO_URI") or "").strip()
+ADMIN_ID_STR = os.getenv("ADMIN_ID") or "").strip() 
+BOT_USERNAME = os.getenv("BOT_USERNAME", "YourBotUsername") or "").strip()
+RENDER_URL   = os.getenv("RENDER_URL", "") or "").strip()
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://sahdakshsanoj-byte.github.io") or "").strip()
 
 if not BOT_TOKEN:
     raise EnvironmentError("FATAL: BOT_TOKEN environment variable is not set!")
@@ -47,14 +47,18 @@ except ValueError:
 # 3. DATABASE CONNECTION
 # ============================================================
 try:
-    client = pymongo.MongoClient(MONGO_URI, maxPoolSize=50, serverSelectionTimeoutMS=5000)
+    client = pymongo.MongoClient(MONGO_URI, maxPoolSize=50, serverSelectionTimeoutMS=5000, w=1)
     db              = client['earning_bot_db']
     users_col       = db['users']
     withdrawals_col = db['withdrawals']
     support_col     = db['support']
     rate_col        = db['rate_limits']
-    # TTL index for auto-expiry of rate limit docs
+    try:
+    
     rate_col.create_index("expires_at", expireAfterSeconds=0)
+    logger.info("TTL index created on rate_limits.expires_at")
+    except Exception as idx_err:
+    logger.warning(f"TTL index creation skipped (may already exist): {idx_err}")
     logger.info("MongoDB connected successfully.")
 except Exception as e:
     logger.error(f"MongoDB connection failed: {e}")
