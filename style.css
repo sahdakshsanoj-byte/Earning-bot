@@ -1,13 +1,21 @@
+/* ============================================================
+   STYLE.CSS — Daksh Grand Earn
+   ============================================================ */
+
 :root {
-    --bg: #0f172a;
-    --card-bg: #1e293b;
-    --gold: #f1c40f;
-    --text: #e2e8f0;
-    --muted: #94a3b8;
-    --border: #334155;
-    --primary: #6366f1;
-    --success: #22c55e;
-    --danger: #e74c3c;
+    --bg:       #0f172a;
+    --card-bg:  #1e293b;
+    --gold:     #f1c40f;
+    --text:     #e2e8f0;
+    --muted:    #94a3b8;
+    --border:   #334155;
+    --primary:  #6366f1;
+    --success:  #22c55e;
+    --danger:   #e74c3c;
+    --purple:   #a855f7;
+    --cyan:     #38bdf8;
+    --red:      #ff0000;
+    --blue:     #3498db;
 }
 
 * {
@@ -72,6 +80,73 @@ body {
     margin-bottom: 10px;
 }
 
+/* ---- PARTNER CARD (Sponsor Slot with code verify) ---- */
+.partner-card {
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    border: 1px solid var(--purple);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 8px;
+}
+
+/* ---- SIMPLE SPONSOR CARD (no code) ---- */
+.sponsor-card {
+    background: linear-gradient(135deg, #0f2027, #1a2a3a);
+    border: 1px solid var(--cyan);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* ---- SPONSOR LOCKED SLOT ---- */
+.lock-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.80);
+    border-radius: 10px;
+    z-index: 10;
+    pointer-events: none;
+}
+
+.lock-icon {
+    font-size: 28px;
+    animation: lock-pulse 1.8s ease-in-out infinite;
+    display: block;
+}
+
+.lock-label {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 4px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+@keyframes lock-pulse {
+    0%,100% { transform: scale(1);   opacity: 1; }
+    50%      { transform: scale(1.2); opacity: 0.5; }
+}
+
+/* ---- AD COUNTER BADGE ---- */
+.ad-counter-badge {
+    display: inline-block;
+    background: rgba(241, 196, 15, 0.12);
+    border: 1px solid var(--gold);
+    border-radius: 20px;
+    padding: 3px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--gold);
+    margin-bottom: 8px;
+}
+
 /* ---- BUTTONS ---- */
 .btn {
     width: 100%;
@@ -86,15 +161,13 @@ body {
     transition: opacity 0.2s, transform 0.1s;
 }
 
-.btn:active {
-    opacity: 0.85;
-    transform: scale(0.98);
-}
+.btn:active  { opacity: 0.85; transform: scale(0.98); }
 
 .btn:disabled {
     background: #334155;
     color: #64748b;
     cursor: not-allowed;
+    transform: none;
 }
 
 .btn-sm {
@@ -109,12 +182,17 @@ body {
     transition: opacity 0.2s;
 }
 
-.btn-sm:active {
-    opacity: 0.8;
+.btn-sm:active  { opacity: 0.8; }
+
+.btn-sm:disabled {
+    background: #334155;
+    color: #64748b;
+    cursor: not-allowed;
 }
 
 /* ---- INPUTS ---- */
-input[type="text"], textarea {
+input[type="text"],
+textarea {
     width: 100%;
     padding: 11px;
     border-radius: 8px;
@@ -126,7 +204,8 @@ input[type="text"], textarea {
     outline: none;
 }
 
-input[type="text"]:focus, textarea:focus {
+input[type="text"]:focus,
+textarea:focus {
     border-color: var(--primary);
 }
 
@@ -135,8 +214,8 @@ textarea {
     resize: none;
 }
 
-/* ---- NAV BAR ---- */
-.nav-bar {
+/* ---- BOTTOM NAV BAR ---- */
+.bottom-nav {
     position: fixed;
     bottom: 0;
     left: 0;
@@ -164,22 +243,19 @@ textarea {
     transition: color 0.2s;
 }
 
-.nav-item span {
-    font-size: 20px;
-}
+.nav-item span:first-child { font-size: 20px; }
 
 .nav-item.active {
     color: var(--gold);
 }
 
-/* ---- TAB CONTENT ---- */
-.tab-content {
-    display: none;
+.nav-item.active span:first-child {
+    filter: drop-shadow(0 0 4px rgba(241, 196, 15, 0.6));
 }
 
-.active-tab {
-    display: block;
-}
+/* ---- TAB CONTENT ---- */
+.tab-content  { display: none; }
+.active-tab   { display: block; }
 
 /* ---- TOAST NOTIFICATION ---- */
 #toast {
@@ -187,27 +263,25 @@ textarea {
     bottom: 80px;
     left: 50%;
     transform: translateX(-50%);
-    background: #1e293b;
+    background: var(--card-bg);
     border: 1px solid var(--border);
     color: var(--text);
     padding: 12px 22px;
     border-radius: 30px;
     font-size: 13px;
     font-weight: 500;
-    z-index: 999;
+    z-index: 9999;
     opacity: 0;
     transition: opacity 0.3s;
     white-space: nowrap;
     max-width: 90vw;
     text-align: center;
+    pointer-events: none;
 }
 
-#toast.show {
-    opacity: 1;
-}
-
+#toast.show    { opacity: 1; }
 #toast.success { border-color: var(--success); color: var(--success); }
-#toast.error { border-color: var(--danger); color: var(--danger); }
+#toast.error   { border-color: var(--danger);  color: var(--danger);  }
 
 /* ---- LEADERBOARD ---- */
 .lb-item {
@@ -221,12 +295,8 @@ textarea {
 
 .lb-item:last-child { border-bottom: none; }
 
-.lb-rank {
-    font-size: 18px;
-    width: 32px;
-}
-
-.lb-user { flex: 1; padding: 0 8px; color: var(--muted); }
+.lb-rank  { font-size: 18px; width: 32px; }
+.lb-user  { flex: 1; padding: 0 8px; color: var(--muted); }
 .lb-coins { color: var(--gold); font-weight: 700; }
 
 /* ---- HISTORY ---- */
@@ -243,13 +313,9 @@ textarea {
     margin-top: 3px;
 }
 
-/* ---- REFER LIST ---- */
-.refer-item {
-    padding: 6px 0;
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-    color: var(--muted);
-}
+/* ---- CHANNEL CLAIM BUTTON ---- */
+.ch-claim-btn { transition: background 0.3s, opacity 0.3s; }
+.ch-claim-btn:disabled { cursor: not-allowed; opacity: 0.85; }
 
 /* ---- TASK ITEM ---- */
 .task-item {
@@ -272,6 +338,17 @@ textarea {
 .task-input-row input {
     flex: 1;
     margin-bottom: 0;
+}
+
+/* ---- SECTION GAP ---- */
+.section-gap { height: 18px; }
+
+/* ---- REFER LIST ---- */
+.refer-item {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--muted);
 }
 
 /* ---- SPINNER ---- */
