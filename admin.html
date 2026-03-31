@@ -1,1 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Panel — Daksh Grand Earn</title>
+<style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#0f172a; color:#e2e8f0; font-family:'Segoe UI',sans-serif; min-height:100vh; }
 
+    /* ── Login ── */
+    #login-screen {
+        display:flex; flex-direction:column; align-items:center; justify-content:center;
+        min-height:100vh; padding:20px;
+    }
+    #login-screen h2 { color:#f1c40f; font-size:22px; margin-bottom:6px; }
+    #login-screen p  { color:#64748b; font-size:13px; margin-bottom:24px; }
+    #token-input {
+        width:100%; max-width:340px; padding:12px 16px;
+        background:#1e293b; border:1px solid #334155; border-radius:10px;
+        color:#e2e8f0; font-size:14px; margin-bottom:12px;
+    }
+    #token-input:focus { outline:none; border-color:#f1c40f; }
+    .btn-login {
+        width:100%; max-width:340px; padding:12px;
+        background:#f1c40f; color:#000; font-weight:700; font-size:15px;
+        border:none; border-radius:10px; cursor:pointer;
+    }
+    #login-err { color:#e74c3c; font-size:13px; margin-top:10px; display:none; }
+
+    /* ── Dashboard ── */
+    #dashboard { display:none; padding-bottom:80px; }
+    .top-bar {
+        background:#1e293b; padding:14px 20px;
+        display:flex; justify-content:space-between; align-items:center;
+        border-bottom:1px solid #334155; position:sticky; top:0; z-index:100;
+    }
+    .top-bar h3 { color:#f1c40f; font-size:16px; }
+    .logout-btn {
+        background:#e74c3c; color:#fff; border:none;
+        padding:6px 14px; border-radius:8px; cursor:pointer; font-size:12px;
+    }
+
+    /* ── Tabs ── */
+    .tabs {
+        display:flex; background:#1e293b;
+        border-bottom:1px solid #334155;
+    }
+    .tab-btn {
+        flex:1; padding:12px 0; font-size:13px; font-weight:600;
+        background:none; border:none; color:#64748b; cursor:pointer;
+        border-bottom:2px solid transparent;
+    }
+    .tab-btn.active { color:#f1c40f; border-bottom-color:#f1c40f; }
+
+    /* ── Cards ── */
+    .section { display:none; padding:16px; }
+    .section.active { display:block; }
+    .card {
+        background:#1e293b; border:1px solid #334155; border-radius:12px;
+        padding:16px; margin-bottom:14px;
+    }
+    .card h4 { color:#38bdf8; font-size:14px; margin-bottom:14px; border-bottom:1px solid #334155; padding-bottom:8px; }
+
+    /* ── Code Rows ── */
+    .code-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+    .code-label { font-size:12px; color:#94a3b8; width:90px; flex-shrink:0; }
+    .code-input {
+        flex:1; padding:9px 12px;
+        background:#0f172a; border:1px solid #334155; border-radius:8px;
+        color:#f1c40f; font-size:13px; font-weight:700; font-family:monospace;
+    }
+    .code-input:focus { outline:none; border-color:#f1c40f; }
+
+    /* ── Buttons ── */
+    .btn-save {
+        width:100%; padding:12px;
+        background:#2ecc71; color:#000; font-weight:700;
+        border:none; border-radius:10px; cursor:pointer; font-size:14px;
+        margin-top:4px;
+    }
+    .btn-save:active { opacity:0.8; }
+    .btn-danger {
+        padding:7px 14px; background:#e74c3c; color:#fff;
+        border:none; border-radius:8px; cursor:pointer; font-size:12px;
+    }
+    .btn-success {
+        padding:7px 14px; background:#2ecc71; color:#000;
+        border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700;
+    }
+
+    /* ── Withdrawal Cards ── */
+    .wd-card {
+        background:#0f172a; border:1px solid #334155; border-radius:10px;
+        padding:14px; margin-bottom:10px;
+    }
+    .wd-row { display:flex; justify-content:space-between; margin-bottom:6px; }
+    .wd-label { font-size:11px; color:#64748b; }
+    .wd-value { font-size:12px; color:#e2e8f0; font-weight:600; }
+    .wd-actions { display:flex; gap:8px; margin-top:10px; }
+
+    /* ── Stats ── */
+    .stats-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+    .stat-box {
+        background:#0f172a; border:1px solid #334155; border-radius:10px;
+        padding:14px; text-align:center;
+    }
+    .stat-num { font-size:24px; font-weight:700; color:#f1c40f; }
+    .stat-lbl { font-size:11px; color:#64748b; margin-top:4px; }
+
+    /* ── Toast ── */
+    #toast {
+        position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
+        background:#1e293b; color:#e2e8f0; padding:10px 20px;
+        border-radius:20px; font-size:13px; font-weight:600;
+        display:none; z-index:999; border:1px solid #334155;
+    }
+    #toast.show { display:block; }
+    #toast.ok  { border-color:#2ecc71; color:#2ecc71; }
+    #toast.err { border-color:#e74c3c; color:#e74c3c; }
+
+    /* ── Empty State ── */
+    .empty { text-align:center; color:#475569; padding:30px 0; font-size:13px; }
+
+    /* ── Broadcast ── */
+    #bcast-msg {
+        width:100%; min-height:100px; padding:12px;
+        background:#0f172a; border:1px solid #334155; border-radius:10px;
+        color:#e2e8f0; font-size:14px; resize:vertical; margin-bottom:12px;
+    }
+    #bcast-msg:focus { outline:none; border-color:#38bdf8; }
+    #bcast-result { font-size:12px; color:#64748b; margin-top:8px; text-align:center; }
+</style>
+</head>
+<body>
+
+<!-- ===================== LOGIN ===================== -->
+<div id="login-screen">
+    <h2>🔐 Admin Panel</h2>
+    <p>Daksh Grand Earn — Secure Access</p>
+    <input type="password" id="token-input" placeholder="Enter Admin Token" autocomplete="off">
+    <button class="btn-login" onclick="doLogin()">Login</button>
+    <p id="login-err">❌ Invalid token. Try again.</p>
+</div>
+
+<!-- ===================== DASHBOARD ===================== -->
+<div id="dashboard">
+
+    <div class="top-bar">
+        <h3>⚙️ Admin Panel</h3>
+        <button class="logout-btn" onclick="doLogout()">Logout</button>
+    </div>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('codes',this)">📝 Codes</button>
+        <button class="tab-btn" onclick="switchTab('withdrawals',this)">💸 Withdraw</button>
+        <button class="tab-btn" onclick="switchTab('users',this)">👤 Users</button>
+        <button class="tab-btn" onclick="switchTab('stats',this)">📊 Stats</button>
+        <button class="tab-btn" onclick="switchTab('broadcast',this)">📢 Broadcast</button>
+    </div>
+
+    <!-- ── CODES TAB ── -->
+    <div id="tab-codes" class="section active" style="padding:16px;">
+
+        <div class="card">
+            <h4>📺 YouTube Task Codes</h4>
+            <div class="code-row">
+                <span class="code-label">Task 1 Code</span>
+                <input class="code-input" id="code-yt1" placeholder="CODE1">
+            </div>
+            <div class="code-row">
+                <span class="code-label">Task 2 Code</span>
+                <input class="code-input" id="code-yt2" placeholder="CODE2">
+            </div>
+            <div class="code-row">
+                <span class="code-label">Task 3 Code</span>
+                <input class="code-input" id="code-yt3" placeholder="CODE3">
+            </div>
+        </div>
+
+        <div class="card">
+            <h4>🌐 Website Task Codes</h4>
+            <div class="code-row">
+                <span class="code-label">Task 1 Code</span>
+                <input class="code-input" id="code-web1" placeholder="SITE1">
+            </div>
+            <div class="code-row">
+                <span class="code-label">Task 2 Code</span>
+                <input class="code-input" id="code-web2" placeholder="SITE2">
+            </div>
+            <div class="code-row">
+                <span class="code-label">Task 3 Code</span>
+                <input class="code-input" id="code-web3" placeholder="SITE3">
+            </div>
+        </div>
+
+        <div class="card">
+            <h4>🌟 Partner Task Code</h4>
+            <div class="code-row">
+                <span class="code-label">Partner Code</span>
+                <input class="code-input" id="code-partner1" placeholder="PARTNER1">
+            </div>
+        </div>
+
+        <button class="btn-save" onclick="saveCodes()">💾 Save All Codes</button>
+
+    </div>
+
+    <!-- ── WITHDRAWALS TAB ── -->
+    <div id="tab-withdrawals" class="section" style="padding:16px;">
+        <div class="card">
+            <h4>⏳ Pending Withdrawals</h4>
+            <div id="wd-list"><p class="empty">Loading...</p></div>
+        </div>
+    </div>
+
+    <!-- ── USERS TAB ── -->
+    <div id="tab-users" class="section" style="padding:16px;">
+        <div class="card">
+            <h4>👤 Search User</h4>
+            <div class="code-row">
+                <input class="code-input" id="search-uid" placeholder="Telegram User ID" type="number" style="flex:1;">
+                <button class="btn-success" onclick="searchUser()" style="white-space:nowrap;">Search</button>
+            </div>
+        </div>
+        <div id="user-result"></div>
+    </div>
+
+    <!-- ── STATS TAB ── -->
+    <div id="tab-stats" class="section" style="padding:16px;">
+        <div class="stats-grid">
+            <div class="stat-box">
+                <div class="stat-num" id="stat-users">—</div>
+                <div class="stat-lbl">Total Users</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-num" id="stat-pending">—</div>
+                <div class="stat-lbl">Pending Withdrawals</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-num" id="stat-approved">—</div>
+                <div class="stat-lbl">Approved</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-num" id="stat-coins">—</div>
+                <div class="stat-lbl">Total Coins Given</div>
+            </div>
+        </div>
+        <button class="btn-save" style="background:#38bdf8;" onclick="loadStats()">🔄 Refresh Stats</button>
+    </div>
+
+    <!-- ── BROADCAST TAB ── -->
+    <div id="tab-broadcast" class="section" style="padding:16px;">
+        <div class="card">
+            <h4>📢 Send Message to All Users</h4>
+            <textarea id="bcast-msg" placeholder="Message likhiyo yahan... (Telegram markdown supported)&#10;Example: *Bold*, _italic_, [link](url)"></textarea>
+            <button class="btn-save" style="background:#a855f7;" onclick="sendBroadcast()">📤 Send to All</button>
+            <p id="bcast-result"></p>
+        </div>
+    </div>
+
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ── State ──
+let adminToken = sessionStorage.getItem('admin_token') || '';
+const API = window.location.origin;
+
+// ── Toast ──
+function toast(msg, type='ok') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'show ' + type;
+    setTimeout(() => t.className = '', 3000);
+}
+
+// ── Login ──
+async function doLogin() {
+    const token = document.getElementById('token-input').value.trim();
+    if (!token) return;
+    try {
+        const res  = await fetch(`${API}/admin/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            adminToken = token;
+            sessionStorage.setItem('admin_token', token);
+            showDashboard();
+        } else {
+            document.getElementById('login-err').style.display = 'block';
+        }
+    } catch(e) {
+        document.getElementById('login-err').style.display = 'block';
+    }
+}
+
+function doLogout() {
+    sessionStorage.removeItem('admin_token');
+    adminToken = '';
+    document.getElementById('dashboard').style.display = 'none';
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('token-input').value = '';
+}
+
+function showDashboard() {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+    loadCodes();
+    loadWithdrawals();
+}
+
+// ── Auto-login if token saved ──
+if (adminToken) {
+    fetch(`${API}/admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: adminToken })
+    }).then(r => r.json()).then(d => {
+        if (d.status === 'success') showDashboard();
+        else { sessionStorage.removeItem('admin_token'); adminToken = ''; }
+    }).catch(() => {});
+}
+
+// ── Token Enter key ──
+document.getElementById('token-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+});
+
+// ── Tab Switch ──
+function switchTab(name, el) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    el.classList.add('active');
+    if (name === 'withdrawals') loadWithdrawals();
+    if (name === 'stats') loadStats();
+}
+
+// ── Headers ──
+function authHeaders() {
+    return { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken };
+}
+
+// ── Load Codes ──
+async function loadCodes() {
+    try {
+        const res  = await fetch(`${API}/admin/get_config`, { headers: authHeaders() });
+        const data = await res.json();
+        if (data.status === 'success') {
+            const codes = data.task_codes;
+            ['yt1','yt2','yt3','web1','web2','web3','partner1'].forEach(k => {
+                const el = document.getElementById('code-' + k);
+                if (el && codes[k]) el.value = codes[k];
+            });
+        }
+    } catch(e) {}
+}
+
+// ── Save Codes ──
+async function saveCodes() {
+    const codes = {};
+    ['yt1','yt2','yt3','web1','web2','web3','partner1'].forEach(k => {
+        const v = document.getElementById('code-' + k)?.value.trim().toUpperCase();
+        if (v) codes[k] = v;
+    });
+    try {
+        const res  = await fetch(`${API}/admin/update_codes`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ codes })
+        });
+        const data = await res.json();
+        if (data.status === 'success') toast('✅ Codes saved!', 'ok');
+        else toast('❌ Failed to save', 'err');
+    } catch(e) { toast('❌ Network error', 'err'); }
+}
+
+// ── Load Withdrawals ──
+async function loadWithdrawals() {
+    const list = document.getElementById('wd-list');
+    list.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        const res  = await fetch(`${API}/admin/withdrawals`, { headers: authHeaders() });
+        const data = await res.json();
+        if (data.status === 'success') {
+            const wds = data.withdrawals;
+            if (!wds.length) { list.innerHTML = '<p class="empty">✅ No pending withdrawals</p>'; return; }
+            list.innerHTML = wds.map(w => `
+                <div class="wd-card">
+                    <div class="wd-row">
+                        <span class="wd-label">User ID</span>
+                        <span class="wd-value">${w.user_id}</span>
+                    </div>
+                    <div class="wd-row">
+                        <span class="wd-label">Coins</span>
+                        <span class="wd-value" style="color:#f1c40f;">${w.coins} 🪙</span>
+                    </div>
+                    <div class="wd-row">
+                        <span class="wd-label">UPI ID</span>
+                        <span class="wd-value">${w.upi_id}</span>
+                    </div>
+                    <div class="wd-row">
+                        <span class="wd-label">Date</span>
+                        <span class="wd-value">${w.requested_at ? new Date(w.requested_at).toLocaleString('en-IN') : '—'}</span>
+                    </div>
+                    <div class="wd-actions">
+                        <button class="btn-success" onclick="updateWithdrawal('${w.user_id}', ${w.coins}, 'approve')">✅ Approve</button>
+                        <button class="btn-danger"  onclick="updateWithdrawal('${w.user_id}', ${w.coins}, 'reject')">❌ Reject</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+    } catch(e) { list.innerHTML = '<p class="empty">Error loading</p>'; }
+}
+
+async function updateWithdrawal(userId, coins, action) {
+    const label = action =�== 'approve' ? 'Approve' : 'Reject';
+    if (!confirm(`${label} withdrawal of ${coins} coins for user ${userId}?`)) return;
+    try {
+        const res  = await fetch(`${API}/admin/update_withdrawal`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ user_id: userId, action })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            toast(`✅ Withdrawal ${label}d!`, 'ok');
+            loadWithdrawals();
+        } else {
+            toast('❌ Failed', 'err');
+        }
+    } catch(e) { toast('❌ Network error', 'err'); }
+}
+
+// ── Stats ──
+async function loadStats() {
+    try {
+        const res  = await fetch(`${API}/admin/stats`, { headers: authHeaders() });
+        const data = await res.json();
+        if (data.status === 'success') {
+            document.getElementById('stat-users').textContent    = data.total_users    ?? '—';
+            document.getElementById('stat-pending').textContent  = data.pending        ?? '—';
+            document.getElementById('stat-approved').textContent = data.approved       ?? '—';
+            document.getElementById('stat-coins').textContent    = data.total_coins != null ? (data.total_coins).toLocaleString('en-IN') : '—';
+        }
+    } catch(e) {}
+}
+
+// ── Search User ──
+async function searchUser() {
+    const uid = document.getElementById('search-uid').value.trim();
+    if (!uid) return toast('❌ User ID daalo', 'err');
+    const result = document.getElementById('user-result');
+    result.innerHTML = '<p class="empty">Searching...</p>';
+    try {
+        const res  = await fetch(`${API}/admin/search_user?user_id=${uid}`, { headers: authHeaders() });
+        const data = await res.json();
+        if (data.status === 'success') {
+            const u = data.user;
+            const banned = u.blocked ? true : false;
+            result.innerHTML = `
+                <div class="card">
+                    <h4>${banned ? '⛔ BANNED USER' : '✅ Active User'}</h4>
+                    <div class="wd-card">
+                        <div class="wd-row"><span class="wd-label">User ID</span><span class="wd-value">${u.user_id}</span></div>
+                        <div class="wd-row"><span class="wd-label">Name</span><span class="wd-value">${u.name || '—'}</span></div>
+                        <div class="wd-row"><span class="wd-label">Username</span><span class="wd-value">${u.username ? '@'+u.username : '—'}</span></div>
+                        <div class="wd-row"><span class="wd-label">Coins</span><span class="wd-value" style="color:#f1c40f;">${u.coins || 0} 🪙</span></div>
+                        <div class="wd-row"><span class="wd-label">Referrals</span><span class="wd-value">${(u.referrals || []).length}</span></div>
+                        <div class="wd-row"><span class="wd-label">Status</span><span class="wd-value" style="color:${banned ? '#e74c3c' : '#2ecc71'};">${banned ? '⛔ Banned' : '✅ Active'}</span></div>
+                        <div class="wd-row"><span class="wd-label">Joined</span><span class="wd-value">${u.joined_at ? new Date(u.joined_at).toLocaleDateString('en-IN') : '—'}</span></div>
+                    </div>
+                    <div class="wd-actions">
+                        ${banned
+                            ? `<button class="btn-success" onclick="banAction(${u.user_id}, 'unban')">✅ Unban User</button>`
+                            : `<button class="btn-danger"  onclick="banAction(${u.user_id}, 'ban')">⛔ Ban User</button>`
+                        }
+                    </div>
+                </div>`;
+        } else {
+            result.innerHTML = `<p class="empty">❌ ${data.message || 'User not found'}</p>`;
+        }
+    } catch(e) {
+        result.innerHTML = '<p class="empty">❌ Network error</p>';
+    }
+}
+
+async function banAction(userId, action) {
+    const label = action === 'ban' ? 'Ban' : 'Unban';
+    if (!confirm(`${label} user ${userId}?`)) return;
+    try {
+        const res  = await fetch(`${API}/admin/${action}_user`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ user_id: userId })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            toast(`✅ User ${label}ned!`, 'ok');
+            searchUser();
+        } else {
+            toast('❌ Failed', 'err');
+        }
+    } catch(e) { toast('❌ Network error', 'err'); }
+}
+
+// ── Enter key on search ──
+document.addEventListener('DOMContentLoaded', () => {
+    const s = document.getElementById('search-uid');
+    if (s) s.addEventListener('keydown', e => { if (e.key === 'Enter') searchUser(); });
+});
+
+// ── Broadcast ──
+async function sendBroadcast() {
+    const msg = document.getElementById('bcast-msg').value.trim();
+    if (!msg) return toast('❌ Message khali hai!', 'err');
+    const result = document.getElementById('bcast-result');
+    result.textContent = '⏳ Sending...';
+    try {
+        const res  = await fetch(`${API}/admin/broadcast`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ message: msg })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            toast('✅ Sent!', 'ok');
+            result.textContent = `✅ Sent to ${data.sent} users, ${data.failed} failed.`;
+            document.getElementById('bcast-msg').value = '';
+        } else {
+            result.textContent = '❌ Failed to send';
+            toast('❌ Failed', 'err');
+        }
+    } catch(e) { result.textContent = '❌ Network error'; toast('❌ Network error', 'err'); }
+}
+</script>
+</body>
+</html>
