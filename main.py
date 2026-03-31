@@ -7,7 +7,7 @@ import logging
 import pymongo
 import time
 from urllib.parse import parse_qsl
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from threading import Thread
 from telebot import types
@@ -31,6 +31,8 @@ ADMIN_ID_STR = (os.getenv("ADMIN_ID")    or "").strip()
 BOT_USERNAME = (os.getenv("BOT_USERNAME") or "YourBotUsername").strip()
 RENDER_URL   = (os.getenv("RENDER_URL")   or "").strip()
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "https://sahdakshsanoj-byte.github.io").strip()
+ADMIN_TOKEN  = (os.getenv("ADMIN_TOKEN")  or "").strip()
+
 if not BOT_TOKEN:
     raise EnvironmentError("FATAL: BOT_TOKEN environment variable is not set!")
 if not MONGO_URI:
@@ -57,6 +59,7 @@ try:
     withdrawals_col = db['withdrawals']
     support_col     = db['support']
     rate_col        = db['rate_limits']
+    config_col      = db['config']
     try:
         rate_col.create_index("expires_at", expireAfterSeconds=0)
         logger.info("TTL index created on rate_limits.expires_at")
@@ -66,7 +69,6 @@ try:
 except Exception as e:
     logger.error(f"MongoDB connection failed: {e}")
     raise
-
 
 # ============================================================
 # 4. CONSTANTS
@@ -110,6 +112,20 @@ TASK_MAX_FAILS       = 3       # max wrong attempts before cooldown
 
 # Allowed task IDs whitelist (for validation)
 VALID_TASK_IDS = set(TASK_CODES.keys())
+
+def get_live_task_codes():
+    """Returns task codes from MongoDB (updated by admin panel), falls back to TASK_CODES."""
+    try:
+        cfg = config_col.find_one({"_id": "task_codes"})
+        if cfg and cfg.get("codes"):
+            return cfg["codes"]
+    except Exception:
+        pass
+    return TASK_CODES
+
+def check_admin_token(req):
+    """Returns True if request has valid admin token."""
+    return req.headers.get("X-Admin-Token", "").strip() == ADMIN_TOKEN and ADMIN_TOKEN != ""
 
 # ============================================================
 # 5. TELEGRAM INIT DATA VERIFICATION
@@ -517,6 +533,11 @@ def verify_task_api():
     if task_id not in VALID_TASK_IDS:
         return jsonify({"status": "error", "message": "Invalid task ID."}), 400
 
+    # Ban check
+    _u = users_col.find_one({"user_id": user_id}, {"blocked": 1})
+    if _u and _u.get("blocked"):
+        return jsonify({"status": "error", "message": "Your account has been suspended."}), 403
+
     # Check if user is in cooldown due to too many wrong attempts
     if is_task_attempt_blocked(user_id, task_id):
         return jsonify({"status": "error", "message": f"Too many wrong attempts. Wait {TASK_FAIL_COOLDOWN // 60} minute(s) before retrying."}), 429
@@ -529,7 +550,7 @@ def verify_task_api():
     if reward is None:
         return jsonify({"status": "error", "message": "Invalid task ID."}), 400
 
-    correct_code = TASK_CODES.get(task_id, "").upper()
+    correct_code = get_live_task_codes().get(task_id, "").upper()
     if user_code != correct_code:
         # Record wrong attempt
         record_task_fail(user_id, task_id)
@@ -627,6 +648,11 @@ def claim_channel_api():
 
     if is_rate_limited(f"channel_{user_id}_{channel_id}", 10):
         return jsonify({"status": "error", "message": "Please wait a moment."}), 429
+
+    # Ban check
+    _u = users_col.find_one({"user_id": user_id}, {"blocked": 1})
+    if _u and _u.get("blocked"):
+        return jsonify({"status": "error", "message": "Your account has been suspended."}), 403
 
     try:
         user = users_col.find_one({"user_id": user_id})
@@ -1222,7 +1248,153 @@ def run_bot():
             time.sleep(5)
 
 # ============================================================
-# 15. UPTIME PING (for UptimeRobot)
+# 15. ADMIN PANEL ROUTES
+# ============================================================
+@app.route('/admin')
+def admin_panel_page():
+    return send_file('admin.html')
+
+@app.route('/admin/login', methods=['POST'])
+def admin_login():
+    data  = request.json or {}
+    token = (data.get('token') or '').strip()
+    if token == ADMIN_TOKEN and ADMIN_TOKEN != '':
+        return jsonify({"status": "success"})
+    return jsonify({"status": "error", "message": "Invalid token"}), 401
+
+@app.route('/admin/get_config', methods=['GET'])
+def admin_get_config():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    return jsonify({"status": "success", "task_codes": get_live_task_codes()})
+
+@app.route('/admin/update_codes', methods=['POST'])
+def admin_update_codes():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data  = request.json or {}
+    codes = {k: str(v).strip().upper() for k, v in data.get("codes", {}).items() if v}
+    if not codes:
+        return jsonify({"status": "error", "message": "No codes provided"}), 400
+    config_col.update_one({"_id": "task_codes"}, {"$set": {"codes": codes}}, upsert=True)
+    logger.info(f"Admin updated task codes: {list(codes.keys())}")
+    return jsonify({"status": "success", "message": "Codes updated!"})
+
+@app.route('/admin/withdrawals', methods=['GET'])
+def admin_withdrawals():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    pending = list(withdrawals_col.find({"status": "pending"}, {"_id": 0}).sort("requested_at", -1))
+    return jsonify({"status": "success", "withdrawals": pending})
+
+@app.route('/admin/update_withdrawal', methods=['POST'])
+def admin_update_withdrawal():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data    = request.json or {}
+    user_id = data.get("user_id")
+    action  = data.get("action")
+    if not user_id or action not in ("approve", "reject"):
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
+    wd = withdrawals_col.find_one({"user_id": user_id, "status": "pending"})
+    if not wd:
+        return jsonify({"status": "error", "message": "No pending withdrawal found"}), 404
+    if action == "approve":
+        withdrawals_col.update_one({"user_id": user_id, "status": "pending"}, {"$set": {"status": "approved"}})
+        try:
+            bot.send_message(user_id, f"✅ Your withdrawal of {wd.get('coins', 0)} coins has been approved!\n💸 Payment will be sent to your UPI shortly.")
+        except Exception:
+            pass
+        logger.info(f"Admin approved withdrawal for user {user_id}")
+    else:
+        withdrawals_col.update_one({"user_id": user_id, "status": "pending"}, {"$set": {"status": "rejected"}})
+        users_col.update_one({"user_id": user_id}, {"$inc": {"coins": wd.get("coins", 0)}})
+        try:
+            bot.send_message(user_id, f"❌ Your withdrawal of {wd.get('coins', 0)} coins was rejected.\n🪙 Coins have been refunded to your account.")
+        except Exception:
+            pass
+        logger.info(f"Admin rejected withdrawal for user {user_id}, refunded {wd.get('coins', 0)} coins")
+    return jsonify({"status": "success"})
+
+@app.route('/admin/stats', methods=['GET'])
+def admin_stats():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    total_users = users_col.count_documents({})
+    pending     = withdrawals_col.count_documents({"status": "pending"})
+    approved    = withdrawals_col.count_documents({"status": "approved"})
+    coins_agg   = list(users_col.aggregate([{"$group": {"_id": None, "total": {"$sum": "$coins"}}}]))
+    total_coins = coins_agg[0]["total"] if coins_agg else 0
+    return jsonify({"status": "success", "total_users": total_users, "pending": pending, "approved": approved, "total_coins": total_coins})
+
+@app.route('/admin/search_user', methods=['GET'])
+def admin_search_user():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    try:
+        uid = int(request.args.get('user_id', 0))
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid user ID"}), 400
+    user = users_col.find_one({"user_id": uid}, {"_id": 0})
+    if not user:
+        return jsonify({"status": "error", "message": "User not found"}), 404
+    return jsonify({"status": "success", "user": user})
+
+@app.route('/admin/ban_user', methods=['POST'])
+def admin_ban_user():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data = request.json or {}
+    try:
+        uid = int(data.get('user_id', 0))
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid user ID"}), 400
+    users_col.update_one({"user_id": uid}, {"$set": {"blocked": True}})
+    try:
+        bot.send_message(uid, "⛔ Your account has been suspended for violating our terms of service.")
+    except Exception:
+        pass
+    logger.info(f"Admin banned user {uid}")
+    return jsonify({"status": "success", "message": f"User {uid} banned"})
+
+@app.route('/admin/unban_user', methods=['POST'])
+def admin_unban_user():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data = request.json or {}
+    try:
+        uid = int(data.get('user_id', 0))
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid user ID"}), 400
+    users_col.update_one({"user_id": uid}, {"$set": {"blocked": False}})
+    try:
+        bot.send_message(uid, "✅ Your account has been reinstated. Welcome back!")
+    except Exception:
+        pass
+    logger.info(f"Admin unbanned user {uid}")
+    return jsonify({"status": "success", "message": f"User {uid} unbanned"})
+
+@app.route('/admin/broadcast', methods=['POST'])
+def admin_broadcast():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data = request.json or {}
+    msg  = (data.get("message") or "").strip()
+    if not msg:
+        return jsonify({"status": "error", "message": "Empty message"}), 400
+    all_users = users_col.find({}, {"user_id": 1})
+    sent = failed = 0
+    for u in all_users:
+        try:
+            bot.send_message(u["user_id"], msg, parse_mode="Markdown")
+            sent += 1
+        except Exception:
+            failed += 1
+    logger.info(f"Broadcast sent: {sent} ok, {failed} failed")
+    return jsonify({"status": "success", "sent": sent, "failed": failed})
+
+# ============================================================
+# 16. UPTIME PING (for UptimeRobot)
 # ============================================================
 def uptime_ping():
     if not RENDER_URL:
