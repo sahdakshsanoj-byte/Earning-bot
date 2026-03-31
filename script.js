@@ -39,7 +39,6 @@ async function fetchWithRetry(url, options = {}, retries = 3, delayMs = 2000) {
             const timeout    = setTimeout(() => controller.abort(), 10000);
             const res        = await fetch(url, { ...options, signal: controller.signal });
             clearTimeout(timeout);
-            // Don't retry 4xx errors — they are client errors
             if (!res.ok && res.status >= 400 && res.status < 500) return res;
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res;
@@ -80,6 +79,11 @@ async function fetchLiveData() {
     try {
         const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_user/${userId}`);
         const data = await res.json();
+        if (data.status === "blocked") {
+            showBlockedView();
+            return;
+        }
+
         if (data.status === "success") {
             userData = data;
 
@@ -107,7 +111,10 @@ async function fetchLiveData() {
             if (coinsText) coinsText.innerText = `${coins} / 4000 ${coins >= 4000 ? '✅' : ''}`;
             if (refText)   refText.innerText   = `${refCount} / 5 ${refCount >= 5 ? '✅' : ''}`;
 
-            updateLeaderboardUI(data.leaderboard);
+            // Leaderboard — update only if we have fresh data
+            if (data.leaderboard && data.leaderboard !== "none") {
+                updateLeaderboardUI(data.leaderboard);
+            }
 
             const linkEl = document.getElementById('display-link');
             if (linkEl) linkEl.innerText = `https://t.me/${CONFIG.BOT_USERNAME}?start=${userId}`;
@@ -127,6 +134,19 @@ async function fetchLiveData() {
 function getRefCount(referrals) {
     if (!referrals || referrals === "" || referrals === "none") return 0;
     return referrals.split(',').filter(id => id.trim() !== '').length;
+}
+
+// ============================================================
+// LEADERBOARD AUTO-REFRESH (every 10 minutes)
+// ============================================================
+async function refreshLeaderboard() {
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_leaderboard`);
+        const data = await res.json();
+        if (data.status === "success" && data.leaderboard) {
+            updateLeaderboardUI(data.leaderboard);
+        }
+    } catch (e) { /* Silent — leaderboard refresh is non-critical */ }
 }
 
 // ============================================================
@@ -301,10 +321,11 @@ function applyCompletedTasks(completedList) {
 }
 
 // ============================================================
-// CHANNEL JOIN — 10s countdown then claim
+// CHANNEL JOIN — 10s countdown, join verify, retry on fail
 // ============================================================
 function updateChannelButtons(channelClaims) {
-    ['official', 'channel2', 'channel3', 'sponsor1'].forEach(ch => {
+    // Regular channels — one-time claim
+    ['official', 'channel2', 'channel3'].forEach(ch => {
         const btn = document.getElementById(`ch-btn-${ch}`);
         if (!btn) return;
         if (channelClaims[ch]) {
@@ -313,6 +334,58 @@ function updateChannelButtons(channelClaims) {
             btn.style.background = "#2ecc71";
         }
     });
+
+    // Slot 1 — link-based claim (reclaim allowed if link changes)
+    const slot1Btn = document.getElementById('ch-btn-slot1');
+    if (slot1Btn && CONFIG.SPONSORS?.slot1?.active) {
+        const claim = channelClaims['slot1'];
+        const currentLink = CONFIG.SPONSORS.slot1.link || '';
+        let alreadyClaimed = false;
+        if (claim) {
+            if (typeof claim === 'object' && claim.claimed_link) {
+                alreadyClaimed = (claim.claimed_link === currentLink && currentLink !== '');
+            } else if (claim === true) {
+                alreadyClaimed = true; // legacy boolean
+            }
+        }
+        if (alreadyClaimed) {
+            slot1Btn.disabled         = true;
+            slot1Btn.innerText        = "✅ Joined";
+            slot1Btn.style.background = "#2ecc71";
+            slot1Btn.onclick          = null;
+        }
+    }
+
+    // Slot 2 — link-based claim
+    const slot2Btn = document.getElementById('ch-btn-slot2');
+    if (slot2Btn && CONFIG.SPONSORS?.slot2?.active) {
+        const claim = channelClaims['slot2'];
+        const currentLink = CONFIG.SPONSORS.slot2.link || '';
+        let alreadyClaimed = false;
+        if (claim) {
+            if (typeof claim === 'object' && claim.claimed_link) {
+                alreadyClaimed = (claim.claimed_link === currentLink && currentLink !== '');
+            } else if (claim === true) {
+                alreadyClaimed = true; // legacy boolean
+            }
+        }
+        if (alreadyClaimed) {
+            slot2Btn.disabled         = true;
+            slot2Btn.innerText        = "✅ Joined";
+            slot2Btn.style.background = "#2ecc71";
+            slot2Btn.onclick          = null;
+        }
+    }
+}
+
+// Silent click tracker — fire and forget
+function trackSponsorClick(slotId, linkUrl) {
+    if (!userId || !linkUrl) return;
+    fetch(`${CONFIG.API_BASE_URL}/click_sponsor`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ user_id: userId, slot_id: slotId, link_url: linkUrl })
+    }).catch(() => {});
 }
 
 async function claimChannel(channelId, channelUrl) {
@@ -321,6 +394,12 @@ async function claimChannel(channelId, channelUrl) {
     const reqKey = `channel_${channelId}`;
     if (_pendingRequests.has(reqKey)) return;
 
+    // Track unique click for sponsor slots before opening link
+    if (channelId === 'slot1' || channelId === 'slot2' || channelId === 'slot3') {
+        trackSponsorClick(channelId, channelUrl);
+    }
+
+    // Open the channel link first
     window.open(channelUrl, '_blank');
 
     _pendingRequests.add(reqKey);
@@ -334,20 +413,42 @@ async function claimChannel(channelId, channelUrl) {
                 const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_channel`, {
                     method:  'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body:    JSON.stringify({ user_id: userId, channel_id: channelId })
+                    body:    JSON.stringify({
+                        user_id:      userId,
+                        channel_id:   channelId,
+                        channel_url:  channelUrl,
+                        claimed_link: channelUrl
+                    })
                 });
                 const data = await res.json();
+
                 if (data.status === "success") {
                     showToast(`🎉 ${data.message}`, "success");
                     if (btn) {
                         btn.disabled         = true;
                         btn.innerText        = "✅ Joined";
                         btn.style.background = "#2ecc71";
+                        btn.onclick          = null;
                     }
                     fetchLiveData();
+
+                } else if (data.status === "not_joined") {
+                    // User has not joined the channel — show Retry
+                    showToast("❌ Please join the channel first, then retry!", "error");
+                    if (btn) {
+                        btn.disabled         = false;
+                        btn.innerText        = "🔄 Retry";
+                        btn.style.background = "#e74c3c";
+                        // onclick stays the same so retry works
+                    }
+
                 } else {
                     showToast(data.message, "error");
-                    if (btn) { btn.disabled = false; btn.innerText = "Join & Claim"; }
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerText = "Join & Claim";
+                        btn.style.background = '';
+                    }
                 }
             } catch (e) {
                 showToast("⚠️ Error! Please retry.", "error");
@@ -436,7 +537,6 @@ async function loadHistory() {
     try {
         const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_history/${userId}`);
         const data = await res.json();
-        // Support both old format (data.history) and new (data.data.history)
         const history = data.history || data.data?.history;
         if (history && history.length > 0) {
             let html = "";
@@ -459,7 +559,7 @@ async function loadHistory() {
 }
 
 // ============================================================
-// SUPPORT — 6h/2 message limit
+// SUPPORT — 1 message per day
 // ============================================================
 async function sendSupport() {
     if (_pendingRequests.has('support')) return;
@@ -535,7 +635,7 @@ async function showAd() {
 }
 
 // ============================================================
-// DEVICE CHECK — fingerprint (soft) + IP check (backend)
+// DEVICE CHECK
 // ============================================================
 async function generateFingerprint() {
     try {
@@ -563,20 +663,47 @@ async function checkDevice() {
         });
         const data = await res.json();
         if (data.status === "blocked") {
-            document.body.innerHTML = `
-                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                    height:100vh;background:#0f172a;color:#e2e8f0;text-align:center;padding:20px;">
-                    <div style="font-size:60px;">🚫</div>
-                    <h2 style="color:#e74c3c;margin:15px 0;">Account Blocked</h2>
-                    <p style="color:#94a3b8;font-size:14px;">Multiple accounts are not allowed.</p>
-                </div>`;
+            showBlockedView();
         }
-    } catch (e) { /* Silent — don't block app on check failure */ }
+    } catch (e) { /* Silent */ }
 }
 
 // ============================================================
 // UTILITY FUNCTIONS
 // ============================================================
+
+/**
+ * Called when the backend confirms a user is blocked.
+ * Hides the full app and shows only the Support/Help tab
+ * so the blocked user can still contact the admin.
+ */
+function showBlockedView() {
+    // Hide every tab-content
+    document.querySelectorAll('.tab-content').forEach(el => {
+        el.style.display = 'none';
+        el.classList.remove('active-tab');
+    });
+
+    // Hide the bottom navigation bar entirely
+    const nav = document.querySelector('.bottom-nav');
+    if (nav) nav.style.display = 'none';
+
+    // Show the help/support tab
+    const helpTab = document.getElementById('help');
+    if (helpTab) {
+        helpTab.style.display = 'block';
+        helpTab.classList.add('active-tab');
+    }
+
+    // Show the blocked banner inside the help tab
+    const banner = document.getElementById('blocked-banner');
+    if (banner) banner.style.display = 'block';
+
+    // Update page title
+    const titleEl = document.getElementById('tab-title');
+    if (titleEl) titleEl.textContent = '🚫 Account Blocked';
+}
+
 function copyEmail() {
     navigator.clipboard.writeText('cdotern.help@gmail.com').catch(() => {});
     const status = document.getElementById('copy-status');
@@ -627,6 +754,9 @@ function switchTab(tabId, el) {
 
 // ============================================================
 // SPONSOR SLOTS — Auto unlock from CONFIG.SPONSORS
+// Slot 1 and Slot 2 use separate channel IDs (slot1, slot2)
+// so they are completely independent from each other.
+// Lock animation is NOT changed.
 // ============================================================
 function initSlots() {
     const s = CONFIG.SPONSORS;
@@ -638,15 +768,23 @@ function initSlots() {
         if (!el) return;
         const overlay = el.querySelector('.lock-overlay');
         if (overlay) overlay.remove();
+
         const btn = el.querySelector('button');
         if (btn) {
-            btn.disabled = false;
+            btn.id            = 'ch-btn-slot1';   // unique ID for slot 1
+            btn.disabled      = false;
             btn.style.opacity = '1';
-            btn.textContent = 'Join & Claim';
-            btn.onclick = () => claimChannel('sponsor1', s.slot1.link);
+            btn.style.background = '#38bdf8';
+            btn.style.color      = '#000';
+            btn.style.fontWeight = '700';
+            btn.textContent   = 'Join & Claim';
+            btn.onclick       = () => claimChannel('slot1', s.slot1.link);
         }
-        const nameEl = el.querySelector('p:first-child');
-        if (nameEl && s.slot1.name) nameEl.textContent = s.slot1.name;
+
+        // Update name and description from config
+        const ps = el.querySelectorAll('p');
+        if (ps[0] && s.slot1.name) ps[0].textContent = s.slot1.name;
+        if (ps[1] && s.slot1.desc) ps[1].textContent = s.slot1.desc;
     }
 
     // ── Slot 2 ──
@@ -655,16 +793,19 @@ function initSlots() {
         if (!el) return;
         const overlay = el.querySelector('.lock-overlay');
         if (overlay) overlay.remove();
-        const btn = document.getElementById('ch-btn-sponsor1');
-        if (btn) {
-            btn.disabled = false;
-            btn.style.opacity = '1';
-            btn.textContent = 'Join & Claim';
-            btn.onclick = () => claimChannel('sponsor1', s.slot2.link);
+
+        // Re-ID the button (was ch-btn-sponsor1, now ch-btn-slot2)
+        const oldBtn = document.getElementById('ch-btn-sponsor1');
+        if (oldBtn) {
+            oldBtn.id            = 'ch-btn-slot2';  // unique ID for slot 2
+            oldBtn.disabled      = false;
+            oldBtn.style.opacity = '1';
+            oldBtn.textContent   = 'Join & Claim';
+            oldBtn.onclick       = () => claimChannel('slot2', s.slot2.link);
         }
     }
 
-    // ── Slot 3 ──
+    // ── Slot 3 ── (partner task — unchanged behaviour)
     if (s.slot3?.active) {
         const el = document.getElementById('sponsor-slot-3');
         if (!el) return;
@@ -683,9 +824,12 @@ function initSlots() {
 }
 
 // ============================================================
-// INIT
+// INIT — Slots first so button IDs exist before updateChannelButtons
 // ============================================================
+initSlots();
 checkDevice();
 fetchLiveData();
 initAdsgram();
-initSlots();
+
+// Leaderboard auto-refresh every 10 minutes
+setInterval(refreshLeaderboard, 10 * 60 * 1000);
