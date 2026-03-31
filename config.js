@@ -62,7 +62,7 @@ const CONFIG = {
         },
 
         slot2: {
-            active: false,
+            active: true,
             icon:   "📢",
             name:   "Sponsor Channel",
             desc:   "Join the channel & earn instantly",
