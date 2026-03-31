@@ -45,11 +45,12 @@
     .tabs {
         display:flex; background:#1e293b;
         border-bottom:1px solid #334155;
+        overflow-x:auto; -webkit-overflow-scrolling:touch;
     }
     .tab-btn {
-        flex:1; padding:12px 0; font-size:13px; font-weight:600;
+        flex:0 0 auto; padding:12px 14px; font-size:12px; font-weight:600;
         background:none; border:none; color:#64748b; cursor:pointer;
-        border-bottom:2px solid transparent;
+        border-bottom:2px solid transparent; white-space:nowrap;
     }
     .tab-btn.active { color:#f1c40f; border-bottom-color:#f1c40f; }
 
@@ -88,6 +89,10 @@
         padding:7px 14px; background:#2ecc71; color:#000;
         border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700;
     }
+    .btn-warn {
+        padding:7px 14px; background:#f39c12; color:#000;
+        border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700;
+    }
 
     /* ── Withdrawal Cards ── */
     .wd-card {
@@ -107,6 +112,18 @@
     }
     .stat-num { font-size:24px; font-weight:700; color:#f1c40f; }
     .stat-lbl { font-size:11px; color:#64748b; margin-top:4px; }
+
+    /* ── Ban List Cards ── */
+    .ban-card {
+        background:#0f172a; border:1px solid #7f1d1d; border-radius:10px;
+        padding:12px 14px; margin-bottom:8px;
+        display:flex; align-items:center; gap:12px;
+    }
+    .ban-avatar { font-size:24px; flex-shrink:0; }
+    .ban-info   { flex:1; min-width:0; }
+    .ban-name   { font-size:13px; font-weight:600; color:#e2e8f0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ban-id     { font-size:11px; color:#64748b; margin-top:2px; }
+    .ban-coins  { font-size:11px; color:#f1c40f; margin-top:1px; }
 
     /* ── Toast ── */
     #toast {
@@ -155,8 +172,10 @@
         <button class="tab-btn active" onclick="switchTab('codes',this)">📝 Codes</button>
         <button class="tab-btn" onclick="switchTab('withdrawals',this)">💸 Withdraw</button>
         <button class="tab-btn" onclick="switchTab('users',this)">👤 Users</button>
+        <button class="tab-btn" onclick="switchTab('ban',this)">🚫 Ban/Unban</button>
         <button class="tab-btn" onclick="switchTab('stats',this)">📊 Stats</button>
         <button class="tab-btn" onclick="switchTab('broadcast',this)">📢 Broadcast</button>
+        <button class="tab-btn" onclick="switchTab('dm',this)">💬 DM</button>
     </div>
 
     <!-- ── CODES TAB ── -->
@@ -217,13 +236,40 @@
     <!-- ── USERS TAB ── -->
     <div id="tab-users" class="section" style="padding:16px;">
         <div class="card">
-            <h4>👤 Search User</h4>
+            <h4>👤 Search & Manage User</h4>
             <div class="code-row">
                 <input class="code-input" id="search-uid" placeholder="Telegram User ID" type="number" style="flex:1;">
                 <button class="btn-success" onclick="searchUser()" style="white-space:nowrap;">Search</button>
             </div>
         </div>
         <div id="user-result"></div>
+    </div>
+
+    <!-- ── BAN / UNBAN TAB ── -->
+    <div id="tab-ban" class="section" style="padding:16px;">
+
+        <!-- Quick Ban by ID -->
+        <div class="card">
+            <h4>🚫 Ban / Unban User</h4>
+            <div class="code-row" style="margin-bottom:14px;">
+                <input class="code-input" id="ban-uid" placeholder="Telegram User ID" type="number" style="flex:1;">
+            </div>
+            <div style="display:flex; gap:8px;">
+                <button class="btn-danger" style="flex:1; padding:10px;" onclick="quickBan()">⛔ Ban User</button>
+                <button class="btn-success" style="flex:1; padding:10px;" onclick="quickUnban()">✅ Unban User</button>
+            </div>
+            <p id="ban-result" style="font-size:12px; color:#64748b; margin-top:10px; text-align:center;"></p>
+        </div>
+
+        <!-- Banned Users List -->
+        <div class="card">
+            <h4 style="display:flex; justify-content:space-between; align-items:center;">
+                <span>⛔ Currently Banned Users</span>
+                <button class="btn-warn" style="padding:5px 10px; font-size:11px;" onclick="loadBannedUsers()">🔄 Refresh</button>
+            </h4>
+            <div id="ban-list"><p class="empty">Click Refresh to load banned users.</p></div>
+        </div>
+
     </div>
 
     <!-- ── STATS TAB ── -->
@@ -247,6 +293,17 @@
             </div>
         </div>
         <button class="btn-save" style="background:#38bdf8;" onclick="loadStats()">🔄 Refresh Stats</button>
+
+        <!-- Sponsor Click Counter -->
+        <div class="card" style="margin-top:16px; border-color:#38bdf8;">
+            <h4 style="color:#38bdf8;">🤝 Sponsor Link Clicks</h4>
+            <p style="font-size:11px; color:#64748b; margin-bottom:12px; margin-top:-8px;">
+                Unique users jo link pe click kiye. Link change hone par automatically reset hota hai.
+            </p>
+            <div id="sponsor-clicks-list">
+                <p class="empty">Click Refresh Stats to load.</p>
+            </div>
+        </div>
     </div>
 
     <!-- ── BROADCAST TAB ── -->
@@ -256,6 +313,31 @@
             <textarea id="bcast-msg" placeholder="Message likhiyo yahan... (Telegram markdown supported)&#10;Example: *Bold*, _italic_, [link](url)"></textarea>
             <button class="btn-save" style="background:#a855f7;" onclick="sendBroadcast()">📤 Send to All</button>
             <p id="bcast-result"></p>
+        </div>
+    </div>
+
+    <!-- ── DM TAB ── -->
+    <div id="tab-dm" class="section" style="padding:16px;">
+        <div class="card">
+            <h4>💬 Direct Message to User</h4>
+            <p style="font-size:11px; color:#64748b; margin-top:-8px; margin-bottom:14px;">
+                Bot ke through ek specific user ko private message bhejein.
+            </p>
+            <div class="code-row" style="margin-bottom:12px;">
+                <input class="code-input" id="dm-uid" placeholder="Telegram User ID" type="number" style="flex:1;">
+            </div>
+            <textarea id="dm-msg" placeholder="Message likhiyo yahan... (Telegram Markdown supported)&#10;Example: *Bold*, _italic_, [link](url)" style="min-height:110px;"></textarea>
+            <button class="btn-save" style="background:#38bdf8; margin-top:4px;" onclick="sendDM()">📩 Message Bhejo</button>
+            <p id="dm-result" style="font-size:12px; margin-top:10px; text-align:center;"></p>
+        </div>
+
+        <div class="card" style="border-color:#334155; margin-top:4px;">
+            <h4 style="color:#64748b; font-size:12px; margin-bottom:6px;">💡 Tips</h4>
+            <ul style="font-size:11px; color:#475569; padding-left:16px; margin:0; line-height:1.8;">
+                <li>User ID pehle <b>👤 Users</b> tab se search kar ke hasil karein</li>
+                <li>User ne agar bot ko block kar rakha hai to message fail hoga</li>
+                <li><code>*bold*</code>, <code>_italic_</code>, <code>[text](url)</code> Markdown supported hai</li>
+            </ul>
         </div>
     </div>
 
@@ -340,6 +422,7 @@ function switchTab(name, el) {
     el.classList.add('active');
     if (name === 'withdrawals') loadWithdrawals();
     if (name === 'stats') loadStats();
+    if (name === 'ban') loadBannedUsers();
 }
 
 // ── Headers ──
@@ -399,7 +482,7 @@ async function loadWithdrawals() {
                     </div>
                     <div class="wd-row">
                         <span class="wd-label">Coins</span>
-                        <span class="wd-value" style="color:#f1c40f;">${w.coins} 🪙</span>
+                        <span class="wd-value" style="color:#f1c40f;">${w.amount || w.coins} 🪙</span>
                     </div>
                     <div class="wd-row">
                         <span class="wd-label">UPI ID</span>
@@ -407,11 +490,11 @@ async function loadWithdrawals() {
                     </div>
                     <div class="wd-row">
                         <span class="wd-label">Date</span>
-                        <span class="wd-value">${w.requested_at ? new Date(w.requested_at).toLocaleString('en-IN') : '—'}</span>
+                        <span class="wd-value">${w.date || '—'}</span>
                     </div>
                     <div class="wd-actions">
-                        <button class="btn-success" onclick="updateWithdrawal('${w.user_id}', ${w.coins}, 'approve')">✅ Approve</button>
-                        <button class="btn-danger"  onclick="updateWithdrawal('${w.user_id}', ${w.coins}, 'reject')">❌ Reject</button>
+                        <button class="btn-success" onclick="updateWithdrawal('${w.user_id}', ${w.amount || w.coins}, 'approve')">✅ Approve</button>
+                        <button class="btn-danger"  onclick="updateWithdrawal('${w.user_id}', ${w.amount || w.coins}, 'reject')">❌ Reject</button>
                     </div>
                 </div>
             `).join('');
@@ -420,7 +503,7 @@ async function loadWithdrawals() {
 }
 
 async function updateWithdrawal(userId, coins, action) {
-    const label = action =�== 'approve' ? 'Approve' : 'Reject';
+    const label = action === 'approve' ? 'Approve' : 'Reject';
     if (!confirm(`${label} withdrawal of ${coins} coins for user ${userId}?`)) return;
     try {
         const res  = await fetch(`${API}/admin/update_withdrawal`, {
@@ -441,21 +524,61 @@ async function updateWithdrawal(userId, coins, action) {
 // ── Stats ──
 async function loadStats() {
     try {
-        const res  = await fetch(`${API}/admin/stats`, { headers: authHeaders() });
-        const data = await res.json();
-        if (data.status === 'success') {
-            document.getElementById('stat-users').textContent    = data.total_users    ?? '—';
-            document.getElementById('stat-pending').textContent  = data.pending        ?? '—';
-            document.getElementById('stat-approved').textContent = data.approved       ?? '—';
-            document.getElementById('stat-coins').textContent    = data.total_coins != null ? (data.total_coins).toLocaleString('en-IN') : '—';
+        const [statsRes, clicksRes] = await Promise.all([
+            fetch(`${API}/admin/stats`,          { headers: authHeaders() }),
+            fetch(`${API}/admin/sponsor_clicks`, { headers: authHeaders() })
+        ]);
+
+        const statsData  = await statsRes.json();
+        const clicksData = await clicksRes.json();
+
+        if (statsData.status === 'success') {
+            document.getElementById('stat-users').textContent    = statsData.total_users    ?? '—';
+            document.getElementById('stat-pending').textContent  = statsData.pending        ?? '—';
+            document.getElementById('stat-approved').textContent = statsData.approved       ?? '—';
+            document.getElementById('stat-coins').textContent    = statsData.total_coins != null ? (statsData.total_coins).toLocaleString('en-IN') : '—';
         }
-    } catch(e) {}
+
+        // Sponsor click counts
+        const clickEl = document.getElementById('sponsor-clicks-list');
+        if (clickEl) {
+            if (clicksData.status === 'success') {
+                const clicks = clicksData.clicks || {};
+                const slots  = ['slot1', 'slot2', 'slot3'];
+                const labels = { slot1: 'Sponsor Slot 1', slot2: 'Sponsor Slot 2', slot3: 'Partner Slot 3' };
+
+                const rows = slots.map(slot => {
+                    const info = clicks[slot];
+                    const count   = info ? info.count    : 0;
+                    const link    = info ? info.link_url : '—';
+                    const shortLink = link.length > 40 ? link.substring(0, 40) + '...' : link;
+                    return `
+                        <div style="background:#0f172a; border:1px solid ${count > 0 ? '#38bdf8' : '#334155'}; border-radius:10px; padding:12px 14px; margin-bottom:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-size:13px; font-weight:600; color:#e2e8f0;">🤝 ${labels[slot]}</span>
+                                <span style="font-size:22px; font-weight:700; color:#38bdf8;">${count}</span>
+                            </div>
+                            <div style="font-size:10px; color:#64748b; margin-top:4px;">unique clicks</div>
+                            <div style="font-size:10px; color:#475569; margin-top:6px; word-break:break-all;">
+                                🔗 ${count > 0 ? shortLink : 'No link active yet'}
+                            </div>
+                        </div>`;
+                }).join('');
+
+                clickEl.innerHTML = rows || '<p class="empty">No sponsor links active.</p>';
+            } else {
+                clickEl.innerHTML = '<p class="empty">Could not load click data.</p>';
+            }
+        }
+    } catch(e) {
+        console.error('loadStats error:', e);
+    }
 }
 
 // ── Search User ──
 async function searchUser() {
     const uid = document.getElementById('search-uid').value.trim();
-    if (!uid) return toast('❌ User ID daalo', 'err');
+    if (!uid) return toast('❌ Enter a User ID', 'err');
     const result = document.getElementById('user-result');
     result.innerHTML = '<p class="empty">Searching...</p>';
     try {
@@ -469,17 +592,17 @@ async function searchUser() {
                     <h4>${banned ? '⛔ BANNED USER' : '✅ Active User'}</h4>
                     <div class="wd-card">
                         <div class="wd-row"><span class="wd-label">User ID</span><span class="wd-value">${u.user_id}</span></div>
-                        <div class="wd-row"><span class="wd-label">Name</span><span class="wd-value">${u.name || '—'}</span></div>
-                        <div class="wd-row"><span class="wd-label">Username</span><span class="wd-value">${u.username ? '@'+u.username : '—'}</span></div>
+                        <div class="wd-row"><span class="wd-label">Name</span><span class="wd-value">${u.username || '—'}</span></div>
                         <div class="wd-row"><span class="wd-label">Coins</span><span class="wd-value" style="color:#f1c40f;">${u.coins || 0} 🪙</span></div>
-                        <div class="wd-row"><span class="wd-label">Referrals</span><span class="wd-value">${(u.referrals || []).length}</span></div>
+                        <div class="wd-row"><span class="wd-label">Referrals</span><span class="wd-value">${(u.referrals || '').split(',').filter(Boolean).length}</span></div>
                         <div class="wd-row"><span class="wd-label">Status</span><span class="wd-value" style="color:${banned ? '#e74c3c' : '#2ecc71'};">${banned ? '⛔ Banned' : '✅ Active'}</span></div>
-                        <div class="wd-row"><span class="wd-label">Joined</span><span class="wd-value">${u.joined_at ? new Date(u.joined_at).toLocaleDateString('en-IN') : '—'}</span></div>
+                        <div class="wd-row"><span class="wd-label">Joined</span><span class="wd-value">${u.joined || '—'}</span></div>
+                        ${u.ip_flagged ? '<div class="wd-row"><span class="wd-label">IP Flag</span><span class="wd-value" style="color:#f39c12;">⚠️ Flagged</span></div>' : ''}
                     </div>
                     <div class="wd-actions">
                         ${banned
-                            ? `<button class="btn-success" onclick="banAction(${u.user_id}, 'unban')">✅ Unban User</button>`
-                            : `<button class="btn-danger"  onclick="banAction(${u.user_id}, 'ban')">⛔ Ban User</button>`
+                            ? `<button class="btn-success" style="flex:1;" onclick="banAction(${u.user_id}, 'unban')">✅ Unban User</button>`
+                            : `<button class="btn-danger"  style="flex:1;" onclick="banAction(${u.user_id}, 'ban')">⛔ Ban User</button>`
                         }
                     </div>
                 </div>`;
@@ -514,12 +637,127 @@ async function banAction(userId, action) {
 document.addEventListener('DOMContentLoaded', () => {
     const s = document.getElementById('search-uid');
     if (s) s.addEventListener('keydown', e => { if (e.key === 'Enter') searchUser(); });
+    const b = document.getElementById('ban-uid');
+    if (b) b.addEventListener('keydown', e => { if (e.key === 'Enter') quickBan(); });
 });
+
+// ── Quick Ban / Unban (from Ban tab) ──
+async function quickBan() {
+    const uid = document.getElementById('ban-uid').value.trim();
+    if (!uid) return toast('❌ Enter a User ID', 'err');
+    if (!confirm(`Ban user ${uid}?`)) return;
+    const result = document.getElementById('ban-result');
+    try {
+        const res  = await fetch(`${API}/admin/ban_user`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ user_id: parseInt(uid) })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            toast('✅ User banned!', 'ok');
+            result.textContent = `⛔ User ${uid} banned successfully.`;
+            result.style.color = '#e74c3c';
+            document.getElementById('ban-uid').value = '';
+            loadBannedUsers();
+        } else {
+            toast('❌ ' + (data.message || 'Failed'), 'err');
+            result.textContent = '❌ ' + (data.message || 'Failed');
+            result.style.color = '#e74c3c';
+        }
+    } catch(e) { toast('❌ Network error', 'err'); }
+}
+
+async function quickUnban() {
+    const uid = document.getElementById('ban-uid').value.trim();
+    if (!uid) return toast('❌ Enter a User ID', 'err');
+    if (!confirm(`Unban user ${uid}?`)) return;
+    const result = document.getElementById('ban-result');
+    try {
+        const res  = await fetch(`${API}/admin/unban_user`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ user_id: parseInt(uid) })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            toast('✅ User unbanned!', 'ok');
+            result.textContent = `✅ User ${uid} unbanned successfully.`;
+            result.style.color = '#2ecc71';
+            document.getElementById('ban-uid').value = '';
+            loadBannedUsers();
+        } else {
+            toast('❌ ' + (data.message || 'Failed'), 'err');
+            result.textContent = '❌ ' + (data.message || 'Failed');
+            result.style.color = '#e74c3c';
+        }
+    } catch(e) { toast('❌ Network error', 'err'); }
+}
+
+// ── Load Banned Users List ──
+async function loadBannedUsers() {
+    const list = document.getElementById('ban-list');
+    list.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        const res  = await fetch(`${API}/admin/list_banned`, { headers: authHeaders() });
+        const data = await res.json();
+        if (data.status === 'success') {
+            const users = data.banned_users || [];
+            if (!users.length) {
+                list.innerHTML = '<p class="empty">✅ No banned users found.</p>';
+                return;
+            }
+            list.innerHTML = `<p style="font-size:11px; color:#64748b; margin-bottom:10px;">Showing ${users.length} banned user(s). Tap Unban to restore.</p>`
+                + users.map(u => `
+                <div class="ban-card">
+                    <span class="ban-avatar">⛔</span>
+                    <div class="ban-info">
+                        <div class="ban-name">${u.username || 'Unknown'}</div>
+                        <div class="ban-id">ID: ${u.user_id}</div>
+                        <div class="ban-coins">${u.coins || 0} 🪙</div>
+                    </div>
+                    <button class="btn-success" style="padding:6px 12px; font-size:11px;" onclick="inlineUnban(${u.user_id}, this)">✅ Unban</button>
+                </div>
+            `).join('');
+        } else {
+            list.innerHTML = '<p class="empty">❌ Error loading banned users.</p>';
+        }
+    } catch(e) {
+        list.innerHTML = '<p class="empty">❌ Network error</p>';
+    }
+}
+
+async function inlineUnban(userId, btn) {
+    if (!confirm(`Unban user ${userId}?`)) return;
+    btn.disabled  = true;
+    btn.innerText = '...';
+    try {
+        const res  = await fetch(`${API}/admin/unban_user`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ user_id: userId })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            toast('✅ User unbanned!', 'ok');
+            // Remove this card from the list
+            btn.closest('.ban-card').remove();
+        } else {
+            toast('❌ Failed', 'err');
+            btn.disabled  = false;
+            btn.innerText = '✅ Unban';
+        }
+    } catch(e) {
+        toast('❌ Network error', 'err');
+        btn.disabled  = false;
+        btn.innerText = '✅ Unban';
+    }
+}
 
 // ── Broadcast ──
 async function sendBroadcast() {
     const msg = document.getElementById('bcast-msg').value.trim();
-    if (!msg) return toast('❌ Message khali hai!', 'err');
+    if (!msg) return toast('❌ Message is empty!', 'err');
     const result = document.getElementById('bcast-result');
     result.textContent = '⏳ Sending...';
     try {
@@ -538,6 +776,43 @@ async function sendBroadcast() {
             toast('❌ Failed', 'err');
         }
     } catch(e) { result.textContent = '❌ Network error'; toast('❌ Network error', 'err'); }
+}
+
+// ── Direct Message ──
+async function sendDM() {
+    const uid = document.getElementById('dm-uid').value.trim();
+    const msg = document.getElementById('dm-msg').value.trim();
+    const resultEl = document.getElementById('dm-result');
+
+    if (!uid) return toast('❌ User ID daalo', 'err');
+    if (!msg) return toast('❌ Message khaali hai!', 'err');
+
+    resultEl.style.color = '#94a3b8';
+    resultEl.textContent = '⏳ Message bheja ja raha hai...';
+
+    try {
+        const res  = await fetch(`${API}/admin/send_dm`, {
+            method:  'POST',
+            headers: authHeaders(),
+            body:    JSON.stringify({ user_id: parseInt(uid), message: msg })
+        });
+        const data = await res.json();
+
+        if (data.status === 'success') {
+            resultEl.style.color = '#4ade80';
+            resultEl.textContent = '✅ ' + data.message;
+            document.getElementById('dm-msg').value = '';
+            toast('✅ Message bheja!', 'ok');
+        } else {
+            resultEl.style.color = '#f87171';
+            resultEl.textContent = '❌ ' + (data.message || 'Message fail ho gaya');
+            toast('❌ Failed', 'err');
+        }
+    } catch(e) {
+        resultEl.style.color = '#f87171';
+        resultEl.textContent = '❌ Network error';
+        toast('❌ Network error', 'err');
+    }
 }
 </script>
 </body>
