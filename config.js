@@ -56,7 +56,7 @@ const CONFIG = {
             icon:   "💼",
             name:   "Sponsor Slot 1",
             desc:   "Contact admin to advertise here",
-            link:   "",
+            link:   "https://youtube.com/shorts/E2g3GuGeDtw?si=p0KQ0f7C37Tc-n9J",
             reward: 10,
             type:   "channel"
         },
@@ -66,7 +66,7 @@ const CONFIG = {
             icon:   "📢",
             name:   "Sponsor Channel",
             desc:   "Join the channel & earn instantly",
-            link:   "https://t.me/YOUR_SPONSOR_CHANNEL",
+            link:   "https://t.me/Cdotchat",
             reward: 10,
             type:   "channel"
         },
@@ -76,7 +76,7 @@ const CONFIG = {
             icon:   "🌟",
             name:   "Partner Task",
             desc:   "Complete the task & enter code to earn",
-            link:   "https://your-partner-link.com",
+            link:   "https://t.me/cdoternoffical",
             reward: 15,
             type:   "task"
         }
