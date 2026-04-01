@@ -768,11 +768,11 @@ async function sendBroadcast() {
         });
         const data = await res.json();
         if (data.status === 'success') {
-            toast('✅ Sent!', 'ok');
-            result.textContent = `✅ Sent to ${data.sent} users, ${data.failed} failed.`;
+            toast('✅ Broadcast started!', 'ok');
+            result.textContent = `✅ ${data.message}`;
             document.getElementById('bcast-msg').value = '';
         } else {
-            result.textContent = '❌ Failed to send';
+            result.textContent = '❌ ' + (data.message || 'Failed to send');
             toast('❌ Failed', 'err');
         }
     } catch(e) { result.textContent = '❌ Network error'; toast('❌ Network error', 'err'); }
