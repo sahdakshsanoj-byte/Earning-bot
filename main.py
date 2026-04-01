@@ -65,6 +65,23 @@ try:
         logger.info("TTL index created on rate_limits.expires_at")
     except Exception as idx_err:
         logger.warning(f"TTL index creation skipped (may already exist): {idx_err}")
+
+    # Performance indexes — critical for 1000+ users
+    _idx_opts = {"background": True}
+    try:
+        users_col.create_index("user_id",     unique=True,  **_idx_opts)
+        users_col.create_index("referred_by",              **_idx_opts)
+        users_col.create_index("coins",                    **_idx_opts)
+        users_col.create_index("ip",          sparse=True,  **_idx_opts)
+        users_col.create_index("fingerprint", sparse=True,  **_idx_opts)
+        users_col.create_index("blocked",     sparse=True,  **_idx_opts)
+        users_col.create_index("joined",                   **_idx_opts)
+        withdrawals_col.create_index("user_id",            **_idx_opts)
+        withdrawals_col.create_index("status",             **_idx_opts)
+        logger.info("MongoDB indexes ensured.")
+    except Exception as idx_err:
+        logger.warning(f"Index creation warning: {idx_err}")
+
     logger.info("MongoDB connected successfully.")
 except Exception as e:
     logger.error(f"MongoDB connection failed: {e}")
@@ -141,14 +158,27 @@ def refresh_leaderboard_loop():
         except Exception as e:
             logger.error(f"Leaderboard refresh error: {e}")
 
+_task_codes_cache      = None
+_task_codes_cache_time = 0.0
+TASK_CODES_CACHE_TTL   = 300  # 5 minutes
+
+
 def get_live_task_codes():
-    """Returns task codes from MongoDB (updated by admin panel), falls back to TASK_CODES."""
+    """Returns task codes from MongoDB with 5-min in-memory cache. Falls back to TASK_CODES."""
+    global _task_codes_cache, _task_codes_cache_time
+    now = time.time()
+    if _task_codes_cache is not None and now - _task_codes_cache_time < TASK_CODES_CACHE_TTL:
+        return _task_codes_cache
     try:
         cfg = config_col.find_one({"_id": "task_codes"})
         if cfg and cfg.get("codes"):
-            return cfg["codes"]
+            _task_codes_cache      = cfg["codes"]
+            _task_codes_cache_time = now
+            return _task_codes_cache
     except Exception:
         pass
+    _task_codes_cache      = TASK_CODES
+    _task_codes_cache_time = now
     return TASK_CODES
 
 def check_admin_token(req):
@@ -326,15 +356,15 @@ def extract_channel_username(url: str) -> str | None:
 
 def verify_channel_membership(channel_id_or_username: str, user_id: int) -> bool:
     """
-    Returns True if user is a member of the channel.
-    Returns True on any error so users are not unfairly blocked.
+    Returns True if user is a confirmed member of the channel.
+    Returns False on API error (fail closed) — prevents reward without actual join.
     """
     try:
         member = bot.get_chat_member(channel_id_or_username, user_id)
         return member.status in ('member', 'administrator', 'creator')
     except Exception as e:
         logger.warning(f"Channel membership check failed for {channel_id_or_username}: {e}")
-        return True  # Fail open — don't block user on API error
+        return False  # Fail closed — do not reward if verification fails
 
 # ============================================================
 # 9. INPUT SANITIZATION
@@ -486,7 +516,8 @@ def withdraw_api():
     if is_rate_limited(f"withdraw_{user_id}", WITHDRAW_COOLDOWN):
         return jsonify({"status": "error", "message": "One withdrawal request allowed per day. Please try again tomorrow."}), 429
 
-    ref_count = users_col.count_documents({"referred_by": str(user_id)})
+    _ref_user = users_col.find_one({"user_id": user_id}, {"referral_count": 1, "_id": 0})
+    ref_count = _ref_user.get("referral_count", 0) if _ref_user else 0
     if ref_count < 5:
         return jsonify({"status": "error", "message": f"You need {5 - ref_count} more referrals to withdraw."}), 400
 
@@ -783,7 +814,11 @@ def click_sponsor_api():
             if user_id not in existing_users:
                 sponsor_clicks_col.update_one(
                     {"_id": slot_id},
-                    {"$inc": {"count": 1}, "$push": {"users": user_id}}
+                    {
+                        "$inc": {"count": 1},
+                        # $push with $slice keeps array capped at 3000 entries max
+                        "$push": {"users": {"$each": [user_id], "$slice": -3000}}
+                    }
                 )
 
         return jsonify({"status": "ok"})
@@ -920,6 +955,7 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None):
                 "username":             username,
                 "coins":                0,
                 "referred_by":          None,
+                "referral_count":       0,
                 "task_completions":     {},
                 "channel_claims":       {},
                 "last_claim_ts":        "",
@@ -935,7 +971,11 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None):
             if referrer_id and str(referrer_id) != str(user_id):
                 referrer = users_col.find_one({"user_id": int(referrer_id)})
                 if referrer:
-                    users_col.update_one({"user_id": int(referrer_id)}, {"$inc": {"coins": 50}})
+                    # Increment both coins AND referral_count atomically
+                    users_col.update_one(
+                        {"user_id": int(referrer_id)},
+                        {"$inc": {"coins": 50, "referral_count": 1}}
+                    )
                     new_user["referred_by"] = str(referrer_id)
                     try:
                         bot.send_message(
@@ -1166,6 +1206,10 @@ def set_task_code(message):
     if task_id not in TASK_CODES:
         return bot.reply_to(message, f"Invalid task ID. Valid: {', '.join(TASK_CODES.keys())}")
     TASK_CODES[task_id] = new_code
+    # Invalidate in-memory cache so the new code is served immediately
+    global _task_codes_cache, _task_codes_cache_time
+    _task_codes_cache      = None
+    _task_codes_cache_time = 0.0
     bot.reply_to(
         message,
         f"\u2705 Task `{task_id}` code updated to `{new_code}`!",
@@ -1451,16 +1495,27 @@ def admin_update_withdrawal():
         logger.info(f"Admin rejected withdrawal for user {uid}, refunded {wd.get('amount', 0)} coins")
     return jsonify({"status": "success"})
 
+_stats_cache      = {}
+_stats_cache_time = 0.0
+STATS_CACHE_TTL   = 60  # seconds
+
+
 @app.route('/admin/stats', methods=['GET'])
 def admin_stats():
+    global _stats_cache, _stats_cache_time
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
+    now = time.time()
+    if _stats_cache and now - _stats_cache_time < STATS_CACHE_TTL:
+        return jsonify(_stats_cache)
     total_users = users_col.count_documents({})
     pending     = withdrawals_col.count_documents({"status": "Pending \u23f3"})
     approved    = withdrawals_col.count_documents({"status": "Approved \u2705"})
     coins_agg   = list(users_col.aggregate([{"$group": {"_id": None, "total": {"$sum": "$coins"}}}]))
     total_coins = coins_agg[0]["total"] if coins_agg else 0
-    return jsonify({"status": "success", "total_users": total_users, "pending": pending, "approved": approved, "total_coins": total_coins})
+    _stats_cache = {"status": "success", "total_users": total_users, "pending": pending, "approved": approved, "total_coins": total_coins}
+    _stats_cache_time = now
+    return jsonify(_stats_cache)
 
 @app.route('/admin/search_user', methods=['GET'])
 def admin_search_user():
@@ -1567,6 +1622,20 @@ def admin_send_dm():
         return jsonify({"status": "error", "message": "Message send nahi ho saka. Telegram error."}), 500
 
 
+def _do_broadcast(msg: str):
+    """Runs broadcast in a background thread with delays to avoid flooding Telegram API."""
+    user_ids = [u["user_id"] for u in users_col.find({}, {"user_id": 1})]
+    sent = failed = 0
+    for uid in user_ids:
+        try:
+            bot.send_message(uid, msg, parse_mode="Markdown")
+            sent += 1
+        except Exception:
+            failed += 1
+        time.sleep(0.05)  # 20 msgs/sec — safe for Telegram rate limits
+    logger.info(f"Broadcast complete: {sent} sent, {failed} failed")
+
+
 @app.route('/admin/broadcast', methods=['POST'])
 def admin_broadcast():
     if not check_admin_token(request):
@@ -1575,16 +1644,9 @@ def admin_broadcast():
     msg  = (data.get("message") or "").strip()
     if not msg:
         return jsonify({"status": "error", "message": "Empty message"}), 400
-    all_users = users_col.find({}, {"user_id": 1})
-    sent = failed = 0
-    for u in all_users:
-        try:
-            bot.send_message(u["user_id"], msg, parse_mode="Markdown")
-            sent += 1
-        except Exception:
-            failed += 1
-    logger.info(f"Broadcast sent: {sent} ok, {failed} failed")
-    return jsonify({"status": "success", "sent": sent, "failed": failed})
+    total = users_col.count_documents({})
+    Thread(target=_do_broadcast, args=(msg,), daemon=True).start()
+    return jsonify({"status": "success", "message": f"Broadcast started for ~{total} users. Sends in background."})
 
 # ============================================================
 # 17. UPTIME PING (for UptimeRobot)
