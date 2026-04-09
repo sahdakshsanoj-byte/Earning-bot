@@ -321,7 +321,7 @@ function applyCompletedTasks(completedList) {
 }
 
 // ============================================================
-// CHANNEL JOIN — 10s countdown, join verify, retry on fail
+// CHANNEL JOIN — 15s countdown, 3-retry backend, retry on fail
 // ============================================================
 function updateChannelButtons(channelClaims) {
     // Regular channels — one-time claim
@@ -345,7 +345,7 @@ function updateChannelButtons(channelClaims) {
             if (typeof claim === 'object' && claim.claimed_link) {
                 alreadyClaimed = (claim.claimed_link === currentLink && currentLink !== '');
             } else if (claim === true) {
-                alreadyClaimed = true; // legacy boolean
+                alreadyClaimed = true;
             }
         }
         if (alreadyClaimed) {
@@ -366,7 +366,7 @@ function updateChannelButtons(channelClaims) {
             if (typeof claim === 'object' && claim.claimed_link) {
                 alreadyClaimed = (claim.claimed_link === currentLink && currentLink !== '');
             } else if (claim === true) {
-                alreadyClaimed = true; // legacy boolean
+                alreadyClaimed = true;
             }
         }
         if (alreadyClaimed) {
@@ -388,13 +388,17 @@ function trackSponsorClick(slotId, linkUrl) {
     }).catch(() => {});
 }
 
+// ============================================================
+// CHANNEL CLAIM — Fixed: 15s countdown, backend retries 3x,
+// Retry button re-opens the channel so user can join again
+// ============================================================
 async function claimChannel(channelId, channelUrl) {
     if (!userId) return showToast("User ID not found!", "error");
 
     const reqKey = `channel_${channelId}`;
     if (_pendingRequests.has(reqKey)) return;
 
-    // Track unique click for sponsor slots before opening link
+    // Track unique click for sponsor slots
     if (channelId === 'slot1' || channelId === 'slot2' || channelId === 'slot3') {
         trackSponsorClick(channelId, channelUrl);
     }
@@ -406,8 +410,9 @@ async function claimChannel(channelId, channelUrl) {
     const btn = document.getElementById(`ch-btn-${channelId}`);
     if (btn) btn.disabled = true;
 
-    startCountdown(10,
-        (s) => { if (btn) btn.innerText = `Claiming in ${s}s...`; },
+    // 15 seconds gives user time to join + Telegram API time to update
+    startCountdown(15,
+        (s) => { if (btn) btn.innerText = `Join & wait ${s}s...`; },
         async () => {
             try {
                 const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_channel`, {
@@ -433,26 +438,37 @@ async function claimChannel(channelId, channelUrl) {
                     fetchLiveData();
 
                 } else if (data.status === "not_joined") {
-                    // User has not joined the channel — show Retry
-                    showToast("❌ Please join the channel first, then retry!", "error");
+                    // Backend tried 3 times — user may not have joined yet
+                    showToast("❌ Join not confirmed! Make sure you joined, then tap Retry.", "error");
                     if (btn) {
                         btn.disabled         = false;
                         btn.innerText        = "🔄 Retry";
                         btn.style.background = "#e74c3c";
-                        // onclick stays the same so retry works
+                        // Retry opens channel again so user can join, then retries claim
+                        btn.onclick = () => {
+                            btn.style.background = '';
+                            btn.innerText        = "Join & Claim";
+                            btn.onclick          = () => claimChannel(channelId, channelUrl);
+                            claimChannel(channelId, channelUrl);
+                        };
                     }
 
                 } else {
                     showToast(data.message, "error");
                     if (btn) {
-                        btn.disabled = false;
-                        btn.innerText = "Join & Claim";
+                        btn.disabled         = false;
+                        btn.innerText        = "Join & Claim";
                         btn.style.background = '';
+                        btn.onclick          = () => claimChannel(channelId, channelUrl);
                     }
                 }
             } catch (e) {
-                showToast("⚠️ Error! Please retry.", "error");
-                if (btn) { btn.disabled = false; btn.innerText = "Join & Claim"; }
+                showToast("⚠️ Connection error! Please retry.", "error");
+                if (btn) {
+                    btn.disabled  = false;
+                    btn.innerText = "🔄 Retry";
+                    btn.onclick   = () => claimChannel(channelId, channelUrl);
+                }
             } finally {
                 _pendingRequests.delete(reqKey);
             }
@@ -771,7 +787,7 @@ function initSlots() {
 
         const btn = el.querySelector('button');
         if (btn) {
-            btn.id            = 'ch-btn-slot1';   // unique ID for slot 1
+            btn.id            = 'ch-btn-slot1';
             btn.disabled      = false;
             btn.style.opacity = '1';
             btn.style.background = '#38bdf8';
@@ -781,7 +797,6 @@ function initSlots() {
             btn.onclick       = () => claimChannel('slot1', s.slot1.link);
         }
 
-        // Update name and description from config
         const ps = el.querySelectorAll('p');
         if (ps[0] && s.slot1.name) ps[0].textContent = s.slot1.name;
         if (ps[1] && s.slot1.desc) ps[1].textContent = s.slot1.desc;
@@ -794,10 +809,9 @@ function initSlots() {
         const overlay = el.querySelector('.lock-overlay');
         if (overlay) overlay.remove();
 
-        // Re-ID the button (was ch-btn-sponsor1, now ch-btn-slot2)
         const oldBtn = document.getElementById('ch-btn-sponsor1');
         if (oldBtn) {
-            oldBtn.id            = 'ch-btn-slot2';  // unique ID for slot 2
+            oldBtn.id            = 'ch-btn-slot2';
             oldBtn.disabled      = false;
             oldBtn.style.opacity = '1';
             oldBtn.textContent   = 'Join & Claim';
@@ -833,3 +847,4 @@ initAdsgram();
 
 // Leaderboard auto-refresh every 10 minutes
 setInterval(refreshLeaderboard, 10 * 60 * 1000);
+
