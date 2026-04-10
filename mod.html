@@ -277,6 +277,7 @@
         <button class="tab-btn active" onclick="switchTab('withdrawals', this)">💸 Withdrawals</button>
         <button class="tab-btn" onclick="switchTab('support', this)">🎧 Support</button>
         <button class="tab-btn" onclick="switchTab('unban', this)">🔓 Unban</button>
+        <button class="tab-btn" onclick="switchTab('msguser', this)">💬 Message</button>
     </div>
 
     <!-- ── WITHDRAWALS TAB ── -->
@@ -308,6 +309,30 @@
         <div class="card" style="background:rgba(241,196,15,0.06); border-color:#f1c40f33;">
             <p style="font-size:12px; color:#94a3b8; line-height:1.6;">
                 ⚠️ <b style="color:#f1c40f;">Important:</b> Unbanning restores full access to the user. Only unban if you have verified their account. You cannot block users from this panel.
+            </p>
+        </div>
+    </div>
+
+    <!-- ── MESSAGE USER TAB ── -->
+    <div id="msguser" class="tab-content">
+        <div class="card">
+            <h4 style="margin-bottom:6px; font-size:15px;">💬 Send Personal Message</h4>
+            <p style="font-size:12px; color:#64748b; margin-bottom:16px;">Send a direct Telegram message to any user by their User ID.</p>
+            <input type="number" id="msg-uid" placeholder="Enter User ID (e.g. 123456789)" style="margin-bottom:12px;">
+            <textarea
+                id="msg-text"
+                placeholder="Type your message here... (max 1000 characters)"
+                style="width:100%; min-height:110px; resize:vertical; background:#1e293b; border:1px solid #334155; border-radius:10px; color:#e2e8f0; padding:12px; font-size:13px; font-family:inherit; margin-bottom:12px;"
+                maxlength="1000"
+            ></textarea>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <span id="msg-char-count" style="font-size:11px; color:#64748b;">0 / 1000</span>
+            </div>
+            <button class="btn btn-primary" id="send-msg-btn" onclick="sendPersonalMessage()">📨 Send Message</button>
+        </div>
+        <div class="card" style="background:rgba(56,189,248,0.06); border-color:#38bdf833;">
+            <p style="font-size:12px; color:#94a3b8; line-height:1.6;">
+                ℹ️ The message will appear in the user's Telegram chat with the bot, labelled <b style="color:#38bdf8;">"Message from Admin"</b>. The user must have started the bot at least once.
             </p>
         </div>
     </div>
@@ -531,6 +556,54 @@ async function sendReply(userId, textareaId, btn) {
 }
 
 // ============================================================
+// PERSONAL MESSAGE
+// ============================================================
+async function sendPersonalMessage() {
+    const uid  = document.getElementById('msg-uid').value.trim();
+    const text = document.getElementById('msg-text').value.trim();
+
+    if (!uid || isNaN(parseInt(uid))) return showToast('Please enter a valid User ID!', 'error');
+    if (!text)                         return showToast('Please enter a message!', 'error');
+    if (text.length > 1000)            return showToast('Message too long (max 1000 chars)!', 'error');
+
+    const btn = document.getElementById('send-msg-btn');
+    if (btn) { btn.disabled = true; btn.innerText = 'Sending...'; }
+
+    try {
+        const res  = await fetch(`${API_BASE}/mod/send_message`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Mod-Token': modToken },
+            body:    JSON.stringify({ user_id: parseInt(uid), message: text })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(`✅ ${data.message}`, 'success');
+            document.getElementById('msg-uid').value   = '';
+            document.getElementById('msg-text').value  = '';
+            document.getElementById('msg-char-count').innerText = '0 / 1000';
+        } else {
+            showToast(data.message || 'Failed to send message!', 'error');
+        }
+    } catch (e) {
+        showToast('Connection error!', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = '📨 Send Message'; }
+    }
+}
+
+// Char counter for message textarea
+document.addEventListener('DOMContentLoaded', () => {
+    const ta    = document.getElementById('msg-text');
+    const count = document.getElementById('msg-char-count');
+    if (ta && count) {
+        ta.addEventListener('input', () => {
+            count.innerText = `${ta.value.length} / 1000`;
+            count.style.color = ta.value.length > 900 ? '#f87171' : '#64748b';
+        });
+    }
+});
+
+// ============================================================
 // UNBAN
 // ============================================================
 async function doUnban() {
@@ -570,4 +643,3 @@ function escapeHtml(text) {
 </script>
 </body>
 </html>
-
