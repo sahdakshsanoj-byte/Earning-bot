@@ -1,4 +1,3 @@
-_stats_cache      = {}
 """
 main.py — Daksh Grand Earn Bot
 ================================
@@ -1736,6 +1735,60 @@ def mod_unban_user():
         return jsonify({"status": "error", "message": "Server error"}), 500
 
 
+@app.route("/mod/send_message", methods=["POST"])
+def mod_send_message():
+    """Send a personal Telegram message to a specific user.
+
+    Requires X-Mod-Token header. The message is delivered via the bot
+    and appears as a notification to the target user.
+
+    Expected JSON body:
+        {
+            "user_id": <int>,
+            "message": <str>   (max 1000 characters)
+        }
+
+    Returns:
+        JSON: Success or error message.
+    """
+    if not check_mod_token(request):
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"status": "error", "message": "No data received"}), 400
+
+    target_id_raw = data.get("user_id")
+    text = sanitize_text(data.get("message", "")).strip()
+
+    if not target_id_raw or not text:
+        return jsonify({"status": "error", "message": "Missing user_id or message"}), 400
+
+    if len(text) > 1000:
+        return jsonify({"status": "error", "message": "Message too long (max 1000 characters)"}), 400
+
+    try:
+        target_id = int(target_id_raw)
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid user ID"}), 400
+
+    try:
+        user = users_col.find_one({"user_id": target_id}, {"_id": 0, "user_id": 1})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found in database"}), 404
+
+        bot.send_message(
+            target_id,
+            f"\U0001f4e9 *Message from Admin:*\n\n{text}",
+            parse_mode="Markdown",
+        )
+        logger.info("Mod sent personal message to user %s.", target_id)
+        return jsonify({"status": "success", "message": f"Message sent to User {target_id}!"})
+    except Exception as exc:
+        logger.error("mod_send_message error for user %s: %s", target_id_raw, exc)
+        return jsonify({"status": "error", "message": f"Failed to deliver: {exc}"}), 500
+
+
 # ============================================================
 # 20. BOT COMMANDS
 # ============================================================
@@ -2156,6 +2209,43 @@ def broadcast(message):
         except Exception:
             failed += 1
     bot.reply_to(message, f"\U0001f4e2 Sent: {sent} | Failed: {failed}")
+
+
+@bot.message_handler(commands=["msg"])
+def send_personal_message_cmd(message):
+    """Handle /msg USER_ID text — admin only, send a personal message to one user.
+
+    Usage: /msg <user_id> <message text>
+
+    Args:
+        message: Telegram Message object.
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+
+    parts = message.text.split(None, 2)
+    if len(parts) < 3:
+        return bot.reply_to(message, "Usage: /msg <user_id> <message text>\nExample: /msg 123456789 Hello there!")
+
+    try:
+        target_id = int(parts[1])
+    except ValueError:
+        return bot.reply_to(message, "\u274c Invalid User ID. Please enter a numeric ID.")
+
+    text = parts[2].strip()
+    if not text:
+        return bot.reply_to(message, "\u274c Message text cannot be empty.")
+
+    try:
+        bot.send_message(
+            target_id,
+            f"\U0001f4e9 *Message from Admin:*\n\n{text}",
+            parse_mode="Markdown",
+        )
+        bot.reply_to(message, f"\u2705 Message sent to User {target_id}!")
+        logger.info("Admin sent personal message to user %s.", target_id)
+    except Exception as exc:
+        bot.reply_to(message, f"\u274c Failed to send message: {exc}")
 
 
 @bot.message_handler(commands=["block"])
@@ -2848,5 +2938,3 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     logger.info("Starting Flask on port %s...", port)
     app.run(host="0.0.0.0", port=port, debug=False)
-
-    
