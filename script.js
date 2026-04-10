@@ -213,6 +213,47 @@ async function claimDaily() {
 }
 
 // ============================================================
+// PROMO CODE
+// ============================================================
+async function redeemPromo() {
+    if (!userId) return showToast("User ID not found!", "error");
+
+    const inputEl = document.getElementById('promo-input');
+    const code    = inputEl ? inputEl.value.trim().toUpperCase() : '';
+
+    if (!code) return showToast("Please enter a promo code!", "error");
+
+    const reqKey = 'redeemPromo';
+    if (_pendingRequests.has(reqKey)) return;
+    _pendingRequests.add(reqKey);
+
+    const btn = document.getElementById('promo-btn');
+    if (btn) { btn.disabled = true; btn.innerText = "Checking..."; }
+
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/redeem_promo`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ user_id: userId, code: code })
+        });
+        const data = await res.json();
+
+        if (data.status === "success") {
+            showToast(`🎉 ${data.message}`, "success");
+            if (inputEl) inputEl.value = '';
+            fetchLiveData();
+        } else {
+            showToast(data.message || "Invalid promo code.", "error");
+        }
+    } catch (e) {
+        showToast("⚠️ Connection error. Please retry.", "error");
+    } finally {
+        _pendingRequests.delete(reqKey);
+        if (btn) { btn.disabled = false; btn.innerText = "Redeem"; }
+    }
+}
+
+// ============================================================
 // WITHDRAW
 // ============================================================
 async function requestWithdraw() {
@@ -847,4 +888,3 @@ initAdsgram();
 
 // Leaderboard auto-refresh every 10 minutes
 setInterval(refreshLeaderboard, 10 * 60 * 1000);
-
