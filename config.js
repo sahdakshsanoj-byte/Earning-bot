@@ -23,7 +23,7 @@ const CONFIG = {
 
     // Website links for Task tab (replace with your own)
     WEB_LINKS: {
-        web1: "https://your-website-1.com",
+        web1: "https://shrtslug.biz/8P5ZF",
         web2: "https://your-website-2.com",
         web3: "https://your-website-3.com"
     },
