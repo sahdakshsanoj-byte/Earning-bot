@@ -31,8 +31,8 @@ const CONFIG = {
     // Telegram channel links — used by channel join buttons
     CHANNELS: {
         official: "https://t.me/cdoternoffical",
-        channel2: "https://t.me/Channel2",
-        channel3: "https://t.me/Channel3"
+        channel2: "https://t.me/chatdotern",
+        channel3: "https://t.me/chatdotern"
     },
 
     // Partner task links — used by Partner Slot code-verify tasks
