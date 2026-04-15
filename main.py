@@ -2983,18 +2983,94 @@ def admin_broadcast():
 # ============================================================
 
 def run_bot() -> None:
-    """Start Telegram bot polling in a loop with automatic restart on crash.
-
-    Runs indefinitely. On exception, waits 5 seconds before restarting
-    to avoid hammering the Telegram API on persistent errors.
-    """
-    logger.info("Starting Telegram bot polling...")
+    """Start Telegram bot polling with a MongoDB single-instance lock."""
+    instance_id = f"{os.getenv('RENDER_INSTANCE_ID') or os.getenv('HOSTNAME') or os.getpid()}-{int(time.time())}"
+    logger.info("Starting Telegram bot polling worker: %s", instance_id)
     while True:
+        if not acquire_bot_polling_lock(instance_id):
+            logger.warning("Another bot polling instance is already active. Retrying in 30s...")
+            time.sleep(30)
+            continue
+
+        stop_event = threading.Event()
+        Thread(target=refresh_bot_polling_lock, args=(instance_id, stop_event), daemon=True).start()
+
         try:
-            bot.polling(none_stop=True, interval=0, timeout=20)
+            try:
+                bot.remove_webhook()
+            except Exception as webhook_exc:
+                logger.warning("Could not remove webhook before polling: %s", webhook_exc)
+
+            bot.polling(none_stop=True, interval=1, timeout=20)
         except Exception as exc:
-            logger.error("Bot polling crashed: %s. Restarting in 5s...", exc)
-            time.sleep(5)
+            error_text = str(exc)
+            if "409" in error_text or "Conflict" in error_text or "getUpdates" in error_text:
+                logger.error(
+                    "Telegram polling conflict detected. Stop other deployments/processes using this BOT_TOKEN. Retrying in 60s: %s",
+                    exc,
+                )
+                time.sleep(60)
+            else:
+                logger.error("Bot polling crashed: %s. Restarting in 5s...", exc)
+                time.sleep(5)
+        finally:
+            stop_event.set()
+            release_bot_polling_lock(instance_id)
+
+
+def acquire_bot_polling_lock(instance_id: str, lease_seconds: int = 90) -> bool:
+    now = datetime.utcnow()
+    expires_at = now + timedelta(seconds=lease_seconds)
+    try:
+        lock = config_col.find_one_and_update(
+            {
+                "_id": "bot_polling_lock",
+                "$or": [
+                    {"expires_at": {"$lte": now}},
+                    {"instance_id": instance_id},
+                    {"expires_at": {"$exists": False}},
+                ],
+            },
+            {
+                "$set": {
+                    "instance_id": instance_id,
+                    "expires_at": expires_at,
+                    "updated_at": now.isoformat(),
+                }
+            },
+            upsert=True,
+            return_document=pymongo.ReturnDocument.AFTER,
+        )
+        return bool(lock and lock.get("instance_id") == instance_id)
+    except pymongo.errors.DuplicateKeyError:
+        return False
+    except Exception as exc:
+        logger.error("Bot polling lock acquire failed: %s", exc)
+        return False
+
+
+def refresh_bot_polling_lock(instance_id: str, stop_event: threading.Event, lease_seconds: int = 90) -> None:
+    while not stop_event.wait(30):
+        now = datetime.utcnow()
+        try:
+            config_col.update_one(
+                {"_id": "bot_polling_lock", "instance_id": instance_id},
+                {
+                    "$set": {
+                        "expires_at": now + timedelta(seconds=lease_seconds),
+                        "updated_at": now.isoformat(),
+                    }
+                },
+            )
+        except Exception as exc:
+            logger.warning("Bot polling lock refresh failed: %s", exc)
+
+
+def release_bot_polling_lock(instance_id: str) -> None:
+    try:
+        config_col.delete_one({"_id": "bot_polling_lock", "instance_id": instance_id})
+    except Exception as exc:
+        logger.warning("Bot polling lock release failed: %s", exc)
 
 
 # ============================================================
