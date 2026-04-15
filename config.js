@@ -24,8 +24,8 @@ const CONFIG = {
     // Website links for Task tab (replace with your own)
     WEB_LINKS: {
         web1: "https://shrtslug.biz/8P5ZF",
-        web2: "https://your-website-2.com",
-        web3: "https://your-website-3.com"
+        web2: "https://shrtslug.biz/8Pd76",
+        web3: "https://shrtslug.biz/8Pd7j"
     },
 
     // Telegram channel links — used by channel join buttons
