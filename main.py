@@ -139,8 +139,8 @@ TASK_CODES = {
     "yt2": "CODE2",
     "yt3": "CODE3",
     "web1": "DASH98",
-    "web2": "SITE2",
-    "web3": "SITE3",
+    "web2": "GYM567",
+    "web3": "SHU234",
     "partner1": "PARTNER1",
 }
 
