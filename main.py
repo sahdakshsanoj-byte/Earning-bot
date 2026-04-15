@@ -1164,95 +1164,95 @@ def watch_ad_api(user_id: int):
         logger.error("watch_ad error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 @app.route("/reward", methods=["GET"])
-  def adsgram_reward():
-      """Secure AdsGram reward callback.
+def adsgram_reward():
+    """Secure AdsGram reward callback.
 
-      Required query parameters:
-          user_id: Telegram user ID of the rewarded user.
-          token: Secret callback token stored in ADSGRAM_REWARD_TOKEN.
-      """
-      client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
-      if client_ip and "," in client_ip:
-          client_ip = client_ip.split(",")[0].strip()
+    Required query parameters:
+        user_id: Telegram user ID of the rewarded user.
+        token: Secret callback token stored in ADSGRAM_REWARD_TOKEN.
+    """
+    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
+    if client_ip and "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
 
-      token = (request.args.get("token") or "").strip()
+    token = (request.args.get("token") or "").strip()
 
-      if not ADSGRAM_REWARD_TOKEN:
-          logger.error("[REWARD] ADSGRAM_REWARD_TOKEN environment variable is not set.")
-          return jsonify({
-              "status": "error",
-              "message": "Server misconfigured. Contact admin.",
-              "data": None,
-          }), 500
+    if not ADSGRAM_REWARD_TOKEN:
+        logger.error("[REWARD] ADSGRAM_REWARD_TOKEN environment variable is not set.")
+        return jsonify({
+            "status": "error",
+            "message": "Server misconfigured. Contact admin.",
+            "data": None,
+        }), 500
 
-      if not token or not hmac.compare_digest(token, ADSGRAM_REWARD_TOKEN):
-          logger.warning(
-              "[REWARD] Invalid token attempt | IP: %s | user_id_param: %s",
-              client_ip,
-              request.args.get("user_id", "missing"),
-          )
-          return jsonify({
-              "status": "error",
-              "message": "Forbidden: invalid or missing token.",
-              "data": None,
-          }), 403
+    if not token or not hmac.compare_digest(token, ADSGRAM_REWARD_TOKEN):
+        logger.warning(
+            "[REWARD] Invalid token attempt | IP: %s | user_id_param: %s",
+            client_ip,
+            request.args.get("user_id", "missing"),
+        )
+        return jsonify({
+            "status": "error",
+            "message": "Forbidden: invalid or missing token.",
+            "data": None,
+        }), 403
 
-      raw_user_id = request.args.get("user_id")
+    raw_user_id = request.args.get("user_id")
 
-      if not raw_user_id:
-          logger.warning("[REWARD] Missing user_id | IP: %s", client_ip)
-          return jsonify({
-              "status": "error",
-              "message": "Missing required parameter: user_id.",
-              "data": None,
-          }), 400
+    if not raw_user_id:
+        logger.warning("[REWARD] Missing user_id | IP: %s", client_ip)
+        return jsonify({
+            "status": "error",
+            "message": "Missing required parameter: user_id.",
+            "data": None,
+        }), 400
 
-      raw_user_id = raw_user_id.strip()
+    raw_user_id = raw_user_id.strip()
 
-      if not raw_user_id.isdigit():
-          logger.warning("[REWARD] Invalid user_id: %s | IP: %s", raw_user_id[:50], client_ip)
-          return jsonify({
-              "status": "error",
-              "message": "Invalid user_id. Must be an integer.",
-              "data": None,
-          }), 400
+    if not raw_user_id.isdigit():
+        logger.warning("[REWARD] Invalid user_id: %s | IP: %s", raw_user_id[:50], client_ip)
+        return jsonify({
+            "status": "error",
+            "message": "Invalid user_id. Must be an integer.",
+            "data": None,
+        }), 400
 
-      user_id = int(raw_user_id)
+    user_id = int(raw_user_id)
 
-      if user_id <= 0:
-          logger.warning("[REWARD] Invalid non-positive user_id: %d | IP: %s", user_id, client_ip)
-          return jsonify({
-              "status": "error",
-              "message": "Invalid user_id. Must be a positive integer.",
-              "data": None,
-          }), 400
+    if user_id <= 0:
+        logger.warning("[REWARD] Invalid non-positive user_id: %d | IP: %s", user_id, client_ip)
+        return jsonify({
+            "status": "error",
+            "message": "Invalid user_id. Must be a positive integer.",
+            "data": None,
+        }), 400
 
-      if is_rate_limited(f"reward_ip_{client_ip}", 10):
-          logger.warning("[REWARD] IP rate limited | IP: %s | user_id: %d", client_ip, user_id)
-          return jsonify({
-              "status": "error",
-              "message": "Too many requests. Please slow down.",
-              "data": None,
-          }), 429
+    if is_rate_limited(f"reward_ip_{client_ip}", 10):
+        logger.warning("[REWARD] IP rate limited | IP: %s | user_id: %d", client_ip, user_id)
+        return jsonify({
+            "status": "error",
+            "message": "Too many requests. Please slow down.",
+            "data": None,
+        }), 429
 
-      logger.info("[REWARD] Valid reward callback | user_id: %d | IP: %s", user_id, client_ip)
+    logger.info("[REWARD] Valid reward callback | user_id: %d | IP: %s", user_id, client_ip)
 
-      try:
-          result = watch_ad_api(user_id)
-          logger.info("[REWARD] Reward processed | user_id: %d | IP: %s", user_id, client_ip)
-          return result
-      except Exception as exc:
-          logger.error(
-              "[REWARD] Error processing reward | user_id: %d | IP: %s | error: %s",
-              user_id,
-              client_ip,
-              exc,
-          )
-          return jsonify({
-              "status": "error",
-              "message": "Server error. Please try again later.",
-              "data": None,
-          }), 500
+    try:
+        result = watch_ad_api(user_id)
+        logger.info("[REWARD] Reward processed | user_id: %d | IP: %s", user_id, client_ip)
+        return result
+    except Exception as exc:
+        logger.error(
+            "[REWARD] Error processing reward | user_id: %d | IP: %s | error: %s",
+            user_id,
+            client_ip,
+            exc,
+        )
+        return jsonify({
+            "status": "error",
+            "message": "Server error. Please try again later.",
+            "data": None,
+        }), 500
 @app.route("/claim_channel", methods=["POST"])
 def claim_channel_api():
     """Claim coins for joining a Telegram channel.
