@@ -1162,6 +1162,22 @@ def watch_ad_api(user_id: int):
         logger.error("watch_ad error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
+    @app.route("/reward", methods=["GET"])
+def adsgram_reward():
+    try:
+        user_id = request.args.get("user_id")
+
+        if not user_id:
+            return jsonify({"status": "error", "message": "Missing user_id"}), 400
+
+        user_id = int(user_id)
+
+        return watch_ad_api(user_id)
+
+    except Exception as exc:
+        logger.error("AdsGram reward error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error"}), 500
+
 
 @app.route("/claim_channel", methods=["POST"])
 def claim_channel_api():
