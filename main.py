@@ -1162,11 +1162,10 @@ def watch_ad_api(user_id: int):
         logger.error("watch_ad error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
-    @app.route("/reward", methods=["GET"])
-    @app.route("/reward", methods=["GET"])
-    def adsgram_reward():
-    try:
-        user_id = request.args.get("user_id")
+@app.route("/reward", methods=["GET"])
+def adsgram_reward():
+try:
+     user_id = request.args.get("user_id")
 
         if not user_id:
             return jsonify({"status": "error", "message": "Missing user_id"}), 400
