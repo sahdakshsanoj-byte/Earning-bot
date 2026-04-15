@@ -1,4 +1,4 @@
-"""
+"""Nana tu wapas Ja
 main.py — Daksh Grand Earn Bot
 ================================
 Telegram earning bot with Flask API backend.
@@ -1163,7 +1163,7 @@ def watch_ad_api(user_id: int):
         return jsonify({"status": "error", "message": "Server error."}), 500
 
     @app.route("/reward", methods=["GET"])
-def adsgram_reward():
+    def adsgram_reward():
     try:
         user_id = request.args.get("user_id")
 
