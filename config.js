@@ -12,7 +12,7 @@ const CONFIG = {
     BOT_USERNAME: "Cdotern_bot",
 
     // Adsgram Block ID — get it from adsgram.ai after registering
-    ADSGRAM_BLOCK_ID: "27821",
+    ADSGRAM_BLOCK_ID: "bot-27821",
 
     // YouTube video links for Task tab (replace with your own)
     YT_LINKS: {
