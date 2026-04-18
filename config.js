@@ -11,9 +11,6 @@ const CONFIG = {
     // Your Telegram bot username (without @)
     BOT_USERNAME: "Cdotern_bot",
 
-    // Adsgram Block ID — get it from adsgram.ai after registering
-    ADSGRAM_BLOCK_ID: "27960",
-
     // YouTube video links for Task tab (replace with your own)
     YT_LINKS: {
         yt1: "https://youtu.be/YOUR_VIDEO_1",
