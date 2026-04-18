@@ -218,7 +218,32 @@
                     </button>
                     <div class="task-input-row">
                         <input type="text" id="partner-1" placeholder="Enter verification code" disabled>
-                        <button class="btn-sm" style="background:#a855f7; opacity:0.5;" disabled>Verify</button>
+                        <button class="btn-sm" style="background:#a855f7; opacity:0.5;" onclick="verifyTask('partner1', 'partner-1')" disabled>Verify</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sponsor Slot 4 — Locked (Code verification partner slot) -->
+            <div id="sponsor-slot-4" class="partner-card">
+                <div class="lock-overlay" style="border-radius:12px;">
+                    <span class="lock-icon">🔒</span>
+                    <span class="lock-label">Slot Available</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                    <span style="font-size:22px;">🚀</span>
+                    <div style="flex:1;">
+                        <p style="font-size:13px; font-weight:700; color:#a855f7; margin:0;">Partner Task 2</p>
+                        <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Open partner link, collect code & verify</p>
+                    </div>
+                    <span style="font-size:12px; color:#f1c40f; font-weight:700;">+15 🪙</span>
+                </div>
+                <div class="card task-item" data-task="partner2" style="background:transparent; padding:0; border:none; margin:0;">
+                    <button class="btn-sm" style="background:#a855f7; width:100%; margin-bottom:8px; opacity:0.5;" disabled>
+                        🔗 Open Partner Link
+                    </button>
+                    <div class="task-input-row">
+                        <input type="text" id="partner-2" placeholder="Enter verification code" disabled>
+                        <button class="btn-sm" style="background:#a855f7; opacity:0.5;" onclick="verifyTask('partner2', 'partner-2')" disabled>Verify</button>
                     </div>
                 </div>
             </div>
