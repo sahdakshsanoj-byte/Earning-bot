@@ -214,10 +214,14 @@
         </div>
 
         <div class="card">
-            <h4>🌟 Partner Task Code</h4>
+            <h4>🌟 Partner Task Codes</h4>
             <div class="code-row">
-                <span class="code-label">Partner Code</span>
+                <span class="code-label">Partner 1</span>
                 <input class="code-input" id="code-partner1" placeholder="PARTNER1">
+            </div>
+            <div class="code-row">
+                <span class="code-label">Partner 2</span>
+                <input class="code-input" id="code-partner2" placeholder="PARTNER2">
             </div>
         </div>
 
@@ -437,7 +441,7 @@ async function loadCodes() {
         const data = await res.json();
         if (data.status === 'success') {
             const codes = data.task_codes;
-            ['yt1','yt2','yt3','web1','web2','web3','partner1'].forEach(k => {
+            ['yt1','yt2','yt3','web1','web2','web3','partner1','partner2'].forEach(k => {
                 const el = document.getElementById('code-' + k);
                 if (el && codes[k]) el.value = codes[k];
             });
@@ -448,7 +452,7 @@ async function loadCodes() {
 // ── Save Codes ──
 async function saveCodes() {
     const codes = {};
-    ['yt1','yt2','yt3','web1','web2','web3','partner1'].forEach(k => {
+    ['yt1','yt2','yt3','web1','web2','web3','partner1','partner2'].forEach(k => {
         const v = document.getElementById('code-' + k)?.value.trim().toUpperCase();
         if (v) codes[k] = v;
     });
