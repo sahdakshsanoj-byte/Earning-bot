@@ -521,7 +521,7 @@ async function claimChannel(channelId, channelUrl) {
 // AD COUNTER
 // ============================================================
 function updateAdCounter(adsToday, adsDate) {
-    const container = document.getElementById('adsgram-container');
+    const container = document.getElementById('ad-reward-container') || document.getElementById('ad-container');
     const today     = new Date().toISOString().split('T')[0];
     const done      = (adsDate === today) ? adsToday : 0;
     const counterEl = document.getElementById('ad-counter');
@@ -652,42 +652,37 @@ async function sendSupport() {
 }
 
 // ============================================================
-// ADSGRAM — watch ad, earn coins
+// MANUAL AD REWARD — claim coins
 // ============================================================
-let AdController = null;
-
-async function initAdsgram() {
-    try {
-        if (window.Adsgram) {
-            AdController = window.Adsgram.init({ blockId: CONFIG.ADSGRAM_BLOCK_ID });
-        }
-    } catch (e) { /* Adsgram not available */ }
-}
-
 async function showAd() {
+    if (!userId) return showToast("User ID not found!", "error");
     if (_pendingRequests.has('showAd')) return;
-    if (!AdController) { showToast("Ad not available right now.", "error"); return; }
     _pendingRequests.add('showAd');
+
+    const btn = document.querySelector('[onclick="showAd()"]');
+    if (btn) { btn.disabled = true; btn.innerText = "Claiming..."; }
+
     try {
-        await AdController.show();
-        const res  = await fetchWithRetry(
-            `${CONFIG.API_BASE_URL}/watch_ad/${userId}`,
+        const res = await fetchWithRetry(
+            `${CONFIG.API_BASE_URL}/claim_ad/${userId}`,
             { method: 'POST' }
         );
         const data = await res.json();
         const adsDone = data.ads_done || data.data?.ads_done;
+
         if (data.status === "success") {
             showToast(`✅ ${data.message}`, "success");
             const counterEl = document.getElementById('ad-counter');
             if (counterEl && adsDone !== undefined) counterEl.innerText = `${adsDone}/5`;
             fetchLiveData();
         } else {
-            showToast(data.message, "error");
+            showToast(data.message || "Unable to claim ad reward.", "error");
         }
     } catch (e) {
-        showToast("Ad skipped — no coins awarded.", "error");
+        showToast("⚠️ Connection error. Please retry.", "error");
     } finally {
         _pendingRequests.delete('showAd');
+        if (btn) { btn.disabled = false; btn.innerText = "Claim Ad Reward"; }
     }
 }
 
@@ -770,20 +765,46 @@ function copyEmail() {
     }
 }
 
-function inviteFriend() {
+async function inviteFriend() {
+    if (!userId) return showToast("User ID not found!", "error");
+    if (_pendingRequests.has('inviteFriend')) return;
+    _pendingRequests.add('inviteFriend');
+
     const link = `https://t.me/${CONFIG.BOT_USERNAME}?start=${userId}`;
-    if (tg && tg.openTelegramLink) {
-        tg.openTelegramLink(
-            `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Join Daksh Grand Earn and earn free coins! 🚀')}`
+    const btn = document.querySelector('[onclick="inviteFriend()"]');
+    if (btn) { btn.disabled = true; btn.innerText = "Sending..."; }
+
+    try {
+        const res = await fetchWithRetry(
+            `${CONFIG.API_BASE_URL}/send_referral_invite/${userId}`,
+            { method: 'POST' }
         );
-    } else if (navigator.share) {
-        navigator.share({ text: `Join Daksh Grand Earn and earn free coins! 🚀\n${link}` });
-    } else {
-        navigator.clipboard.writeText(link).catch(() => {});
-        showToast("✅ Invite link copied!", "success");
+        const data = await res.json();
+
+        if (data.status === "success") {
+            showToast("✅ Referral banner sent in Telegram!", "success");
+            if (tg && tg.openTelegramLink) tg.openTelegramLink(link);
+        } else {
+            throw new Error(data.message || "Unable to send referral invite.");
+        }
+    } catch (e) {
+        const shareText = '💰 Earn coins daily by watching ads & completing tasks! 🚀 Join now and start earning instantly!';
+        if (tg && tg.openTelegramLink) {
+            tg.openTelegramLink(
+                `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(shareText)}`
+            );
+        } else if (navigator.share) {
+            navigator.share({ text: `${shareText}
+${link}` }).catch(() => {});
+        } else {
+            navigator.clipboard.writeText(link).catch(() => {});
+            showToast("✅ Invite link copied!", "success");
+        }
+    } finally {
+        _pendingRequests.delete('inviteFriend');
+        if (btn) { btn.disabled = false; btn.innerText = "Invite Friends"; }
     }
 }
-
 function switchTab(tabId, el) {
     document.querySelectorAll('.tab-content').forEach(t => {
         t.style.display = 'none';
@@ -884,7 +905,6 @@ function initSlots() {
 initSlots();
 checkDevice();
 fetchLiveData();
-initAdsgram();
 
 // Leaderboard auto-refresh every 10 minutes
 setInterval(refreshLeaderboard, 10 * 60 * 1000);
