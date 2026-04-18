@@ -13,10 +13,10 @@ Environment Variables Required:
     RENDER_URL   : Render deploy URL (for uptime ping)
     FRONTEND_URL : Frontend GitHub Pages URL
     ADMIN_TOKEN  : Secret token for Admin Panel API
-    ADSGRAM_REWARD_TOKEN : Secret token for AdsGram reward callback
 """
 
 import hmac
+import html
 import hashlib
 import json
 import logging
@@ -59,7 +59,6 @@ RENDER_URL = (os.getenv("RENDER_URL") or "").strip()
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "https://sahdakshsanoj-byte.github.io").strip()
 ADMIN_TOKEN    = (os.getenv("ADMIN_TOKEN")    or "").strip()
 MOD_TOKEN      = (os.getenv("MOD_TOKEN")      or "").strip()
-ADSGRAM_REWARD_TOKEN = (os.getenv("ADSGRAM_REWARD_TOKEN") or "").strip()
 # Webhook secret — auto-derived from BOT_TOKEN so you don't need to set it manually
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:32] if BOT_TOKEN else ""
 
@@ -99,6 +98,8 @@ try:
     sponsor_clicks_col   = db["sponsor_clicks"]
     promos_col           = db["promos"]
     support_messages_col = db["support_messages"]
+    code_filter_rules_col = db["code_filter_rules"]
+    group_code_violations_col = db["group_code_violations"]
 
     # TTL index on rate_limits — auto-expire documents
     try:
@@ -122,6 +123,8 @@ try:
         promos_col.create_index("code", unique=True, **_idx_opts)
         support_messages_col.create_index("user_id", **_idx_opts)
         support_messages_col.create_index("created_at", **_idx_opts)
+        code_filter_rules_col.create_index("pattern", unique=True, **_idx_opts)
+        group_code_violations_col.create_index([("chat_id", 1), ("user_id", 1)], unique=True, **_idx_opts)
         logger.info("MongoDB indexes ensured.")
     except Exception as idx_err:
         logger.warning("Index creation warning: %s", idx_err)
@@ -144,6 +147,7 @@ TASK_CODES = {
     "web2": "GYM567",
     "web3": "SHU234",
     "partner1": "PARTNER1",
+    "partner2": "PARTNER2",
 }
 
 TASK_REWARDS = {
@@ -154,6 +158,7 @@ TASK_REWARDS = {
     "web2": 15,
     "web3": 15,
     "partner1": 15,
+    "partner2": 15,
 }
 
 CHANNEL_REWARDS = {
@@ -166,6 +171,10 @@ CHANNEL_REWARDS = {
 
 MAX_ADS_PER_DAY = 5
 AD_COIN_REWARD = 10
+REFERRAL_BANNER_IMAGE = (
+    os.getenv("REFERRAL_BANNER_IMAGE")
+    or "attached_assets/1774943452049_1776522320549.png"
+).strip()
 MIN_WITHDRAW = 4000
 MAX_WITHDRAW = 100000
 WITHDRAW_COOLDOWN = 86400     # 24 hours
@@ -175,6 +184,14 @@ TASK_FAIL_COOLDOWN = 60
 TASK_MAX_FAILS = 3
 
 VALID_TASK_IDS = set(TASK_CODES.keys())
+
+GROUP_CODE_FILTER_ENABLED = True
+GROUP_CODE_MAX_VIOLATIONS = 3
+GROUP_CODE_VIOLATION_WINDOW_HOURS = 24
+DEFAULT_GROUP_CODE_PATTERNS = [
+    r"\b[A-Z]{3}\b",
+    r"\b\d{3}\b",
+]
 
 
 # ============================================================
@@ -653,6 +670,93 @@ def sanitize_text(value: str, max_length: int = 1000) -> str:
     return value.strip()[:max_length]
 
 
+def is_group_chat(message) -> bool:
+    return getattr(message.chat, "type", "") in ("group", "supergroup")
+
+
+def get_bot_user_id() -> int | None:
+    if not hasattr(get_bot_user_id, "_bot_id"):
+        try:
+            get_bot_user_id._bot_id = bot.get_me().id
+        except Exception as exc:
+            logger.warning("Unable to fetch bot user ID: %s", exc)
+            get_bot_user_id._bot_id = None
+    return get_bot_user_id._bot_id
+
+
+def bot_has_group_moderation_rights(chat_id: int) -> tuple[bool, bool]:
+    bot_id = get_bot_user_id()
+    if not bot_id:
+        return False, False
+    try:
+        member = bot.get_chat_member(chat_id, bot_id)
+        if member.status == "creator":
+            return True, True
+        if member.status != "administrator":
+            return False, False
+        can_delete = bool(getattr(member, "can_delete_messages", False))
+        can_ban = bool(getattr(member, "can_restrict_members", False))
+        return can_delete, can_ban
+    except Exception as exc:
+        logger.warning("Unable to check bot moderation rights in chat %s: %s", chat_id, exc)
+        return False, False
+
+
+def get_group_code_patterns() -> list[str]:
+    patterns = list(DEFAULT_GROUP_CODE_PATTERNS)
+    try:
+        custom_rules = code_filter_rules_col.find({"active": True}, {"pattern": 1, "_id": 0})
+        patterns.extend(rule["pattern"] for rule in custom_rules if rule.get("pattern"))
+    except Exception as exc:
+        logger.warning("Unable to load custom group code patterns: %s", exc)
+    return patterns
+
+
+def message_matches_group_code_filter(text: str) -> str | None:
+    if not text:
+        return None
+    for pattern in get_group_code_patterns():
+        try:
+            if re.search(pattern, text):
+                return pattern
+        except re.error as exc:
+            logger.warning("Invalid group code filter pattern '%s': %s", pattern, exc)
+    return None
+
+
+def record_group_code_violation(chat_id: int, user_id: int) -> int:
+    now = datetime.utcnow()
+    window_start = now - timedelta(hours=GROUP_CODE_VIOLATION_WINDOW_HOURS)
+    try:
+        current = group_code_violations_col.find_one({"chat_id": chat_id, "user_id": user_id})
+        if current:
+            last_violation_raw = current.get("last_violation_at", "")
+            try:
+                last_violation_at = datetime.fromisoformat(last_violation_raw)
+            except Exception:
+                last_violation_at = now
+            if last_violation_at < window_start:
+                count = 1
+            else:
+                count = int(current.get("count", 0)) + 1
+        else:
+            count = 1
+        group_code_violations_col.update_one(
+            {"chat_id": chat_id, "user_id": user_id},
+            {
+                "$set": {
+                    "count": count,
+                    "last_violation_at": now.isoformat(),
+                }
+            },
+            upsert=True,
+        )
+        return count
+    except Exception as exc:
+        logger.error("Unable to record group code violation for %s in %s: %s", user_id, chat_id, exc)
+        return 1
+
+
 # ============================================================
 # 13. FLASK + BOT SETUP
 # ============================================================
@@ -724,6 +828,57 @@ def get_referral_list(user_id: int) -> str:
     except Exception as exc:
         logger.error("get_referral_list error for %s: %s", user_id, exc)
         return ""
+
+
+def send_referral_invite(user_id: int) -> bool:
+    """Send referral banner, caption, and join button to a Telegram user."""
+    bot_username = BOT_USERNAME.lstrip("@")
+    referral_link = f"https://t.me/{bot_username}?start={user_id}"
+    user = users_col.find_one({"user_id": user_id}, {"username": 1, "_id": 0}) or {}
+    first_name = html.escape(str(user.get("username") or "Friend"))
+
+    caption = (
+        f"💰 <b>{first_name}, invite your friends & earn more!</b>\n\n"
+        "🚀 Earn coins daily by watching ads, completing tasks, and growing your referral team.\n\n"
+        "🎁 <b>Referral Bonus:</b> Get <b>50 coins</b> for every friend who joins with your link.\n\n"
+        f"🔗 <b>Your referral link:</b>\n{html.escape(referral_link)}\n\n"
+        "Start sharing now and boost your earnings instantly!"
+    )
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🚀 Join Now", url=referral_link))
+
+    try:
+        if REFERRAL_BANNER_IMAGE.startswith(("http://", "https://")):
+            bot.send_photo(
+                user_id,
+                REFERRAL_BANNER_IMAGE,
+                caption=caption,
+                reply_markup=markup,
+                parse_mode="HTML",
+            )
+        elif os.path.exists(REFERRAL_BANNER_IMAGE):
+            with open(REFERRAL_BANNER_IMAGE, "rb") as banner:
+                bot.send_photo(
+                    user_id,
+                    banner,
+                    caption=caption,
+                    reply_markup=markup,
+                    parse_mode="HTML",
+                )
+        else:
+            logger.warning("Referral banner image not found: %s", REFERRAL_BANNER_IMAGE)
+            bot.send_message(
+                user_id,
+                caption,
+                reply_markup=markup,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+        return True
+    except Exception as exc:
+        logger.error("send_referral_invite error for %s: %s", user_id, exc)
+        return False
 
 
 def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
@@ -835,10 +990,11 @@ def get_user_data_api(user_id: int):
         ads_today = user.get("ads_today", 0) if ads_date == today else 0
 
         task_completions = user.get("task_completions", {})
+        live_task_codes = get_live_task_codes()
         completed_today = []
         for tid, info in task_completions.items():
             if isinstance(info, dict):
-                if info.get("date") == today and info.get("code") == TASK_CODES.get(tid, ""):
+                if info.get("date") == today and info.get("code") == live_task_codes.get(tid, ""):
                     completed_today.append(tid)
 
         return jsonify(
@@ -1117,142 +1273,100 @@ def verify_task_api():
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
-@app.route("/watch_ad/<int:user_id>", methods=["POST"])
-def watch_ad_api(user_id: int):
-    """Credit coins after a user watches an ad.
+def manual_ad_reward(user_id: int) -> tuple[dict, int]:
+    """Credit coins for a manually claimed ad reward.
 
-    Enforces a 30-second cooldown and a daily limit of MAX_ADS_PER_DAY ads.
+    Enforces a 30-second cooldown, daily ad claim limit, user existence,
+    and blocked-account checks before adding coins.
 
     Args:
-        user_id: Telegram user ID (URL path parameter).
+        user_id: Telegram user ID.
 
     Returns:
-        JSON: Success with ad count info, or error with descriptive message.
+        tuple[dict, int]: JSON-ready response payload and HTTP status code.
     """
-    if is_rate_limited(f"ad_{user_id}", 30):
-        return jsonify({"status": "error", "message": "Please wait 30 seconds before the next ad."}), 429
+    if user_id <= 0:
+        return {"status": "error", "message": "Invalid user ID."}, 400
+
+    if is_rate_limited(f"manual_ad_{user_id}", 30):
+        return {
+            "status": "error",
+            "message": "Please wait 30 seconds before claiming the next ad reward.",
+        }, 429
+
     try:
         user = users_col.find_one({"user_id": user_id})
         if not user:
-            return jsonify({"status": "error", "message": "User not found."}), 404
+            return {"status": "error", "message": "User not found."}, 404
         if user.get("blocked"):
-            return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
+            return {"status": "error", "message": "Your account has been blocked."}, 403
 
         today = str(date.today())
         ads_date = user.get("ads_date", "")
         ads_today = user.get("ads_today", 0) if ads_date == today else 0
 
         if ads_today >= MAX_ADS_PER_DAY:
-            return jsonify(
-                {"status": "error", "message": f"Daily ad limit reached ({MAX_ADS_PER_DAY}/5). Come back tomorrow!"}
-            ), 400
+            return {
+                "status": "error",
+                "message": f"Daily ad limit reached ({MAX_ADS_PER_DAY}/{MAX_ADS_PER_DAY}). Come back tomorrow!",
+                "data": {
+                    "ads_done": ads_today,
+                    "ads_total": MAX_ADS_PER_DAY,
+                    "remaining": 0,
+                },
+            }, 400
 
-        users_col.update_one(
-            {"user_id": user_id},
-            {"$inc": {"coins": AD_COIN_REWARD}, "$set": {"ads_date": today, "ads_today": ads_today + 1}},
-        )
         done = ads_today + 1
         remaining = MAX_ADS_PER_DAY - done
-        return jsonify(
+        users_col.update_one(
+            {"user_id": user_id},
             {
-                "status": "success",
-                "message": f"{AD_COIN_REWARD} coins earned! ({done}/{MAX_ADS_PER_DAY} ads today)",
-                "data": {"ads_done": done, "ads_total": MAX_ADS_PER_DAY, "remaining": remaining},
-            }
+                "$inc": {"coins": AD_COIN_REWARD},
+                "$set": {"ads_date": today, "ads_today": done},
+            },
         )
+
+        return {
+            "status": "success",
+            "message": f"{AD_COIN_REWARD} coins earned! ({done}/{MAX_ADS_PER_DAY} ad rewards claimed today)",
+            "data": {
+                "reward": AD_COIN_REWARD,
+                "ads_done": done,
+                "ads_total": MAX_ADS_PER_DAY,
+                "remaining": remaining,
+            },
+        }, 200
     except Exception as exc:
-        logger.error("watch_ad error for %s: %s", user_id, exc)
-        return jsonify({"status": "error", "message": "Server error."}), 500
-@app.route("/reward", methods=["GET"])
-def adsgram_reward():
-    """Secure AdsGram reward callback.
+        logger.error("manual_ad_reward error for %s: %s", user_id, exc)
+        return {"status": "error", "message": "Server error."}, 500
 
-    Required query parameters:
-        user_id: Telegram user ID of the rewarded user.
-        token: Secret callback token stored in ADSGRAM_REWARD_TOKEN.
-    """
-    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
-    if client_ip and "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
 
-    token = (request.args.get("token") or "").strip()
+@app.route("/claim_ad/<int:user_id>", methods=["POST"])
+def claim_ad_api(user_id: int):
+    """Manual ad reward endpoint."""
+    payload, status_code = manual_ad_reward(user_id)
+    return jsonify(payload), status_code
 
-    if not ADSGRAM_REWARD_TOKEN:
-        logger.error("[REWARD] ADSGRAM_REWARD_TOKEN environment variable is not set.")
-        return jsonify({
-            "status": "error",
-            "message": "Server misconfigured. Contact admin.",
-            "data": None,
-        }), 500
 
-    if not token or not hmac.compare_digest(token, ADSGRAM_REWARD_TOKEN):
-        logger.warning(
-            "[REWARD] Invalid token attempt | IP: %s | user_id_param: %s",
-            client_ip,
-            request.args.get("user_id", "missing"),
-        )
-        return jsonify({
-            "status": "error",
-            "message": "Forbidden: invalid or missing token.",
-            "data": None,
-        }), 403
-
-    raw_user_id = request.args.get("user_id")
-
-    if not raw_user_id:
-        logger.warning("[REWARD] Missing user_id | IP: %s", client_ip)
-        return jsonify({
-            "status": "error",
-            "message": "Missing required parameter: user_id.",
-            "data": None,
-        }), 400
-
-    raw_user_id = raw_user_id.strip()
-
-    if not raw_user_id.isdigit():
-        logger.warning("[REWARD] Invalid user_id: %s | IP: %s", raw_user_id[:50], client_ip)
-        return jsonify({
-            "status": "error",
-            "message": "Invalid user_id. Must be an integer.",
-            "data": None,
-        }), 400
-
-    user_id = int(raw_user_id)
-
+@app.route("/send_referral_invite/<int:user_id>", methods=["POST"])
+def send_referral_invite_api(user_id: int):
+    """Send the referral invite banner to a user from the web app."""
     if user_id <= 0:
-        logger.warning("[REWARD] Invalid non-positive user_id: %d | IP: %s", user_id, client_ip)
-        return jsonify({
-            "status": "error",
-            "message": "Invalid user_id. Must be a positive integer.",
-            "data": None,
-        }), 400
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+    if is_rate_limited(f"referral_invite_{user_id}", 5):
+        return jsonify({"status": "error", "message": "Please wait a moment before trying again."}), 429
 
-    if is_rate_limited(f"reward_ip_{client_ip}", 10):
-        logger.warning("[REWARD] IP rate limited | IP: %s | user_id: %d", client_ip, user_id)
-        return jsonify({
-            "status": "error",
-            "message": "Too many requests. Please slow down.",
-            "data": None,
-        }), 429
+    user = users_col.find_one({"user_id": user_id}, {"blocked": 1})
+    if not user:
+        return jsonify({"status": "error", "message": "User not found."}), 404
+    if user.get("blocked"):
+        return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
 
-    logger.info("[REWARD] Valid reward callback | user_id: %d | IP: %s", user_id, client_ip)
+    if send_referral_invite(user_id):
+        return jsonify({"status": "success", "message": "Referral invite sent in Telegram."})
+    return jsonify({"status": "error", "message": "Unable to send invite right now."}), 500
 
-    try:
-        result = watch_ad_api(user_id)
-        logger.info("[REWARD] Reward processed | user_id: %d | IP: %s", user_id, client_ip)
-        return result
-    except Exception as exc:
-        logger.error(
-            "[REWARD] Error processing reward | user_id: %d | IP: %s | error: %s",
-            user_id,
-            client_ip,
-            exc,
-        )
-        return jsonify({
-            "status": "error",
-            "message": "Server error. Please try again later.",
-            "data": None,
-        }), 500
+
 @app.route("/claim_channel", methods=["POST"])
 def claim_channel_api():
     """Claim coins for joining a Telegram channel.
@@ -1911,10 +2025,7 @@ def start(message):
     markup.add(
         types.InlineKeyboardButton(
             "\U0001f465 Invite Friends",
-            url=(
-                f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}?start={user_id}"
-                f"&text=Join+and+earn+free+coins!"
-            ),
+            callback_data="invite_friends",
         )
     )
 
@@ -1927,6 +2038,26 @@ def start(message):
         reply_markup=markup,
         parse_mode="Markdown",
     )
+
+
+@bot.message_handler(commands=["invite"])
+def invite_command(message):
+    """Handle /invite command — send the referral invite banner."""
+    user_id = message.from_user.id
+    get_or_create_user(user_id, message.from_user.first_name or "User")
+    if not send_referral_invite(user_id):
+        bot.reply_to(message, "Unable to send invite right now. Please try again later.")
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "invite_friends")
+def invite_friends_callback(call):
+    """Handle Invite Friends button click."""
+    user_id = call.from_user.id
+    get_or_create_user(user_id, call.from_user.first_name or "User")
+    if send_referral_invite(user_id):
+        bot.answer_callback_query(call.id, "Referral invite sent!")
+    else:
+        bot.answer_callback_query(call.id, "Unable to send invite. Try again later.", show_alert=True)
 
 
 @bot.message_handler(commands=["balance"])
@@ -2568,6 +2699,7 @@ def admin_panel(message):
         f"`/approve <id>` — Approve withdrawal\n"
         f"`/reject <id>` — Reject withdrawal\n"
         f"`/addcoins <id> <amt>` — Add coins\n"
+        f"`/msg <id> <message>` — Message one user\n"
         f"`/userinfo <id>` — View user details\n"
         f"`/listblocked` — List all blocked users\n"
         f"`/settask <task\\_id> <code>` — Update task code\n"
@@ -2924,7 +3056,11 @@ def admin_send_dm():
     if not user:
         return jsonify({"status": "error", "message": f"User {uid} is not registered in the bot."}), 404
     try:
-        bot.send_message(uid, msg, parse_mode="Markdown")
+        try:
+            bot.send_message(uid, msg, parse_mode="Markdown")
+        except Exception as markdown_exc:
+            logger.warning("Markdown DM failed for %s, retrying as plain text: %s", uid, markdown_exc)
+            bot.send_message(uid, msg)
         logger.info("Admin sent DM to %s", uid)
         return jsonify({"status": "success", "message": f"Message sent to user {uid}!"})
     except Exception as exc:
@@ -2976,6 +3112,180 @@ def admin_broadcast():
     total = users_col.count_documents({})
     Thread(target=_do_broadcast, args=(msg,), daemon=True).start()
     return jsonify({"status": "success", "message": f"Broadcast started for ~{total} users."})
+
+
+@bot.message_handler(commands=["addcodefilter"])
+def add_code_filter_command(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split(None, 1)
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /addcodefilter CODE\nExample: /addcodefilter ABC")
+    code = parts[1].strip()
+    if not code or len(code) > 80:
+        return bot.reply_to(message, "Invalid code. Maximum length is 80 characters.")
+    pattern = rf"\b{re.escape(code)}\b"
+    try:
+        code_filter_rules_col.update_one(
+            {"pattern": pattern},
+            {
+                "$set": {
+                    "pattern": pattern,
+                    "label": code,
+                    "active": True,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "created_by": ADMIN_ID,
+                }
+            },
+            upsert=True,
+        )
+        bot.reply_to(message, f"Code filter added: {code}")
+    except Exception as exc:
+        logger.error("add_code_filter_command error: %s", exc)
+        bot.reply_to(message, "Server error while adding code filter.")
+
+
+@bot.message_handler(commands=["addcodepattern"])
+def add_code_pattern_command(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split(None, 1)
+    if len(parts) < 2:
+        return bot.reply_to(message, r"Usage: /addcodepattern REGEX\nExample: /addcodepattern \b[A-Z]{4}\b")
+    pattern = parts[1].strip()
+    if not pattern or len(pattern) > 200:
+        return bot.reply_to(message, "Invalid pattern. Maximum length is 200 characters.")
+    try:
+        re.compile(pattern)
+        code_filter_rules_col.update_one(
+            {"pattern": pattern},
+            {
+                "$set": {
+                    "pattern": pattern,
+                    "label": pattern,
+                    "active": True,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "created_by": ADMIN_ID,
+                }
+            },
+            upsert=True,
+        )
+        bot.reply_to(message, f"Code pattern added: {pattern}")
+    except re.error as exc:
+        bot.reply_to(message, f"Invalid regex pattern: {exc}")
+    except Exception as exc:
+        logger.error("add_code_pattern_command error: %s", exc)
+        bot.reply_to(message, "Server error while adding code pattern.")
+
+
+@bot.message_handler(commands=["listcodefilters"])
+def list_code_filters_command(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        rules = list(code_filter_rules_col.find({"active": True}, {"_id": 0, "label": 1, "pattern": 1}).limit(50))
+        lines = [
+            "Active group code filters:",
+            "Default: uppercase 3-letter codes",
+            "Default: 3-number codes",
+        ]
+        for idx, rule in enumerate(rules, start=1):
+            lines.append(f"{idx}. {rule.get('label') or rule.get('pattern')}")
+        bot.reply_to(message, "\n".join(lines))
+    except Exception as exc:
+        logger.error("list_code_filters_command error: %s", exc)
+        bot.reply_to(message, "Server error while listing code filters.")
+
+
+@bot.message_handler(commands=["delcodefilter"])
+def delete_code_filter_command(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split(None, 1)
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /delcodefilter CODE")
+    code = parts[1].strip()
+    exact_pattern = rf"\b{re.escape(code)}\b"
+    try:
+        result = code_filter_rules_col.update_many(
+            {"$or": [{"label": code}, {"pattern": code}, {"pattern": exact_pattern}]},
+            {"$set": {"active": False, "deleted_at": datetime.utcnow().isoformat()}},
+        )
+        if result.modified_count:
+            bot.reply_to(message, f"Code filter removed: {code}")
+        else:
+            bot.reply_to(message, "No matching custom code filter found.")
+    except Exception as exc:
+        logger.error("delete_code_filter_command error: %s", exc)
+        bot.reply_to(message, "Server error while deleting code filter.")
+
+
+@bot.message_handler(commands=["resetcodeviolations"])
+def reset_code_violations_command(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    if not is_group_chat(message):
+        return bot.reply_to(message, "Use this command inside the group where you want to reset violations.")
+    group_code_violations_col.delete_many({"chat_id": message.chat.id})
+    bot.reply_to(message, "Code violation counts reset for this group.")
+
+
+@bot.message_handler(
+    func=lambda message: (
+        GROUP_CODE_FILTER_ENABLED
+        and is_group_chat(message)
+        and bool(getattr(message, "text", ""))
+        and not message.text.strip().startswith("/")
+    ),
+    content_types=["text"],
+)
+def group_code_filter_handler(message):
+    text = message.text or ""
+    matched_pattern = message_matches_group_code_filter(text)
+    if not matched_pattern:
+        return
+
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    can_delete, can_ban = bot_has_group_moderation_rights(chat_id)
+
+    if not can_delete:
+        logger.warning("Group code filter matched in %s but bot cannot delete messages.", chat_id)
+        return
+
+    try:
+        bot.delete_message(chat_id, message.message_id)
+        logger.info(
+            "Deleted group code message | chat_id: %s | user_id: %s | pattern: %s",
+            chat_id,
+            user_id,
+            matched_pattern,
+        )
+    except Exception as exc:
+        logger.warning("Failed to delete group code message in %s from %s: %s", chat_id, user_id, exc)
+        return
+
+    violations = record_group_code_violation(chat_id, user_id)
+    if violations <= GROUP_CODE_MAX_VIOLATIONS:
+        return
+
+    try:
+        member = bot.get_chat_member(chat_id, user_id)
+        if member.status in ("administrator", "creator"):
+            logger.warning("User %s exceeded code violations in %s but is group admin/creator.", user_id, chat_id)
+            return
+    except Exception as exc:
+        logger.warning("Unable to verify user role before ban for %s in %s: %s", user_id, chat_id, exc)
+
+    if not can_ban:
+        logger.warning("User %s exceeded code violations in %s but bot cannot ban users.", user_id, chat_id)
+        return
+
+    try:
+        bot.ban_chat_member(chat_id, user_id)
+        logger.info("Banned user %s from group %s after %s code violations.", user_id, chat_id, violations)
+    except Exception as exc:
+        logger.error("Failed to ban user %s from group %s: %s", user_id, chat_id, exc)
 
 
 # ============================================================
