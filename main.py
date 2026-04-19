@@ -16,17 +16,17 @@ Environment Variables Required:
 """
 
 import hmac
-import html
 import hashlib
 import json
 import logging
 import os
 import re
+import secrets
 import time
 import threading
 from datetime import date, datetime, timedelta
 from threading import Thread
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, quote
 
 import pymongo
 import requests as req_lib
@@ -98,12 +98,14 @@ try:
     sponsor_clicks_col   = db["sponsor_clicks"]
     promos_col           = db["promos"]
     support_messages_col = db["support_messages"]
+    ad_reward_tokens_col = db["ad_reward_tokens"]
     code_filter_rules_col = db["code_filter_rules"]
     group_code_violations_col = db["group_code_violations"]
 
     # TTL index on rate_limits — auto-expire documents
     try:
         rate_col.create_index("expires_at", expireAfterSeconds=0)
+        ad_reward_tokens_col.create_index("expires_at", expireAfterSeconds=0)
         logger.info("TTL index ensured on rate_limits.expires_at")
     except Exception as idx_err:
         logger.warning("TTL index creation skipped (may already exist): %s", idx_err)
@@ -171,10 +173,7 @@ CHANNEL_REWARDS = {
 
 MAX_ADS_PER_DAY = 5
 AD_COIN_REWARD = 10
-REFERRAL_BANNER_IMAGE = (
-    os.getenv("REFERRAL_BANNER_IMAGE")
-    or "attached_assets/1774943452049_1776522320549.png"
-).strip()
+AD_CLAIM_TOKEN_TTL_SECONDS = 300
 MIN_WITHDRAW = 4000
 MAX_WITHDRAW = 100000
 WITHDRAW_COOLDOWN = 86400     # 24 hours
@@ -830,54 +829,34 @@ def get_referral_list(user_id: int) -> str:
         return ""
 
 
-def send_referral_invite(user_id: int) -> bool:
-    """Send referral banner, caption, and join button to a Telegram user."""
+def get_referral_link(user_id: int) -> str:
     bot_username = BOT_USERNAME.lstrip("@")
-    referral_link = f"https://t.me/{bot_username}?start={user_id}"
-    user = users_col.find_one({"user_id": user_id}, {"username": 1, "_id": 0}) or {}
-    first_name = html.escape(str(user.get("username") or "Friend"))
+    return f"https://t.me/{bot_username}?start={user_id}"
 
-    caption = (
-        f"💰 <b>{first_name}, invite your friends & earn more!</b>\n\n"
-        "🚀 Earn coins daily by watching ads, completing tasks, and growing your referral team.\n\n"
-        "🎁 <b>Referral Bonus:</b> Get <b>50 coins</b> for every friend who joins with your link.\n\n"
-        f"🔗 <b>Your referral link:</b>\n{html.escape(referral_link)}\n\n"
-        "Start sharing now and boost your earnings instantly!"
+
+def send_referral_link(user_id: int) -> bool:
+    """Send a direct referral link and Telegram share button."""
+    referral_link = get_referral_link(user_id)
+    share_text = "💰 Earn coins daily by watching ads & completing tasks! 🚀 Join now and start earning instantly!"
+    share_url = (
+        "https://t.me/share/url"
+        f"?url={quote(referral_link, safe='')}"
+        f"&text={quote(share_text, safe='')}"
     )
-
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🚀 Join Now", url=referral_link))
+    markup.add(types.InlineKeyboardButton("📤 Share Now", url=share_url))
 
     try:
-        if REFERRAL_BANNER_IMAGE.startswith(("http://", "https://")):
-            bot.send_photo(
-                user_id,
-                REFERRAL_BANNER_IMAGE,
-                caption=caption,
-                reply_markup=markup,
-                parse_mode="HTML",
-            )
-        elif os.path.exists(REFERRAL_BANNER_IMAGE):
-            with open(REFERRAL_BANNER_IMAGE, "rb") as banner:
-                bot.send_photo(
-                    user_id,
-                    banner,
-                    caption=caption,
-                    reply_markup=markup,
-                    parse_mode="HTML",
-                )
-        else:
-            logger.warning("Referral banner image not found: %s", REFERRAL_BANNER_IMAGE)
-            bot.send_message(
-                user_id,
-                caption,
-                reply_markup=markup,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
+        bot.send_message(
+            user_id,
+            "👥 Invite your friends and earn 50 coins for each referral!\n\n"
+            f"Your referral link:\n{referral_link}",
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
         return True
     except Exception as exc:
-        logger.error("send_referral_invite error for %s: %s", user_id, exc)
+        logger.error("send_referral_link error for %s: %s", user_id, exc)
         return False
 
 
@@ -1273,26 +1252,10 @@ def verify_task_api():
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
-def manual_ad_reward(user_id: int) -> tuple[dict, int]:
-    """Credit coins for a manually claimed ad reward.
-
-    Enforces a 30-second cooldown, daily ad claim limit, user existence,
-    and blocked-account checks before adding coins.
-
-    Args:
-        user_id: Telegram user ID.
-
-    Returns:
-        tuple[dict, int]: JSON-ready response payload and HTTP status code.
-    """
+def create_ad_claim_token(user_id: int) -> tuple[dict, int]:
+    """Create a short-lived one-time token before showing a Monetag ad."""
     if user_id <= 0:
         return {"status": "error", "message": "Invalid user ID."}, 400
-
-    if is_rate_limited(f"manual_ad_{user_id}", 30):
-        return {
-            "status": "error",
-            "message": "Please wait 30 seconds before claiming the next ad reward.",
-        }, 429
 
     try:
         user = users_col.find_one({"user_id": user_id})
@@ -1300,6 +1263,90 @@ def manual_ad_reward(user_id: int) -> tuple[dict, int]:
             return {"status": "error", "message": "User not found."}, 404
         if user.get("blocked"):
             return {"status": "error", "message": "Your account has been blocked."}, 403
+
+        last_ad_claim = user.get("last_ad_claim_at")
+        if last_ad_claim:
+            try:
+                last_ad_claim_dt = datetime.fromisoformat(last_ad_claim)
+                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=30):
+                    return {
+                        "status": "error",
+                        "message": "Please wait 30 seconds before claiming the next ad reward.",
+                    }, 429
+            except ValueError:
+                pass
+
+        today = str(date.today())
+        ads_date = user.get("ads_date", "")
+        ads_today = user.get("ads_today", 0) if ads_date == today else 0
+
+        if ads_today >= MAX_ADS_PER_DAY:
+            return {
+                "status": "error",
+                "message": f"Daily ad limit reached ({MAX_ADS_PER_DAY}/{MAX_ADS_PER_DAY}). Come back tomorrow!",
+                "data": {
+                    "ads_done": ads_today,
+                    "ads_total": MAX_ADS_PER_DAY,
+                    "remaining": 0,
+                },
+            }, 400
+
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        expires_at = datetime.utcnow() + timedelta(seconds=AD_CLAIM_TOKEN_TTL_SECONDS)
+        ad_reward_tokens_col.insert_one({
+            "_id": token_hash,
+            "user_id": user_id,
+            "created_at": datetime.utcnow(),
+            "expires_at": expires_at,
+            "source": "monetag",
+        })
+        return {
+            "status": "success",
+            "token": raw_token,
+            "expires_in": AD_CLAIM_TOKEN_TTL_SECONDS,
+        }, 200
+    except Exception as exc:
+        logger.error("create_ad_claim_token error for %s: %s", user_id, exc)
+        return {"status": "error", "message": "Server error."}, 500
+
+
+def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
+    """Credit coins only after Monetag confirms a valued ad event."""
+    if user_id <= 0:
+        return {"status": "error", "message": "Invalid user ID."}, 400
+
+    if not claim_token:
+        return {"status": "error", "message": "Ad verification token missing."}, 400
+
+    try:
+        token_hash = hashlib.sha256(claim_token.encode()).hexdigest()
+        token_doc = ad_reward_tokens_col.find_one_and_delete({
+            "_id": token_hash,
+            "user_id": user_id,
+        })
+        if not token_doc:
+            return {"status": "error", "message": "Invalid or already used ad token."}, 403
+        if token_doc.get("expires_at") and token_doc["expires_at"] < datetime.utcnow():
+            return {"status": "error", "message": "Ad token expired. Please watch another ad."}, 403
+
+        user = users_col.find_one({"user_id": user_id})
+        if not user:
+            return {"status": "error", "message": "User not found."}, 404
+        if user.get("blocked"):
+            return {"status": "error", "message": "Your account has been blocked."}, 403
+
+        last_ad_claim = user.get("last_ad_claim_at")
+        if last_ad_claim:
+            try:
+                last_ad_claim_dt = datetime.fromisoformat(last_ad_claim)
+                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=30):
+                    return {
+                        "status": "error",
+                        "message": "Please wait 30 seconds before claiming the next ad reward.",
+                    }, 429
+            except ValueError:
+                pass
 
         today = str(date.today())
         ads_date = user.get("ads_date", "")
@@ -1322,7 +1369,11 @@ def manual_ad_reward(user_id: int) -> tuple[dict, int]:
             {"user_id": user_id},
             {
                 "$inc": {"coins": AD_COIN_REWARD},
-                "$set": {"ads_date": today, "ads_today": done},
+                "$set": {
+                    "ads_date": today,
+                    "ads_today": done,
+                    "last_ad_claim_at": datetime.utcnow().isoformat(),
+                },
             },
         )
 
@@ -1343,28 +1394,17 @@ def manual_ad_reward(user_id: int) -> tuple[dict, int]:
 
 @app.route("/claim_ad/<int:user_id>", methods=["POST"])
 def claim_ad_api(user_id: int):
-    """Manual ad reward endpoint."""
-    payload, status_code = manual_ad_reward(user_id)
+    """Reward endpoint called only after Monetag ad completion."""
+    data = request.get_json(silent=True) or {}
+    payload, status_code = manual_ad_reward(user_id, (data.get("token") or "").strip())
     return jsonify(payload), status_code
 
 
-@app.route("/send_referral_invite/<int:user_id>", methods=["POST"])
-def send_referral_invite_api(user_id: int):
-    """Send the referral invite banner to a user from the web app."""
-    if user_id <= 0:
-        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
-    if is_rate_limited(f"referral_invite_{user_id}", 5):
-        return jsonify({"status": "error", "message": "Please wait a moment before trying again."}), 429
-
-    user = users_col.find_one({"user_id": user_id}, {"blocked": 1})
-    if not user:
-        return jsonify({"status": "error", "message": "User not found."}), 404
-    if user.get("blocked"):
-        return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
-
-    if send_referral_invite(user_id):
-        return jsonify({"status": "success", "message": "Referral invite sent in Telegram."})
-    return jsonify({"status": "error", "message": "Unable to send invite right now."}), 500
+@app.route("/ad_claim_token/<int:user_id>", methods=["POST"])
+def ad_claim_token_api(user_id: int):
+    """Create a short-lived one-time token for a Monetag ad reward attempt."""
+    payload, status_code = create_ad_claim_token(user_id)
+    return jsonify(payload), status_code
 
 
 @app.route("/claim_channel", methods=["POST"])
@@ -2042,10 +2082,10 @@ def start(message):
 
 @bot.message_handler(commands=["invite"])
 def invite_command(message):
-    """Handle /invite command — send the referral invite banner."""
+    """Handle /invite command — send the direct referral link."""
     user_id = message.from_user.id
     get_or_create_user(user_id, message.from_user.first_name or "User")
-    if not send_referral_invite(user_id):
+    if not send_referral_link(user_id):
         bot.reply_to(message, "Unable to send invite right now. Please try again later.")
 
 
@@ -2054,8 +2094,8 @@ def invite_friends_callback(call):
     """Handle Invite Friends button click."""
     user_id = call.from_user.id
     get_or_create_user(user_id, call.from_user.first_name or "User")
-    if send_referral_invite(user_id):
-        bot.answer_callback_query(call.id, "Referral invite sent!")
+    if send_referral_link(user_id):
+        bot.answer_callback_query(call.id, "Referral link sent!")
     else:
         bot.answer_callback_query(call.id, "Unable to send invite. Try again later.", show_alert=True)
 
