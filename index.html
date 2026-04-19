@@ -9,7 +9,7 @@
     <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
     <link rel="stylesheet" href="style.css">
     <style>
-        /* ── Sponsor Lock Animation ── */
+        /* ── Lock Animation ── */
         .lock-overlay {
             position: absolute;
             inset: 0;
@@ -56,7 +56,7 @@
         .ch-claim-btn { transition: background 0.3s, opacity 0.3s; }
         .ch-claim-btn:disabled { cursor: not-allowed; opacity: 0.85; }
 
-        /* ── Partner Task Card ── */
+        /* ── Partner / Promo Task Card ── */
         .partner-card {
             background: linear-gradient(135deg, #1a1a2e, #16213e);
             border: 1px solid #a855f7;
@@ -65,6 +65,37 @@
             margin-bottom: 8px;
             position: relative;
             overflow: hidden;
+        }
+
+        /* ── Promotion Task Card ── */
+        .promo-task-card {
+            background: linear-gradient(135deg, #0d1f12, #102818);
+            border: 1px solid #22c55e;
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 8px;
+            position: relative;
+        }
+        .promo-task-card.completed {
+            border-color: #334155;
+            opacity: 0.7;
+        }
+        .promo-task-card .promo-btn {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 18px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 8px;
+        }
+        .promo-task-card .promo-btn:disabled {
+            background: #334155;
+            cursor: not-allowed;
+            opacity: 0.7;
         }
 
         /* ── Section Divider ── */
@@ -99,6 +130,14 @@
             color: #94a3b8;
             font-weight: 500;
         }
+
+        /* Channel progress indicator */
+        .channel-progress-label {
+            font-size: 11px;
+            color: #64748b;
+            text-align: center;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
@@ -118,6 +157,7 @@
         <div class="card balance-card" style="text-align:center;">
             <p style="font-size:12px; color:#94a3b8; margin-bottom:6px;">Your Balance</p>
             <h1 id="balance" style="font-size:40px; color:#f1c40f;">0 🪙</h1>
+            <p style="font-size:11px; color:#64748b; margin-top:4px;">5000 🪙 = ₹100 &nbsp;|&nbsp; 1 🪙 = ₹0.02</p>
         </div>
 
         <!-- Daily Bonus -->
@@ -125,8 +165,47 @@
             <div>
                 <h4 style="margin-bottom:4px;">Daily Bonus 🎁</h4>
                 <p style="font-size:12px; color:#94a3b8;">Claim 10 coins every 24 hours!</p>
+                <p id="daily-timer" style="font-size:11px; color:#f1c40f; font-weight:700; margin-top:4px; display:none;">
+                    ⏰ Next claim: <span id="daily-countdown">--:--:--</span>
+                </p>
             </div>
             <button class="btn" id="daily-btn" onclick="claimDaily()" style="width:auto; padding:10px 20px;">Claim Now</button>
+        </div>
+
+        <!-- All-Tasks Complete Bonus -->
+        <div class="card" style="background:linear-gradient(135deg,#0c1a0c,#0f2a10); border:1px solid #22c55e;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                <div>
+                    <h4 style="color:#22c55e; margin-bottom:4px;">🏅 All-Tasks Bonus</h4>
+                    <p style="font-size:11px; color:#64748b;">Complete all daily tasks → Earn <b style="color:#f1c40f;">+10 bonus coins</b></p>
+                </div>
+                <span id="allbonus-status-badge" style="font-size:11px; background:#1e3a1e; color:#22c55e; border:1px solid #22c55e; border-radius:20px; padding:2px 10px; white-space:nowrap; margin-top:2px;">0/4</span>
+            </div>
+
+            <!-- Progress checklist -->
+            <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:12px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="check-daily" style="font-size:16px;">⬜</span>
+                    <span style="font-size:12px; color:#94a3b8;">Daily Bonus Claimed</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="check-ads" style="font-size:16px;">⬜</span>
+                    <span style="font-size:12px; color:#94a3b8;">Watch All 10 Ads <span id="allbonus-ads-count" style="color:#f1c40f;">(0/10)</span></span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="check-yt" style="font-size:16px;">⬜</span>
+                    <span style="font-size:12px; color:#94a3b8;">All 3 YouTube Tasks <span id="allbonus-yt-count" style="color:#f1c40f;">(0/3)</span></span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="check-web" style="font-size:16px;">⬜</span>
+                    <span style="font-size:12px; color:#94a3b8;">All 3 Website Tasks <span id="allbonus-web-count" style="color:#f1c40f;">(0/3)</span></span>
+                </div>
+            </div>
+
+            <button id="allbonus-btn" class="btn" onclick="claimAllBonus()"
+                style="background:linear-gradient(135deg,#22c55e,#16a34a); font-weight:700;" disabled>
+                🏅 Claim Bonus 10 Coins
+            </button>
         </div>
 
         <!-- Promo Code -->
@@ -152,22 +231,34 @@
             </div>
         </div>
 
-        <!-- Watch Ad -->
+        <!-- Watch Ad (SDK-based, reward only after completion) -->
         <div class="card" style="text-align:center;">
             <p style="font-size:11px; color:#64748b; margin-bottom:6px;">Advertisement</p>
-            <div class="ad-counter-badge">📺 Ads Today: <span id="ad-counter">0/5</div>
+            <div class="ad-counter-badge">📺 Ads Today: <span id="ad-counter">0</span>/<span id="ad-max">10</span></div>
+            <p style="font-size:11px; color:#94a3b8; margin-bottom:8px;">Earn <b style="color:#f1c40f;">+5 coins</b> per ad • Max 10 ads/day</p>
             <div id="adsgram-container">
-                <button class="btn" style="background:linear-gradient(135deg,#f1c40f,#f39c12); color:#000; font-weight:700;" onclick="showAd()">
-                    📺 Watch Ad & Earn 10 Coins
+                <button class="btn" id="ad-btn" style="background:linear-gradient(135deg,#f1c40f,#f39c12); color:#000; font-weight:700;" onclick="showAd()">
+                    📺 Watch Ad & Earn 5 Coins
                 </button>
+            </div>
+            <p style="font-size:10px; color:#475569; margin-top:6px;">Reward credited only after full ad completion</p>
+        </div>
+
+        <!-- Promotion Tasks Section (Manual, Admin-controlled) -->
+        <div class="card" style="background:linear-gradient(135deg,#0d1f12,#102818); border:1px solid #22c55e;">
+            <h4 style="color:#22c55e; margin-bottom:4px;">📢 Promotion Tasks</h4>
+            <p style="font-size:11px; color:#64748b; margin-bottom:12px;">Complete tasks to earn coins • Each task is one-time only</p>
+            <div id="promo-tasks-list">
+                <p style="color:#475569; text-align:center; font-size:13px;">Loading tasks...</p>
             </div>
         </div>
 
-        <!-- Partnership & Sponsors -->
+        <!-- Partnership & Sponsors (Locked slots, contact admin via email) -->
         <div class="card" style="background:linear-gradient(135deg,#0f2027,#203a43,#2c5364); border:1px solid #38bdf8;">
-            <h4 style="color:#38bdf8; margin-bottom:12px;">🤝 Partnership & Sponsors</h4>
+            <h4 style="color:#38bdf8; margin-bottom:4px;">🤝 Partnership & Sponsors</h4>
+            <p style="font-size:11px; color:#64748b; margin-bottom:12px;">Contact us via email to advertise here</p>
 
-            <!-- Sponsor Slot 1 — Locked (Available for purchase) -->
+            <!-- Sponsor Slot 1 — Locked -->
             <div id="sponsor-slot-1" style="position:relative; display:flex; align-items:center; gap:12px; padding:10px; background:rgba(255,255,255,0.05); border-radius:10px; margin-bottom:8px; overflow:hidden; min-height:58px;">
                 <div class="lock-overlay">
                     <span class="lock-icon">🔒</span>
@@ -181,7 +272,7 @@
                 <button class="btn-sm" style="background:#38bdf8; color:#000; opacity:0.5;" disabled>Locked</button>
             </div>
 
-            <!-- Sponsor Slot 2 — Locked (Available for purchase) -->
+            <!-- Sponsor Slot 2 — Locked -->
             <div id="sponsor-slot-2" class="sponsor-card" style="margin-bottom:8px; position:relative; overflow:hidden;">
                 <div class="lock-overlay">
                     <span class="lock-icon">🔒</span>
@@ -189,65 +280,32 @@
                 </div>
                 <div style="font-size:26px;">📢</div>
                 <div style="flex:1;">
-                    <p style="font-size:13px; font-weight:700; color:#38bdf8; margin:0;">Sponsor Channel</p>
-                    <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Join the channel & earn instantly</p>
+                    <p style="font-size:13px; font-weight:700; color:#38bdf8; margin:0;">Sponsor Slot 2</p>
+                    <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Contact admin to advertise here</p>
                 </div>
                 <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
-                    <span style="font-size:12px; color:#f1c40f; font-weight:700;">+10 🪙</span>
-                    <button id="ch-btn-sponsor1" class="btn-sm ch-claim-btn" style="background:#38bdf8; color:#000; font-weight:700; opacity:0.5;" disabled>Locked</button>
+                    <button class="btn-sm" style="background:#38bdf8; color:#000; font-weight:700; opacity:0.5;" disabled>Locked</button>
                 </div>
             </div>
 
-            <!-- Sponsor Slot 3 — Locked (Available for purchase) -->
+            <!-- Sponsor Slot 3 — Locked -->
             <div id="sponsor-slot-3" class="partner-card">
                 <div class="lock-overlay" style="border-radius:12px;">
                     <span class="lock-icon">🔒</span>
                     <span class="lock-label">Slot Available</span>
                 </div>
-                <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                <div style="display:flex; align-items:center; gap:10px;">
                     <span style="font-size:22px;">🌟</span>
                     <div style="flex:1;">
-                        <p style="font-size:13px; font-weight:700; color:#a855f7; margin:0;">Partner Task</p>
-                        <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Complete the task & enter code to earn</p>
-                    </div>
-                    <span style="font-size:12px; color:#f1c40f; font-weight:700;">+15 🪙</span>
-                </div>
-                <div class="card task-item" data-task="partner1" style="background:transparent; padding:0; border:none; margin:0;">
-                    <button class="btn-sm" style="background:#a855f7; width:100%; margin-bottom:8px; opacity:0.5;" disabled>
-                        🔗 Open Partner Link
-                    </button>
-                    <div class="task-input-row">
-                        <input type="text" id="partner-1" placeholder="Enter verification code" disabled>
-                        <button class="btn-sm" style="background:#a855f7; opacity:0.5;" onclick="verifyTask('partner1', 'partner-1')" disabled>Verify</button>
+                        <p style="font-size:13px; font-weight:700; color:#a855f7; margin:0;">Sponsor Slot 3</p>
+                        <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Contact admin to advertise here</p>
                     </div>
                 </div>
             </div>
 
-            <!-- Sponsor Slot 4 — Locked (Code verification partner slot) -->
-            <div id="sponsor-slot-4" class="partner-card">
-                <div class="lock-overlay" style="border-radius:12px;">
-                    <span class="lock-icon">🔒</span>
-                    <span class="lock-label">Slot Available</span>
-                </div>
-                <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
-                    <span style="font-size:22px;">🚀</span>
-                    <div style="flex:1;">
-                        <p style="font-size:13px; font-weight:700; color:#a855f7; margin:0;">Partner Task 2</p>
-                        <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Open partner link, collect code & verify</p>
-                    </div>
-                    <span style="font-size:12px; color:#f1c40f; font-weight:700;">+15 🪙</span>
-                </div>
-                <div class="card task-item" data-task="partner2" style="background:transparent; padding:0; border:none; margin:0;">
-                    <button class="btn-sm" style="background:#a855f7; width:100%; margin-bottom:8px; opacity:0.5;" disabled>
-                        🔗 Open Partner Link
-                    </button>
-                    <div class="task-input-row">
-                        <input type="text" id="partner-2" placeholder="Enter verification code" disabled>
-                        <button class="btn-sm" style="background:#a855f7; opacity:0.5;" onclick="verifyTask('partner2', 'partner-2')" disabled>Verify</button>
-                    </div>
-                </div>
+            <div style="margin-top:10px; padding:10px; background:rgba(56,189,248,0.06); border-radius:8px; border:1px dashed #38bdf8; text-align:center;">
+                <p style="font-size:12px; color:#38bdf8; margin:0;">📧 Interested in sponsoring? Email us!</p>
             </div>
-
         </div>
 
         <!-- Gap before Withdrawal -->
@@ -260,11 +318,12 @@
             <div style="background:#0f172a; border-radius:10px; padding:12px; margin-bottom:10px; border:1px solid #334155;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <span style="font-size:13px; color:#94a3b8;">🪙 Coins Required</span>
-                    <span style="font-size:13px; font-weight:700;" id="coins-progress-text">0 / 4000</span>
+                    <span style="font-size:13px; font-weight:700;" id="coins-progress-text">0 / 5000</span>
                 </div>
                 <div style="background:#1e293b; border-radius:20px; height:8px; overflow:hidden;">
                     <div id="coins-progress-bar" style="height:100%; background:linear-gradient(90deg,#f1c40f,#f39c12); border-radius:20px; width:0%; transition:width 0.5s;"></div>
                 </div>
+                <p style="font-size:10px; color:#475569; margin-top:6px;">5000 coins = ₹100</p>
             </div>
 
             <div style="background:#0f172a; border-radius:10px; padding:12px; margin-bottom:14px; border:1px solid #334155;">
@@ -277,14 +336,14 @@
                 </div>
             </div>
 
-            <input type="text" id="withdraw-amount" placeholder="Enter coin amount (Min. 4000)"
+            <input type="text" id="withdraw-amount" placeholder="Enter coin amount (Min. 5000)"
                 style="margin-bottom:10px;"
                 oninput="this.value = this.value.replace(/[^0-9]/g, '')">
 
             <input type="text" id="upi-id" placeholder="Enter UPI ID (name@upi)" style="margin-bottom:10px;">
 
             <p style="font-size:11px; color:#64748b; margin-bottom:10px; margin-top:-6px;">
-                ⏳ day/One withdrawal request allowed.
+                ⏳ 1 withdrawal request allowed per day.
             </p>
 
             <button class="btn" style="background:#e74c3c;" onclick="requestWithdraw()">Withdraw Now</button>
@@ -300,15 +359,16 @@
             <p style="color:#1a1a1a; font-size:13px;">Tasks reset every day. Complete and earn!</p>
         </div>
 
-        <!-- YouTube Tasks -->
+        <!-- YouTube Tasks (max 3 per day, 5 coins each) -->
         <div style="padding:8px 14px 4px 14px;">
             <p style="font-size:12px; font-weight:700; color:#ff0000; text-transform:uppercase; letter-spacing:1px;">📺 YouTube Tasks</p>
+            <p style="font-size:11px; color:#64748b; padding: 0 0 4px 0;">+5 coins each • Max 3 per day</p>
         </div>
 
         <div class="card task-item" data-task="yt1">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 1: Watch & Verify</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+20 🪙</span>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+5 🪙</span>
             </div>
             <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt1', 'yt')">▶ Watch Video 1</button>
             <div class="task-input-row">
@@ -320,7 +380,7 @@
         <div class="card task-item" data-task="yt2">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 2: Watch & Verify</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+20 🪙</span>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+5 🪙</span>
             </div>
             <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt2', 'yt')">▶ Watch Video 2</button>
             <div class="task-input-row">
@@ -332,7 +392,7 @@
         <div class="card task-item" data-task="yt3">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 3: Watch & Verify</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+20 🪙</span>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+5 🪙</span>
             </div>
             <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt3', 'yt')">▶ Watch Video 3</button>
             <div class="task-input-row">
@@ -341,15 +401,16 @@
             </div>
         </div>
 
-        <!-- Website Tasks -->
+        <!-- Website Tasks (max 3 per day, 3 coins each) -->
         <div style="padding:8px 14px 4px 14px;">
             <p style="font-size:12px; font-weight:700; color:#3498db; text-transform:uppercase; letter-spacing:1px;">🌐 Website Tasks</p>
+            <p style="font-size:11px; color:#64748b; padding: 0 0 4px 0;">+3 coins each • Max 3 per day</p>
         </div>
 
         <div class="card task-item" data-task="web1">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 1: Visit Site</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+15 🪙</span>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+3 🪙</span>
             </div>
             <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web1', 'web')">🌐 Visit Site 1</button>
             <div class="task-input-row">
@@ -361,7 +422,7 @@
         <div class="card task-item" data-task="web2">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 2: Visit Site</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+15 🪙</span>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+3 🪙</span>
             </div>
             <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web2', 'web')">🌐 Visit Site 2</button>
             <div class="task-input-row">
@@ -373,7 +434,7 @@
         <div class="card task-item" data-task="web3">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 3: Visit Site</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+15 🪙</span>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+3 🪙</span>
             </div>
             <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web3', 'web')">🌐 Visit Site 3</button>
             <div class="task-input-row">
@@ -382,9 +443,10 @@
             </div>
         </div>
 
-        <!-- Telegram Channels — 1-time reward -->
+        <!-- Telegram Channels — One-time reward per channel, 5 coins each -->
         <div style="padding:8px 14px 4px 14px;">
             <p style="font-size:12px; font-weight:700; color:#0088cc; text-transform:uppercase; letter-spacing:1px;">📢 Telegram Channels</p>
+            <p style="font-size:11px; color:#64748b; padding: 0 0 4px 0;">Join all 3 channels • +5 coins each (one-time per channel)</p>
         </div>
 
         <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
@@ -393,7 +455,7 @@
                 <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Join once & earn coins 🎁</p>
             </div>
             <button id="ch-btn-official" class="btn-sm ch-claim-btn" style="background:#0088cc;"
-                onclick="claimChannel('official', CONFIG.CHANNELS.official)">+30 🪙 Join</button>
+                onclick="claimChannel('official', CONFIG.CHANNELS.official)">+5 🪙 Join</button>
         </div>
 
         <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
@@ -402,7 +464,7 @@
                 <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Join once & earn coins 🎁</p>
             </div>
             <button id="ch-btn-channel2" class="btn-sm ch-claim-btn" style="background:#0088cc;"
-                onclick="claimChannel('channel2', CONFIG.CHANNELS.channel2)">+20 🪙 Join</button>
+                onclick="claimChannel('channel2', CONFIG.CHANNELS.channel2)">+5 🪙 Join</button>
         </div>
 
         <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
@@ -411,7 +473,7 @@
                 <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">Join once & earn coins 🎁</p>
             </div>
             <button id="ch-btn-channel3" class="btn-sm ch-claim-btn" style="background:#0088cc;"
-                onclick="claimChannel('channel3', CONFIG.CHANNELS.channel3)">+20 🪙 Join</button>
+                onclick="claimChannel('channel3', CONFIG.CHANNELS.channel3)">+5 🪙 Join</button>
         </div>
 
     </div>
@@ -471,14 +533,23 @@
 
                 <div style="background:rgba(241,196,15,0.08); border-left:3px solid #f1c40f; border-radius:0 8px 8px 0; padding:10px 14px; margin-bottom:10px;">
                     <p style="font-size:13px; font-weight:700; color:#f1c40f; margin:0 0 4px 0;">💰 Coin Value</p>
-                    <p style="font-size:15px; font-weight:600; color:#e2e8f0; margin:0;">1000 🪙 = ₹25</p>
+                    <p style="font-size:15px; font-weight:600; color:#e2e8f0; margin:0;">5000 🪙 = ₹100 &nbsp;|&nbsp; 1 🪙 = ₹0.02</p>
+                </div>
+
+                <div style="background:rgba(46,204,113,0.08); border-left:3px solid #2ecc71; border-radius:0 8px 8px 0; padding:10px 14px; margin-bottom:10px;">
+                    <p style="font-size:13px; font-weight:700; color:#2ecc71; margin:0 0 8px 0;">🎯 Earning Rates</p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Watch Ad: <b style="color:#f1c40f;">+5 🪙</b> (max 10/day)</p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• YouTube Task: <b style="color:#f1c40f;">+5 🪙</b> (max 3/day)</p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Website Task: <b style="color:#f1c40f;">+3 🪙</b> (max 3/day)</p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Telegram Channel: <b style="color:#f1c40f;">+5 🪙</b> (one-time each)</p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0;">• Promotion Task: <b style="color:#f1c40f;">+5 🪙</b> (one-time each)</p>
                 </div>
 
                 <div style="background:rgba(46,204,113,0.08); border-left:3px solid #2ecc71; border-radius:0 8px 8px 0; padding:10px 14px; margin-bottom:10px;">
                     <p style="font-size:13px; font-weight:700; color:#2ecc71; margin:0 0 8px 0;">📤 Withdrawal Rules</p>
-                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Minimum Withdrawal: <b style="color:#f1c40f;">4000 🪙</b></p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Minimum Withdrawal: <b style="color:#f1c40f;">5000 🪙 (₹100)</b></p>
                     <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Referral Requirement: <b style="color:#f1c40f;">5 Users</b></p>
-                    <p style="font-size:13px; color:#e2e8f0; margin:0;">• Cooldown: <b style="color:#f1c40f;">1 Request per 3 Hours</b></p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0;">• Cooldown: <b style="color:#f1c40f;">1 Request per 24 Hours</b></p>
                 </div>
 
                 <div style="background:rgba(231,76,60,0.12); border:1px solid #e74c3c; border-radius:10px; padding:12px 14px;">
@@ -497,7 +568,7 @@
         <div class="card">
             <h4 style="margin-bottom:6px;">Support Center 🎧</h4>
             <p style="font-size:13px; color:#94a3b8; margin-bottom:4px;">Describe your issue and we will respond shortly.</p>
-            <p style="font-size:11px; color:#64748b; margin-bottom:12px;">⏳ Limit: 1 messages per day.</p>
+            <p style="font-size:11px; color:#64748b; margin-bottom:12px;">⏳ Limit: 1 message per day.</p>
             <textarea id="support-msg" placeholder="Write your issue here..."></textarea>
             <button class="btn" onclick="sendSupport()">Send to Admin</button>
         </div>
@@ -512,7 +583,6 @@
             </div>
             <p id="copy-status" style="color:#2ecc71; font-size:12px; margin-top:10px; display:none; font-weight:bold;">Email Copied! ✅</p>
 
-            <!-- Social Media Icons — apna link niche replace karo -->
             <div style="margin-top:6px; padding-top:14px; border-top:1px solid #1e293b;">
                 <p style="font-size:11px; color:#64748b; margin-bottom:12px;">Follow us on social media</p>
                 <div class="social-icons-row">
@@ -570,7 +640,101 @@
 
     <div style="height: 70px;"></div>
 
+    <script>
+    // ============================================================
+    // PROMOTION TASKS — Frontend Logic
+    // ============================================================
+
+    // Called on app load — fetches and renders promotion tasks
+    async function loadPromoTasks() {
+        const container = document.getElementById('promo-tasks-list');
+        if (!container) return;
+
+        try {
+            const resp = await fetch(CONFIG.API_URL + '/get_promo_tasks');
+            const data = await resp.json();
+
+            if (data.status !== 'success' || !data.tasks || data.tasks.length === 0) {
+                container.innerHTML = '<p style="color:#475569; text-align:center; font-size:13px;">No promotion tasks available right now.</p>';
+                return;
+            }
+
+            const completedTasks = window._promoTaskCompletions || [];
+            container.innerHTML = '';
+
+            data.tasks.forEach(task => {
+                const isCompleted = completedTasks.includes(task.task_id);
+                const card = document.createElement('div');
+                card.className = 'promo-task-card' + (isCompleted ? ' completed' : '');
+                card.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+                        <div style="flex:1;">
+                            <p style="font-size:13px; font-weight:700; color:#22c55e; margin:0 0 2px 0;">${escapeHtml(task.title)}</p>
+                            ${task.description ? `<p style="font-size:11px; color:#64748b; margin:0;">${escapeHtml(task.description)}</p>` : ''}
+                        </div>
+                        <span style="font-size:12px; color:#f1c40f; font-weight:700; margin-left:8px;">+${task.reward || 5} 🪙</span>
+                    </div>
+                    ${task.link ? `<a href="${escapeHtml(task.link)}" target="_blank" style="display:block; font-size:11px; color:#38bdf8; margin-bottom:6px; word-break:break-all;">🔗 ${escapeHtml(task.link)}</a>` : ''}
+                    <button
+                        class="promo-btn"
+                        onclick="claimPromoTask('${escapeHtml(task.task_id)}')"
+                        ${isCompleted ? 'disabled' : ''}
+                    >
+                        ${isCompleted ? '✅ Completed' : '✅ Mark as Done & Claim'}
+                    </button>
+                `;
+                container.appendChild(card);
+            });
+        } catch (e) {
+            container.innerHTML = '<p style="color:#475569; text-align:center; font-size:13px;">Failed to load tasks.</p>';
+        }
+    }
+
+    // Claim a promotion task reward
+    async function claimPromoTask(taskId) {
+        const userId = window.USER_ID;
+        if (!userId) return showToast('Please open via Telegram bot.');
+
+        try {
+            const resp = await fetch(CONFIG.API_URL + '/claim_promo_task', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, task_id: taskId }),
+            });
+            const data = await resp.json();
+
+            if (data.status === 'success') {
+                showToast(data.message || 'Coins credited!');
+                if (!window._promoTaskCompletions) window._promoTaskCompletions = [];
+                window._promoTaskCompletions.push(taskId);
+                await loadPromoTasks();
+                await refreshBalance();
+            } else {
+                showToast(data.message || 'Failed to claim.');
+            }
+        } catch (e) {
+            showToast('Network error. Please try again.');
+        }
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    // loadPromoTasks is called from fetchLiveData in script.js after user data loads
+    // Also call once on DOM ready as fallback
+    document.addEventListener('DOMContentLoaded', function() {
+        loadPromoTasks();
+    });
+    </script>
+
     <script src="config.js"></script>
     <script src="script.js"></script>
+
 </body>
 </html>
