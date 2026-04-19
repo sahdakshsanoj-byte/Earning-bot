@@ -3,6 +3,7 @@
 // ============================================================
 
 const tg = window.Telegram.WebApp;
+tg.ready();
 tg.expand();
 tg.enableClosingConfirmation();
 
@@ -13,6 +14,63 @@ let userData = {};
 
 // Tracks in-flight requests to prevent duplicate clicks
 const _pendingRequests = new Set();
+let monetagSdkPromise = null;
+let monetagPreloaded = false;
+
+function getMonetagZoneId() {
+    return String(CONFIG.MONETAG_ZONE_ID || "").trim();
+}
+
+function getMonetagShowFunction() {
+    const zoneId = getMonetagZoneId();
+    if (!zoneId) return null;
+    return window[`show_${zoneId}`];
+}
+
+function loadMonetagSdk() {
+    const zoneId = getMonetagZoneId();
+    const sdkUrl = String(CONFIG.MONETAG_SDK_URL || "").trim();
+    if (!zoneId) return Promise.reject(new Error("Monetag Zone ID missing"));
+    if (getMonetagShowFunction()) return Promise.resolve();
+    if (!sdkUrl) return Promise.reject(new Error("Monetag SDK URL missing"));
+    if (monetagSdkPromise) return monetagSdkPromise;
+
+    monetagSdkPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.async = true;
+        script.src = sdkUrl;
+        script.dataset.zone = zoneId;
+        script.dataset.sdk = `show_${zoneId}`;
+        script.onload = () => getMonetagShowFunction()
+            ? resolve()
+            : reject(new Error("Monetag show function not found"));
+        script.onerror = () => reject(new Error("Monetag SDK failed to load"));
+        document.head.appendChild(script);
+    }).catch((err) => {
+        monetagSdkPromise = null;
+        throw err;
+    });
+
+    return monetagSdkPromise;
+}
+
+async function preloadMonetagAd() {
+    if (!userId || !getMonetagZoneId()) return;
+    try {
+        await loadMonetagSdk();
+        const showMonetagAd = getMonetagShowFunction();
+        if (!showMonetagAd) return;
+        await showMonetagAd({
+            type: 'preload',
+            timeout: 5,
+            ymid: String(userId),
+            requestVar: 'ad_reward',
+        });
+        monetagPreloaded = true;
+    } catch (e) {
+        monetagPreloaded = false;
+    }
+}
 
 // ============================================================
 // TOAST NOTIFICATION
@@ -652,20 +710,53 @@ async function sendSupport() {
 }
 
 // ============================================================
-// MANUAL AD REWARD — claim coins
+// MONETAG REWARDED AD — claim coins after completed ad
 // ============================================================
 async function showAd() {
     if (!userId) return showToast("User ID not found!", "error");
+    if (!getMonetagZoneId()) return showToast("Monetag Zone ID missing in config.js", "error");
     if (_pendingRequests.has('showAd')) return;
     _pendingRequests.add('showAd');
 
     const btn = document.querySelector('[onclick="showAd()"]');
-    if (btn) { btn.disabled = true; btn.innerText = "Claiming..."; }
+    if (btn) { btn.disabled = true; btn.innerText = "Loading Ad..."; }
 
     try {
+        await loadMonetagSdk();
+        const showMonetagAd = getMonetagShowFunction();
+        if (!showMonetagAd) throw new Error("Monetag ad function unavailable");
+
+        const tokenRes = await fetchWithRetry(
+            `${CONFIG.API_BASE_URL}/ad_claim_token/${userId}`,
+            { method: 'POST' }
+        );
+        const tokenData = await tokenRes.json();
+        if (tokenData.status !== "success" || !tokenData.token) {
+            showToast(tokenData.message || "Ad reward is not available right now.", "error");
+            return;
+        }
+
+        if (btn) btn.innerText = monetagPreloaded ? "Showing Ad..." : "Preparing Ad...";
+        const adResult = await showMonetagAd({
+            ymid: String(userId),
+            requestVar: 'ad_reward',
+        });
+        monetagPreloaded = false;
+
+        if (adResult?.reward_event_type && adResult.reward_event_type !== 'valued') {
+            showToast("Ad was skipped. Watch the full ad to earn coins.", "error");
+            preloadMonetagAd();
+            return;
+        }
+
+        if (btn) btn.innerText = "Crediting...";
         const res = await fetchWithRetry(
             `${CONFIG.API_BASE_URL}/claim_ad/${userId}`,
-            { method: 'POST' }
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: tokenData.token })
+            }
         );
         const data = await res.json();
         const adsDone = data.ads_done || data.data?.ads_done;
@@ -679,10 +770,11 @@ async function showAd() {
             showToast(data.message || "Unable to claim ad reward.", "error");
         }
     } catch (e) {
-        showToast("⚠️ Connection error. Please retry.", "error");
+        showToast("Ad not completed. No coins awarded.", "error");
     } finally {
         _pendingRequests.delete('showAd');
-        if (btn) { btn.disabled = false; btn.innerText = "Claim Ad Reward"; }
+        if (btn) { btn.disabled = false; btn.innerText = "Watch Ad & Earn"; }
+        preloadMonetagAd();
     }
 }
 
@@ -772,22 +864,9 @@ async function inviteFriend() {
 
     const link = `https://t.me/${CONFIG.BOT_USERNAME}?start=${userId}`;
     const btn = document.querySelector('[onclick="inviteFriend()"]');
-    if (btn) { btn.disabled = true; btn.innerText = "Sending..."; }
+    if (btn) { btn.disabled = true; btn.innerText = "Opening..."; }
 
     try {
-        const res = await fetchWithRetry(
-            `${CONFIG.API_BASE_URL}/send_referral_invite/${userId}`,
-            { method: 'POST' }
-        );
-        const data = await res.json();
-
-        if (data.status === "success") {
-            showToast("✅ Referral banner sent in Telegram!", "success");
-            if (tg && tg.openTelegramLink) tg.openTelegramLink(link);
-        } else {
-            throw new Error(data.message || "Unable to send referral invite.");
-        }
-    } catch (e) {
         const shareText = '💰 Earn coins daily by watching ads & completing tasks! 🚀 Join now and start earning instantly!';
         if (tg && tg.openTelegramLink) {
             tg.openTelegramLink(
@@ -800,6 +879,9 @@ ${link}` }).catch(() => {});
             navigator.clipboard.writeText(link).catch(() => {});
             showToast("✅ Invite link copied!", "success");
         }
+    } catch (e) {
+        navigator.clipboard.writeText(link).catch(() => {});
+        showToast("✅ Invite link copied!", "success");
     } finally {
         _pendingRequests.delete('inviteFriend');
         if (btn) { btn.disabled = false; btn.innerText = "Invite Friends"; }
@@ -905,6 +987,7 @@ function initSlots() {
 initSlots();
 checkDevice();
 fetchLiveData();
+preloadMonetagAd();
 
 // Leaderboard auto-refresh every 10 minutes
 setInterval(refreshLeaderboard, 10 * 60 * 1000);
