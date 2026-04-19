@@ -11,6 +11,13 @@ const CONFIG = {
     // Your Telegram bot username (without @)
     BOT_USERNAME: "Cdotern_bot",
 
+    // Monetag Telegram Mini App Rewarded Interstitial Zone ID
+    // Replace this with the Zone ID from your Monetag dashboard
+    MONETAG_ZONE_ID: "10822310",
+
+    // Paste the exact SDK script URL from your Monetag dashboard
+    MONETAG_SDK_URL: "https://libtl.com/sdk.js",
+
     // YouTube video links for Task tab (replace with your own)
     YT_LINKS: {
         yt1: "https://youtu.be/YOUR_VIDEO_1",
