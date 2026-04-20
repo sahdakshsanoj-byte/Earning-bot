@@ -12,7 +12,7 @@ const CONFIG = {
     BOT_USERNAME: "Cdotern_bot",
 
     // Admin Telegram username for support contact (with or without @)
-    ADMIN_TELEGRAM: "@YourAdminUsername",
+    ADMIN_TELEGRAM: "@cdotern_help",
 
     // Monetag Telegram Mini App Rewarded Interstitial Zone ID
     MONETAG_ZONE_ID: "10822310",
