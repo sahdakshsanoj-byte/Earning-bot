@@ -147,6 +147,14 @@
     }
     #bcast-msg:focus { outline:none; border-color:#38bdf8; }
     #bcast-result { font-size:12px; color:#64748b; margin-top:8px; text-align:center; }
+
+    /* ── DM textarea ── */
+    #dm-msg {
+        width:100%; min-height:110px; padding:12px;
+        background:#0f172a; border:1px solid #334155; border-radius:10px;
+        color:#e2e8f0; font-size:14px; resize:vertical; margin-bottom:12px;
+    }
+    #dm-msg:focus { outline:none; border-color:#38bdf8; }
 </style>
 </head>
 <body>
@@ -222,6 +230,19 @@
             <div class="code-row">
                 <span class="code-label">Partner 2</span>
                 <input class="code-input" id="code-partner2" placeholder="PARTNER2">
+            </div>
+        </div>
+
+        <!-- ── NEW: Sponsor Slot 4 Verify Code ── -->
+        <div class="card" style="border-color:#3498db;">
+            <h4 style="color:#3498db;">🔐 Sponsor Slot 4 — Verify Code</h4>
+            <p style="font-size:11px; color:#64748b; margin-top:-8px; margin-bottom:14px;">
+                Yeh code users Sponsor Slot 4 mein enter karke 4 coins claim karte hain. One-time task hai.
+                Bot command: <code style="color:#3498db;">/settask slot4 CODE</code>
+            </p>
+            <div class="code-row">
+                <span class="code-label">Slot 4 Code</span>
+                <input class="code-input" id="code-slot4" placeholder="SLOT4CODE" style="border-color:#3498db; color:#3498db;">
             </div>
         </div>
 
@@ -330,7 +351,7 @@
             <div class="code-row" style="margin-bottom:12px;">
                 <input class="code-input" id="dm-uid" placeholder="Telegram User ID" type="number" style="flex:1;">
             </div>
-            <textarea id="dm-msg" placeholder="Message likhiyo yahan... (Telegram Markdown supported)&#10;Example: *Bold*, _italic_, [link](url)" style="min-height:110px;"></textarea>
+            <textarea id="dm-msg" placeholder="Message likhiyo yahan... (Telegram Markdown supported)&#10;Example: *Bold*, _italic_, [link](url)"></textarea>
             <button class="btn-save" style="background:#38bdf8; margin-top:4px;" onclick="sendDM()">📩 Message Bhejo</button>
             <p id="dm-result" style="font-size:12px; margin-top:10px; text-align:center;"></p>
         </div>
@@ -354,6 +375,9 @@
 // ── State ──
 let adminToken = sessionStorage.getItem('admin_token') || '';
 const API = window.location.origin;
+
+// ── All task code keys (including slot4) ──
+const CODE_KEYS = ['yt1','yt2','yt3','web1','web2','web3','partner1','partner2','slot4'];
 
 // ── Toast ──
 function toast(msg, type='ok') {
@@ -441,7 +465,7 @@ async function loadCodes() {
         const data = await res.json();
         if (data.status === 'success') {
             const codes = data.task_codes;
-            ['yt1','yt2','yt3','web1','web2','web3','partner1','partner2'].forEach(k => {
+            CODE_KEYS.forEach(k => {
                 const el = document.getElementById('code-' + k);
                 if (el && codes[k]) el.value = codes[k];
             });
@@ -452,7 +476,7 @@ async function loadCodes() {
 // ── Save Codes ──
 async function saveCodes() {
     const codes = {};
-    ['yt1','yt2','yt3','web1','web2','web3','partner1','partner2'].forEach(k => {
+    CODE_KEYS.forEach(k => {
         const v = document.getElementById('code-' + k)?.value.trim().toUpperCase();
         if (v) codes[k] = v;
     });
@@ -540,29 +564,40 @@ async function loadStats() {
             document.getElementById('stat-users').textContent    = statsData.total_users    ?? '—';
             document.getElementById('stat-pending').textContent  = statsData.pending        ?? '—';
             document.getElementById('stat-approved').textContent = statsData.approved       ?? '—';
-            document.getElementById('stat-coins').textContent    = statsData.total_coins != null ? (statsData.total_coins).toLocaleString('en-IN') : '—';
+            document.getElementById('stat-coins').textContent    = statsData.total_coins != null
+                ? statsData.total_coins.toLocaleString('en-IN') : '—';
         }
 
-        // Sponsor click counts
+        // Sponsor click counts — all 4 slots
         const clickEl = document.getElementById('sponsor-clicks-list');
         if (clickEl) {
             if (clicksData.status === 'success') {
                 const clicks = clicksData.clicks || {};
-                const slots  = ['slot1', 'slot2', 'slot3'];
-                const labels = { slot1: 'Sponsor Slot 1', slot2: 'Sponsor Slot 2', slot3: 'Partner Slot 3' };
+                const slots  = ['slot1', 'slot2', 'slot3', 'slot4'];
+                const labels = {
+                    slot1: 'Sponsor Slot 1 (Channel)',
+                    slot2: 'Sponsor Slot 2 (Channel)',
+                    slot3: 'Partner Slot 3 (Task)',
+                    slot4: 'Partner Slot 4 (Verify 🔐)'
+                };
+                const colors = {
+                    slot1: '#38bdf8', slot2: '#38bdf8',
+                    slot3: '#a855f7', slot4: '#3498db'
+                };
 
                 const rows = slots.map(slot => {
                     const info = clicks[slot];
-                    const count   = info ? info.count    : 0;
-                    const link    = info ? info.link_url : '—';
+                    const count     = info ? info.count    : 0;
+                    const link      = info ? info.link_url : '—';
                     const shortLink = link.length > 40 ? link.substring(0, 40) + '...' : link;
+                    const col       = colors[slot] || '#38bdf8';
                     return `
-                        <div style="background:#0f172a; border:1px solid ${count > 0 ? '#38bdf8' : '#334155'}; border-radius:10px; padding:12px 14px; margin-bottom:8px;">
+                        <div style="background:#0f172a; border:1px solid ${count > 0 ? col : '#334155'}; border-radius:10px; padding:12px 14px; margin-bottom:8px;">
                             <div style="display:flex; justify-content:space-between; align-items:center;">
                                 <span style="font-size:13px; font-weight:600; color:#e2e8f0;">🤝 ${labels[slot]}</span>
-                                <span style="font-size:22px; font-weight:700; color:#38bdf8;">${count}</span>
+                                <span style="font-size:22px; font-weight:700; color:${col};">${count}</span>
                             </div>
-                            <div style="font-size:10px; color:#64748b; margin-top:4px;">unique clicks</div>
+                            <div style="font-size:10px; color:#64748b; margin-top:4px;">unique clicks / verifications</div>
                             <div style="font-size:10px; color:#475569; margin-top:6px; word-break:break-all;">
                                 🔗 ${count > 0 ? shortLink : 'No link active yet'}
                             </div>
@@ -744,7 +779,6 @@ async function inlineUnban(userId, btn) {
         const data = await res.json();
         if (data.status === 'success') {
             toast('✅ User unbanned!', 'ok');
-            // Remove this card from the list
             btn.closest('.ban-card').remove();
         } else {
             toast('❌ Failed', 'err');
