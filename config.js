@@ -60,7 +60,7 @@ const CONFIG = {
     SPONSORS: {
 
         slot1: {
-            active: true,
+            active: false,
             icon:   "💼",
             name:   "Sponsor Slot 1",
             desc:   "Contact admin to advertise here",
@@ -70,7 +70,7 @@ const CONFIG = {
         },
 
         slot2: {
-            active: true,
+            active: false,
             icon:   "📢",
             name:   "Sponsor Channel",
             desc:   "Join the channel & earn instantly",
@@ -80,7 +80,7 @@ const CONFIG = {
         },
 
         slot3: {
-            active: true,
+            active: false,
             icon:   "🌟",
             name:   "Partner Task",
             desc:   "Complete the task & claim to earn",
@@ -90,7 +90,7 @@ const CONFIG = {
         },
 
         slot4: {
-            active: true,
+            active: false,
             icon:   "🌐",
             name:   "Sponsor Website Task",
             desc:   "Visit the site & enter code to earn",
