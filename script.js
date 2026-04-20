@@ -356,6 +356,7 @@ async function fetchLiveData() {
             checkDailyBonus(data.last_claim);
             updateAdCounter(data.ads_today || 0, data.ads_date || "");
             updateChannelButtons(data.channel_claims || {});
+            renderSponsorSlots(data.channel_claims || {}, data.completed_tasks || []);
 
             // Promo task completions (for index.html inline scripts)
             window._promoTaskCompletions = data.promo_task_completions || [];
@@ -1140,9 +1141,157 @@ function switchTab(tabId, el) {
 }
 
 // ============================================================
+// SPONSOR SLOTS — Dynamic render from CONFIG.SPONSORS
+// ============================================================
+
+/**
+ * Render all sponsor slots (slot1–slot4) from CONFIG.SPONSORS.
+ * Called on init and after fetchLiveData so claimed state is fresh.
+ * @param {object} channelClaims   - user's channel_claims map from server
+ * @param {Array}  completedTasks  - user's completed task IDs (for verify type)
+ */
+function renderSponsorSlots(channelClaims, completedTasks) {
+    const container = document.getElementById('sponsor-slots-container');
+    if (!container) return;
+
+    const sponsors = CONFIG.SPONSORS || {};
+    const slots    = ['slot1', 'slot2', 'slot3', 'slot4'];
+    const claims   = channelClaims  || {};
+    const done     = completedTasks || [];
+
+    let html = '';
+
+    slots.forEach(slotId => {
+        const s = sponsors[slotId];
+        if (!s) return; // slot not defined in config → skip
+
+        const icon   = s.icon   || '💼';
+        const name   = s.name   || ('Sponsor ' + slotId);
+        const desc   = s.desc   || '';
+        const link   = s.link   || '#';
+        const reward = s.reward || 5;
+        const type   = s.type   || 'channel';
+        const active = s.active === true;
+
+        if (!active) {
+            // Locked slot
+            html += `
+            <div style="position:relative; display:flex; align-items:center; gap:12px; padding:10px;
+                        background:rgba(255,255,255,0.04); border-radius:10px; margin-bottom:8px;
+                        overflow:hidden; min-height:58px;">
+                <div class="lock-overlay">
+                    <span class="lock-icon">🔒</span>
+                    <span class="lock-label">Slot Available</span>
+                </div>
+                <div style="font-size:26px;">${icon}</div>
+                <div style="flex:1;">
+                    <p style="font-size:13px; font-weight:600; color:#475569; margin:0;">${name}</p>
+                    <p style="font-size:11px; color:#334155; margin:2px 0 0 0;">Contact admin to activate</p>
+                </div>
+                <button class="btn-sm" style="background:#38bdf8; color:#000; opacity:0.4;" disabled>Locked</button>
+            </div>`;
+            return;
+        }
+
+        // Check if already claimed
+        const claim = claims[slotId];
+        let alreadyClaimed = false;
+        if (claim) {
+            if (typeof claim === 'object' && claim.claimed_link) {
+                alreadyClaimed = (claim.claimed_link === link && link !== '');
+            } else if (claim === true) {
+                alreadyClaimed = true;
+            }
+        }
+
+        if (type === 'verify') {
+            // Verify type — open site + enter code + verify (like web tasks, one-time)
+            const isVerifyDone = done.includes(slotId);
+            const inputId = `${slotId}-code-input`;
+            html += `
+            <div class="partner-card" style="margin-bottom:8px;">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                    <span style="font-size:22px;">${icon}</span>
+                    <div style="flex:1;">
+                        <p style="font-size:13px; font-weight:700; color:#3498db; margin:0;">${name}</p>
+                        <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">${desc}</p>
+                    </div>
+                    <span style="font-size:12px; color:#f1c40f; font-weight:700;">+${reward} 🪙</span>
+                </div>
+                ${isVerifyDone
+                    ? `<button class="btn-sm" style="width:100%; background:#334155; color:#64748b;" disabled>✅ Completed (One-time)</button>`
+                    : `<button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px; font-weight:700;"
+                            onclick="window.open('${link}', '_blank')">
+                            🌐 Visit Site
+                        </button>
+                        <div style="display:flex; gap:8px;">
+                            <input type="text" id="${inputId}" placeholder="Enter code"
+                                style="flex:1; padding:8px 10px; background:#1e293b; border:1px solid #334155;
+                                       border-radius:8px; color:#e2e8f0; font-size:13px; text-transform:uppercase;"
+                                maxlength="20">
+                            <button class="btn-sm" style="background:linear-gradient(135deg,#3498db,#2980b9); font-weight:700;"
+                                onclick="verifyTask('${slotId}', '${inputId}')">Verify</button>
+                        </div>`
+                }
+            </div>`;
+
+        } else if (type === 'task') {
+            // Task type — open link + claim button (no code)
+            html += `
+            <div class="partner-card" style="margin-bottom:8px;">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                    <span style="font-size:22px;">${icon}</span>
+                    <div style="flex:1;">
+                        <p style="font-size:13px; font-weight:700; color:#a855f7; margin:0;">${name}</p>
+                        <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">${desc}</p>
+                    </div>
+                    <span style="font-size:12px; color:#f1c40f; font-weight:700;">+${reward} 🪙</span>
+                </div>
+                ${alreadyClaimed
+                    ? `<button class="btn-sm" style="width:100%; background:#334155; color:#64748b;" disabled>✅ Completed</button>`
+                    : `<button class="btn-sm" style="width:100%; background:linear-gradient(135deg,#a855f7,#7c3aed); color:#fff; font-weight:700;"
+                            onclick="claimChannel('${slotId}', '${link}')">
+                            Open & Claim +${reward} 🪙
+                        </button>`
+                }
+            </div>`;
+        } else {
+            // Channel type — join button
+            html += `
+            <div style="display:flex; align-items:center; gap:12px; padding:10px;
+                        background:rgba(255,255,255,0.05); border-radius:10px; margin-bottom:8px;">
+                <div style="font-size:26px;">${icon}</div>
+                <div style="flex:1;">
+                    <p style="font-size:13px; font-weight:600; color:#e2e8f0; margin:0;">${name}</p>
+                    <p style="font-size:11px; color:#94a3b8; margin:2px 0 0 0;">${desc}</p>
+                </div>
+                ${alreadyClaimed
+                    ? `<button class="btn-sm" style="background:#2ecc71; color:#000;" disabled>✅ Joined</button>`
+                    : `<button id="ch-btn-${slotId}" class="btn-sm ch-claim-btn"
+                            style="background:linear-gradient(135deg,#38bdf8,#0ea5e9); color:#000; font-weight:700;"
+                            onclick="claimChannel('${slotId}', '${link}')">
+                            +${reward} 🪙 Join
+                        </button>`
+                }
+            </div>`;
+        }
+    });
+
+    container.innerHTML = html || '<p style="color:#475569; text-align:center; font-size:13px;">No sponsor slots configured.</p>';
+}
+
+// ============================================================
 // APP INIT
 // ============================================================
 window.addEventListener('DOMContentLoaded', () => {
+    // Set admin Telegram username display
+    const adminEl = document.getElementById('admin-tg-username');
+    if (adminEl && CONFIG.ADMIN_TELEGRAM) {
+        const u = String(CONFIG.ADMIN_TELEGRAM);
+        adminEl.textContent = u.startsWith('@') ? u : '@' + u;
+    }
+
+    renderSponsorSlots({});
     fetchLiveData();
     checkDevice();
     preloadMonetagAd();
