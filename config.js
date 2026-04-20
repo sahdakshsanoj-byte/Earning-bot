@@ -11,8 +11,10 @@ const CONFIG = {
     // Your Telegram bot username (without @)
     BOT_USERNAME: "Cdotern_bot",
 
+    // Admin Telegram username for support contact (with or without @)
+    ADMIN_TELEGRAM: "@YourAdminUsername",
+
     // Monetag Telegram Mini App Rewarded Interstitial Zone ID
-    // Replace this with the Zone ID from your Monetag dashboard
     MONETAG_ZONE_ID: "10822310",
 
     // Paste the exact SDK script URL from your Monetag dashboard
@@ -51,7 +53,9 @@ const CONFIG = {
     //   active : true   →  Slot unlock ho jaayega automatically
     //
     //   type "channel"  →  Join button (link = t.me/...)
-    //   type "task"     →  Open link + code verify (link = website)
+    //   type "task"     →  Open link + claim button (link = website)
+    //
+    //   Slot 4 bhi yahan se control hoti hai (nayi feature)
     // ──────────────────────────────────────────────────────────
     SPONSORS: {
 
@@ -61,7 +65,7 @@ const CONFIG = {
             name:   "Sponsor Slot 1",
             desc:   "Contact admin to advertise here",
             link:   "https://youtube.com/shorts/E2g3GuGeDtw?si=p0KQ0f7C37Tc-n9J",
-            reward: 10,
+            reward: 3,
             type:   "channel"
         },
 
@@ -71,7 +75,7 @@ const CONFIG = {
             name:   "Sponsor Channel",
             desc:   "Join the channel & earn instantly",
             link:   "https://t.me/Cdotchat",
-            reward: 10,
+            reward: 3,
             type:   "channel"
         },
 
@@ -79,10 +83,20 @@ const CONFIG = {
             active: true,
             icon:   "🌟",
             name:   "Partner Task",
-            desc:   "Complete the task & enter code to earn",
+            desc:   "Complete the task & claim to earn",
             link:   "https://t.me/cdoternoffical",
-            reward: 15,
+            reward: 4,
             type:   "task"
+        },
+
+        slot4: {
+            active: false,
+            icon:   "🌐",
+            name:   "Sponsor Website Task",
+            desc:   "Visit the site & enter code to earn",
+            link:   "https://your-sponsor-link.com",
+            reward: 4,
+            type:   "verify"   // Code verification task — use /settask slot4 CODE to set code
         }
 
     }
