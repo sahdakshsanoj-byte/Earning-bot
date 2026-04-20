@@ -151,6 +151,7 @@ TASK_CODES = {
     "web1": "DASH98",
     "web2": "GYM567",
     "web3": "SHU234",
+    "slot4": "SLOT4",   # Sponsor slot 4 verification code (change with /settask slot4 CODE)
 }
 
 # Updated rewards per spec
@@ -161,7 +162,11 @@ TASK_REWARDS = {
     "web1": 3,   # Website/link tasks: 3 coins each
     "web2": 3,
     "web3": 3,
+    "slot4": 4,  # Sponsor slot 4 verify task: 4 coins (one-time)
 }
+
+# Task IDs that are one-time ever (not daily) — slot verify tasks
+ONE_TIME_TASK_IDS = {"slot4"}
 
 # Daily limits per task type
 MAX_YT_TASKS_PER_DAY = 3      # max 3 YouTube tasks per day
@@ -772,8 +777,14 @@ def get_user_data_api(user_id: int):
         completed_today = []
         for tid, info in task_completions.items():
             if isinstance(info, dict):
-                if info.get("date") == today and info.get("code") == live_task_codes.get(tid, ""):
-                    completed_today.append(tid)
+                code_matches = info.get("code") == live_task_codes.get(tid, "")
+                if tid in ONE_TIME_TASK_IDS:
+                    # One-time tasks: show as done forever once code matches
+                    if code_matches:
+                        completed_today.append(tid)
+                else:
+                    if info.get("date") == today and code_matches:
+                        completed_today.append(tid)
 
         promo_task_completions = user.get("promo_task_completions", [])
 
@@ -1098,12 +1109,17 @@ def verify_task_api():
         live_codes = get_live_task_codes()
 
         existing = task_completions.get(task_id, {})
-        if (
-            isinstance(existing, dict)
-            and existing.get("date") == today
-            and existing.get("code") == correct_code
-        ):
-            return jsonify({"status": "error", "message": "Task already completed today! Come back tomorrow."}), 400
+        # One-time tasks (slot verify): block if ever completed, not just today
+        if task_id in ONE_TIME_TASK_IDS:
+            if isinstance(existing, dict) and existing.get("code") == correct_code:
+                return jsonify({"status": "error", "message": "You have already completed this task!"}), 400
+        else:
+            if (
+                isinstance(existing, dict)
+                and existing.get("date") == today
+                and existing.get("code") == correct_code
+            ):
+                return jsonify({"status": "error", "message": "Task already completed today! Come back tomorrow."}), 400
 
         # Enforce daily task-type limits
         if task_id.startswith("yt"):
@@ -2294,6 +2310,66 @@ def list_promo_tasks_command(message):
     except Exception as exc:
         logger.error("list_promo_tasks_command error: %s", exc)
         bot.reply_to(message, "Server error. Please try again.")
+
+
+@bot.message_handler(commands=["adminpanel"])
+def admin_panel_command(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    text = (
+        "🛠 *Admin Panel — All Commands*\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "📊 *Stats & Info*\n"
+        "• /stats — Bot statistics\n"
+        "• /balance `<user_id>` — User balance\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "💰 *Coins*\n"
+        "• /addcoins `<user_id> <amount>` — Add coins\n"
+        "• /penalty `<user_id> <amount>` — Deduct coins\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "💸 *Withdrawals*\n"
+        "• /approve `<user_id>` — Approve withdrawal\n"
+        "• /reject `<user_id> <reason>` — Reject withdrawal\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🎫 *Promo Codes*\n"
+        "• /createpromo `<code> <coins> <uses>` — Create promo\n"
+        "• /deletepromo `<code>` — Delete promo\n"
+        "• /listpromos — List all promos\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "📢 *Promotion Tasks*\n"
+        "• /addpromtask `<id> <coins> <title>` — Add task\n"
+        "• /delpromtask `<id>` — Delete task\n"
+        "• /listpromtasks — List all tasks\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "✅ *Task Codes*\n"
+        "• /settask `<task_id> <code>` — Update task code\n"
+        "  IDs: yt1 yt2 yt3 web1 web2 web3 slot4\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🚫 *User Management*\n"
+        "• /block `<user_id>` — Block user\n"
+        "• /unblock `<user_id>` — Unblock user\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "📣 *Broadcast*\n"
+        "• /broadcast `<message>` — Send to all users\n"
+        "• /msg `<user_id> <message>` — Message a user\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🔤 *Word Filter (Group)*\n"
+        "• /addcodefilter `<word>` — Block a word\n"
+        "• /delcodefilter `<word>` — Unblock a word\n"
+        "• /listcodefilters — List blocked words\n"
+        "• /resetcodeviolations — Reset user violations\n"
+        "• /addcodepattern `<regex>` — Add regex pattern\n"
+    )
+    bot.reply_to(message, text, parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["stats"])
