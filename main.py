@@ -151,6 +151,7 @@ TASK_CODES = {
     "web1": "DASH98",
     "web2": "GYM567",
     "web3": "SHU234",
+    "slot3": "SLOT3",   # Sponsor slot 3 verification code (change with /settask slot3 CODE)
     "slot4": "SLOT4",   # Sponsor slot 4 verification code (change with /settask slot4 CODE)
 }
 
@@ -162,11 +163,12 @@ TASK_REWARDS = {
     "web1": 3,   # Website/link tasks: 3 coins each
     "web2": 3,
     "web3": 3,
+    "slot3": 4,  # Sponsor slot 3 verify task: 4 coins (one-time)
     "slot4": 4,  # Sponsor slot 4 verify task: 4 coins (one-time)
 }
 
 # Task IDs that are one-time ever (not daily) — slot verify tasks
-ONE_TIME_TASK_IDS = {"slot4"}
+ONE_TIME_TASK_IDS = {"slot3", "slot4"}
 
 # Daily limits per task type
 MAX_YT_TASKS_PER_DAY = 3      # max 3 YouTube tasks per day
@@ -775,10 +777,17 @@ def get_user_data_api(user_id: int):
         task_completions = user.get("task_completions", {})
         live_task_codes = get_live_task_codes()
         completed_today = []
+        verify_completions = {}
         for tid, info in task_completions.items():
             if isinstance(info, dict):
                 code_matches = info.get("code") == live_task_codes.get(tid, "")
                 if tid in ONE_TIME_TASK_IDS:
+                    # Expose stored {code, link} to frontend so it can also
+                    # invalidate completion when sponsor link changes.
+                    verify_completions[tid] = {
+                        "code": info.get("code", ""),
+                        "link": info.get("link", ""),
+                    }
                     # One-time tasks: show as done forever once code matches
                     if code_matches:
                         completed_today.append(tid)
@@ -795,6 +804,7 @@ def get_user_data_api(user_id: int):
                 "leaderboard": get_leaderboard_cached(),
                 "referrals": get_referral_list(user_id),
                 "completed_tasks": completed_today,
+                "verify_completions": verify_completions,
                 "last_claim": user.get("last_claim_ts", ""),
                 "referred_by": user.get("referred_by", ""),
                 "ads_today": ads_today,
@@ -1070,6 +1080,7 @@ def verify_task_api():
 
     task_id = sanitize_text(data.get("task_id", "")).lower()
     user_code = sanitize_text(data.get("code", "")).upper()
+    sponsor_link = sanitize_text(data.get("link", ""), max_length=512)
 
     if not task_id or not user_code:
         return jsonify({"status": "error", "message": "Missing task ID or code."}), 400
@@ -1137,13 +1148,45 @@ def verify_task_api():
                     "message": f"Daily website task limit reached ({MAX_WEB_TASKS_PER_DAY}/{MAX_WEB_TASKS_PER_DAY}). Come back tomorrow!"
                 }), 400
 
-        users_col.update_one(
-            {"user_id": user_id},
+        # Atomic guard: only credit if THIS exact completion record isn't already
+        # set. Prevents double-reward from concurrent requests (same task, same
+        # day, same code). For one-time tasks we additionally guard on "code".
+        completion_field = f"task_completions.{task_id}"
+        if task_id in ONE_TIME_TASK_IDS:
+            guard_filter = {
+                "user_id": user_id,
+                "blocked": {"$ne": True},
+                "$or": [
+                    {completion_field: {"$exists": False}},
+                    {f"{completion_field}.code": {"$ne": correct_code}},
+                ],
+            }
+        else:
+            guard_filter = {
+                "user_id": user_id,
+                "blocked": {"$ne": True},
+                "$or": [
+                    {completion_field: {"$exists": False}},
+                    {f"{completion_field}.date": {"$ne": today}},
+                    {f"{completion_field}.code": {"$ne": correct_code}},
+                ],
+            }
+
+        completion_record = {"date": today, "code": correct_code}
+        if sponsor_link:
+            completion_record["link"] = sponsor_link
+
+        upd = users_col.update_one(
+            guard_filter,
             {
                 "$inc": {"coins": reward},
-                "$set": {f"task_completions.{task_id}": {"date": today, "code": correct_code}},
+                "$set": {completion_field: completion_record},
             },
         )
+        if upd.modified_count == 0:
+            # Lost the race — already credited by a parallel request
+            return jsonify({"status": "error", "message": "Task already completed."}), 400
+
         clear_task_fail_counter(user_id, task_id)
         return jsonify(
             {
@@ -1635,32 +1678,100 @@ def check_device_api():
         if current_user.get("blocked"):
             return jsonify({"status": "blocked"})
 
-        ip_conflict = users_col.find_one({"ip": ip, "user_id": {"$ne": user_id}}) if ip else None
-        fp_conflict = (
-            users_col.find_one({"fingerprint": fingerprint, "user_id": {"$ne": user_id}})
-            if fingerprint
-            else None
-        )
+        # ---------- FINGERPRINT CHECK (HARD AUTO-BAN) ----------
+        # Fingerprint device-unique hai. Same fp wale duplicate accounts
+        # ko turant block karo. Sabse purana account "original" rehta hai.
+        if fingerprint:
+            fp_siblings = list(users_col.find(
+                {"fingerprint": fingerprint, "user_id": {"$ne": user_id}},
+                {"user_id": 1, "joined": 1, "blocked": 1},
+            ).limit(50))
+            active_siblings = [s for s in fp_siblings if not s.get("blocked")]
 
-        if ip_conflict:
-            logger.warning("IP conflict: user %s shares IP %s with another account.", user_id, ip)
-            users_col.update_one({"user_id": user_id}, {"$set": {"ip_flagged": True}})
-            try:
-                bot.send_message(
-                    ADMIN_ID,
-                    f"⚠️ IP Conflict Detected\nUser: `{user_id}` shares IP with `{ip_conflict.get('user_id')}`",
-                    parse_mode="Markdown",
+            if active_siblings:
+                # Pick the OLDEST UN-BLOCKED account as original. Skipping
+                # blocked accounts prevents a banned account from "owning" the
+                # fingerprint and getting every new genuine signup auto-banned.
+                all_accounts = active_siblings + [{
+                    "user_id": user_id,
+                    "joined": current_user.get("joined"),
+                    "blocked": False,
+                }]
+                all_accounts.sort(key=lambda u: u.get("joined") or "")
+                original = all_accounts[0]
+                duplicates = all_accounts[1:]
+
+                banned_ids = []
+                for dup in duplicates:
+                    dup_id = dup["user_id"]
+                    res = users_col.update_one(
+                        {"user_id": dup_id, "blocked": {"$ne": True}},
+                        {"$set": {
+                            "blocked": True,
+                            "block_reason": "duplicate_device_fingerprint",
+                            "blocked_at": datetime.utcnow().isoformat(),
+                            "fp_flagged": True,
+                        }},
+                    )
+                    if res.modified_count:
+                        banned_ids.append(dup_id)
+                        logger.warning(
+                            "AUTO-BAN: user %s blocked (duplicate fingerprint of %s)",
+                            dup_id, original["user_id"],
+                        )
+                        try:
+                            bot.send_message(
+                                dup_id,
+                                "🚫 Aapka account block kar diya gaya hai.\n"
+                                "Reason: Same device se ek aur account already registered hai.\n"
+                                "Ek device = Ek account allowed hai.",
+                            )
+                        except Exception:
+                            pass
+
+                if banned_ids:
+                    try:
+                        bot.send_message(
+                            ADMIN_ID,
+                            "🚫 *Auto-Ban (Duplicate Device)*\n"
+                            f"Original: `{original['user_id']}`\n"
+                            f"Banned: {', '.join('`' + str(b) + '`' for b in banned_ids)}",
+                            parse_mode="Markdown",
+                        )
+                    except Exception:
+                        pass
+
+                if user_id != original["user_id"]:
+                    return jsonify({"status": "blocked"})
+
+        # ---------- IP CHECK (SOFT FLAG ONLY) ----------
+        # IP shared ho sakti hai (family WiFi, mobile NAT). Auto-ban mat
+        # karo — sirf admin ko notify karo review ke liye.
+        if ip:
+            ip_siblings_count = users_col.count_documents(
+                {"ip": ip, "user_id": {"$ne": user_id}, "blocked": {"$ne": True}}
+            )
+            if ip_siblings_count > 0 and not current_user.get("ip_flagged"):
+                users_col.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"ip_flagged": True}},
                 )
-            except Exception:
-                pass
+                try:
+                    bot.send_message(
+                        ADMIN_ID,
+                        f"⚠️ IP Conflict (review only, no auto-ban)\n"
+                        f"User `{user_id}` shares IP `{ip}` with {ip_siblings_count} other account(s).",
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    pass
 
-        if fp_conflict:
-            logger.warning("Fingerprint conflict: user %s shares fingerprint with another account.", user_id)
-            users_col.update_one({"user_id": user_id}, {"$set": {"fp_flagged": True}})
-
+        # ---------- STORE / UPDATE FIELDS ----------
         update_fields = {}
-        if ip and not current_user.get("ip"):
+        # IP latest rakho (network change ho sakta hai)
+        if ip:
             update_fields["ip"] = ip
+        # Fingerprint sticky — pehli baar set hone ke baad change nahi
         if fingerprint and not current_user.get("fingerprint"):
             update_fields["fingerprint"] = fingerprint
         if update_fields:
@@ -2430,13 +2541,14 @@ def reject_withdrawal(message):
         target_id = int(parts[1])
     except ValueError:
         return bot.reply_to(message, "Invalid user ID.")
-    withdraw = withdrawals_col.find_one({"user_id": target_id, "status": "Pending \u23f3"})
+    # Atomic: claim the pending row first, then refund. Prevents double-refund
+    # if two admins press /reject simultaneously.
+    withdraw = withdrawals_col.find_one_and_update(
+        {"user_id": target_id, "status": "Pending \u23f3"},
+        {"$set": {"status": "Rejected \u274c"}},
+    )
     if withdraw:
         users_col.update_one({"user_id": target_id}, {"$inc": {"coins": withdraw["amount"]}})
-        withdrawals_col.update_one(
-            {"user_id": target_id, "status": "Pending \u23f3"},
-            {"$set": {"status": "Rejected \u274c"}},
-        )
         try:
             bot.send_message(
                 target_id,
