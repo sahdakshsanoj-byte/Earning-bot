@@ -356,7 +356,7 @@ async function fetchLiveData() {
             checkDailyBonus(data.last_claim);
             updateAdCounter(data.ads_today || 0, data.ads_date || "");
             updateChannelButtons(data.channel_claims || {});
-            renderSponsorSlots(data.channel_claims || {}, data.completed_tasks || []);
+            renderSponsorSlots(data.channel_claims || {}, data.completed_tasks || [], data.verify_completions || {});
 
             // Promo task completions (for index.html inline scripts)
             window._promoTaskCompletions = data.promo_task_completions || [];
@@ -511,7 +511,7 @@ function openTask(taskKey, type) {
     }
 }
 
-async function verifyTask(taskId, inputId) {
+async function verifyTask(taskId, inputId, sponsorLink) {
     const code = document.getElementById(inputId)?.value.trim();
     if (!code) return showToast("Please enter the code!", "error");
 
@@ -519,7 +519,15 @@ async function verifyTask(taskId, inputId) {
     if (_pendingRequests.has(reqKey)) return;
     _pendingRequests.add(reqKey);
 
-    const verifyBtn = document.querySelector(`[onclick="verifyTask('${taskId}', '${inputId}')"]`);
+    // Accept both 2-arg (legacy) and 3-arg invocations. Resolve link from
+    // CONFIG.SPONSORS if not explicitly passed (covers slot* IDs).
+    let linkToSend = sponsorLink || "";
+    if (!linkToSend && typeof CONFIG !== 'undefined' && CONFIG.SPONSORS && CONFIG.SPONSORS[taskId]) {
+        linkToSend = CONFIG.SPONSORS[taskId].link || "";
+    }
+
+    const verifyBtn = document.querySelector(`[data-verify-btn="${taskId}"]`)
+                   || document.querySelector(`[onclick^="verifyTask('${taskId}'"]`);
     if (verifyBtn) verifyBtn.disabled = true;
 
     startCountdown(10,
@@ -529,7 +537,7 @@ async function verifyTask(taskId, inputId) {
                 const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/verify_task`, {
                     method:  'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body:    JSON.stringify({ user_id: userId, task_id: taskId, code: code })
+                    body:    JSON.stringify({ user_id: userId, task_id: taskId, code: code, link: linkToSend })
                 });
                 const data = await res.json();
                 if (data.status === "success") {
@@ -899,26 +907,54 @@ async function showAd() {
 // ============================================================
 // DEVICE CHECK
 // ============================================================
+// Strong device fingerprint via FingerprintJS open source (50+ signals).
+// Falls back to a weak hash (prefixed `wk_`) only if the CDN is blocked.
+let _fpPromise = null;
+function loadFingerprintJS() {
+    if (_fpPromise) return _fpPromise;
+    _fpPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://openfpcdn.io/fingerprintjs/v4/iife.min.js';
+        s.async = true;
+        s.onload  = () => resolve(window.FingerprintJS);
+        s.onerror = () => reject(new Error('FingerprintJS failed to load'));
+        document.head.appendChild(s);
+    }).catch((err) => { _fpPromise = null; throw err; });
+    return _fpPromise;
+}
+
 async function generateFingerprint() {
     try {
-        const data = [
-            navigator.userAgent, navigator.language,
-            screen.width + "x" + screen.height, screen.colorDepth,
-            new Date().getTimezoneOffset(),
-            navigator.hardwareConcurrency || "",
-            navigator.platform || ""
-        ].join("|");
-        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data));
-        return Array.from(new Uint8Array(buf))
-            .map(b => b.toString(16).padStart(2, "0")).join("");
-    } catch (e) { return ""; }
+        const FP = await loadFingerprintJS();
+        const fp = await FP.load();
+        const result = await fp.get();
+        if (result?.visitorId) return result.visitorId;
+        throw new Error('no visitorId');
+    } catch (e) {
+        // Fallback (weak) — better than nothing if CDN blocked
+        try {
+            const data = [
+                navigator.userAgent, navigator.language,
+                screen.width + "x" + screen.height, screen.colorDepth,
+                new Date().getTimezoneOffset(),
+                navigator.hardwareConcurrency || "",
+                navigator.platform || "",
+                navigator.deviceMemory || "",
+                (navigator.plugins ? navigator.plugins.length : 0)
+            ].join("|");
+            const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data));
+            return "wk_" + Array.from(new Uint8Array(buf))
+                .map(b => b.toString(16).padStart(2, "0")).join("");
+        } catch (_) { return ""; }
+    }
 }
 
 async function checkDevice() {
     if (!userId) return;
     try {
         const fingerprint = await generateFingerprint();
-        const res  = await fetch(`${CONFIG.API_BASE_URL}/check_device`, {
+        if (!fingerprint) return; // empty fp backend ko mat bhejo
+        const res = await fetch(`${CONFIG.API_BASE_URL}/check_device`, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({ user_id: userId, fingerprint })
@@ -1150,7 +1186,7 @@ function switchTab(tabId, el) {
  * @param {object} channelClaims   - user's channel_claims map from server
  * @param {Array}  completedTasks  - user's completed task IDs (for verify type)
  */
-function renderSponsorSlots(channelClaims, completedTasks) {
+function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
     const container = document.getElementById('sponsor-slots-container');
     if (!container) return;
 
@@ -1205,8 +1241,13 @@ function renderSponsorSlots(channelClaims, completedTasks) {
         }
 
         if (type === 'verify') {
-            // Verify type — open site + enter code + verify (like web tasks, one-time)
-            const isVerifyDone = done.includes(slotId);
+            // Verify type — open site + enter code + verify (one-time per
+            // (code,link) pair). If admin rotates either the code (via
+            // /settask) or the sponsor link (in config.js), the slot
+            // automatically re-opens for everyone.
+            const vc = (verifyCompletions || {})[slotId] || {};
+            const linkMatches = !vc.link || vc.link === link;
+            const isVerifyDone = done.includes(slotId) && linkMatches;
             const inputId = `${slotId}-code-input`;
             html += `
             <div class="partner-card" style="margin-bottom:8px;">
@@ -1229,8 +1270,9 @@ function renderSponsorSlots(channelClaims, completedTasks) {
                                 style="flex:1; padding:8px 10px; background:#1e293b; border:1px solid #334155;
                                        border-radius:8px; color:#e2e8f0; font-size:13px; text-transform:uppercase;"
                                 maxlength="20">
-                            <button class="btn-sm" style="background:linear-gradient(135deg,#3498db,#2980b9); font-weight:700;"
-                                onclick="verifyTask('${slotId}', '${inputId}')">Verify</button>
+                            <button class="btn-sm" data-verify-btn="${slotId}"
+                                style="background:linear-gradient(135deg,#3498db,#2980b9); font-weight:700;"
+                                onclick="verifyTask('${slotId}', '${inputId}', '${link}')">Verify</button>
                         </div>`
                 }
             </div>`;
