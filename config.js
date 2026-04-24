@@ -29,7 +29,7 @@ const CONFIG = {
     //   Use this when you have no YT videos ready, or want to
     //   pause YT earning temporarily.
     // ──────────────────────────────────────────────────────────
-    YT_TASKS_ACTIVE: true,
+    YT_TASKS_ACTIVE: false,
 
     // YouTube video links for Task tab (replace with your own)
     YT_LINKS: {
