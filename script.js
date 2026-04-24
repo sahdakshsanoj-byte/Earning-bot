@@ -1013,7 +1013,7 @@ function updateReferralList(referrals) {
                     <p style="margin:0;font-size:13px;font-weight:600;color:#e2e8f0;">Friend ${i + 1}</p>
                     <p style="margin:0;font-size:11px;color:#94a3b8;">ID: ${id.trim()}</p>
                 </div>
-                <span style="margin-left:auto;font-size:12px;color:#2ecc71;font-weight:700;">+50 🪙</span>
+                <span style="margin-left:auto;font-size:12px;color:#2ecc71;font-weight:700;">+30 🪙</span>
             </div>`;
     });
     list.innerHTML = html;
