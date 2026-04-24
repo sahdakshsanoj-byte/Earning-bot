@@ -311,6 +311,8 @@
         </div>
 
         <!-- YouTube Tasks (max 3 per day, 5 coins each) -->
+        <!-- Wrapped in #yt-tasks-section so it can be locked via config.js -->
+        <div id="yt-tasks-section" style="position:relative;">
         <div style="padding:8px 14px 4px 14px;">
             <p style="font-size:12px; font-weight:700; color:#ff0000; text-transform:uppercase; letter-spacing:1px;">📺 YouTube Tasks</p>
             <p style="font-size:11px; color:#64748b; padding: 0 0 4px 0;">+5 coins each • Max 3 per day</p>
@@ -351,6 +353,7 @@
                 <button class="btn-sm" onclick="verifyTask('yt3', 'yt-3')">Verify</button>
             </div>
         </div>
+        </div><!-- /#yt-tasks-section -->
 
         <!-- Website Tasks (max 3 per day, 3 coins each) -->
         <div style="padding:8px 14px 4px 14px;">
@@ -444,7 +447,7 @@
     <div id="refer" class="tab-content" style="display:none;">
         <div class="card balance-card" style="text-align:center;">
             <h4>Refer & Earn 🚀</h4>
-            <p style="font-size:13px; color:#94a3b8; margin-top:4px;">Earn <b style="color:#f1c40f;">50 Coins</b> for every friend you invite!</p>
+            <p style="font-size:13px; color:#94a3b8; margin-top:4px;">Earn <b style="color:#f1c40f;">30 Coins</b> for every friend you invite!</p>
         </div>
         <div class="card">
             <p style="font-size:13px; color:#94a3b8; margin-bottom:8px;">Your Referral Link:</p>
@@ -697,6 +700,51 @@
 
     // loadPromoTasks and renderSponsorSlots are called from fetchLiveData in script.js
     // Also call once on DOM ready as fallback
+    // ============================================================
+    // YOUTUBE TASKS LOCK — controlled via CONFIG.YT_TASKS_ACTIVE
+    // ============================================================
+    function applyYtLockState() {
+        const section = document.getElementById('yt-tasks-section');
+        if (!section || typeof CONFIG === 'undefined') return;
+
+        // Default to active (true) if flag missing — backward compatible.
+        const isActive = CONFIG.YT_TASKS_ACTIVE !== false;
+
+        // Remove any existing overlay first
+        const existing = section.querySelector('.lock-overlay');
+        if (existing) existing.remove();
+
+        // Re-enable any previously-disabled buttons/inputs inside the section
+        section.querySelectorAll('button, input').forEach(el => {
+            if (el.dataset.ytLockedDisabled === '1') {
+                el.disabled = false;
+                delete el.dataset.ytLockedDisabled;
+            }
+        });
+        section.style.pointerEvents = '';
+        section.style.filter = '';
+
+        if (!isActive) {
+            // Lock: dim section, disable interactions, show 🔒 overlay
+            section.style.pointerEvents = 'none';
+            section.style.filter = 'blur(2px) grayscale(0.4)';
+            section.querySelectorAll('button, input').forEach(el => {
+                if (!el.disabled) {
+                    el.disabled = true;
+                    el.dataset.ytLockedDisabled = '1';
+                }
+            });
+
+            const overlay = document.createElement('div');
+            overlay.className = 'lock-overlay';
+            overlay.style.pointerEvents = 'auto';
+            overlay.innerHTML =
+                '<span class="lock-icon">🔒</span>' +
+                '<span class="lock-label">YouTube tasks coming soon</span>';
+            section.appendChild(overlay);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         // Set admin Telegram display once config.js is loaded
         setTimeout(function() {
@@ -705,6 +753,7 @@
                 const u = CONFIG.ADMIN_TELEGRAM.startsWith('@') ? CONFIG.ADMIN_TELEGRAM : '@' + CONFIG.ADMIN_TELEGRAM;
                 el.textContent = u;
             }
+            applyYtLockState();
         }, 200);
         loadPromoTasks();
     });
