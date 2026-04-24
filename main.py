@@ -672,7 +672,7 @@ def send_referral_link(user_id: int) -> bool:
     try:
         bot.send_message(
             user_id,
-            "👥 Invite your friends and earn 50 coins for each referral!\n\n"
+            "👥 Invite your friends and earn 30 coins for each referral!\n\n"
             f"Your referral link:\n{referral_link}",
             reply_markup=markup,
             disable_web_page_preview=True,
@@ -712,13 +712,13 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
                 if referrer:
                     users_col.update_one(
                         {"user_id": int(referrer_id)},
-                        {"$inc": {"coins": 50, "referral_count": 1}},
+                        {"$inc": {"coins": 30, "referral_count": 1}},
                     )
                     new_user["referred_by"] = str(referrer_id)
                     try:
                         bot.send_message(
                             int(referrer_id),
-                            "\U0001f38a *Referral Bonus!*\n\nYou earned 50 coins for inviting a friend!",
+                            "\U0001f38a *Referral Bonus!*\n\nYou earned 30 coins for inviting a friend!",
                             parse_mode="Markdown",
                         )
                     except Exception as notify_exc:
@@ -2141,7 +2141,7 @@ def start(message):
         user_id,
         f"\U0001f44b *Hello {username}!*\n\n"
         f"\U0001f4b0 Balance: *{current_coins} \U0001fa99*\n\n"
-        f"Invite friends and earn *50 coins* for each referral!\n"
+        f"Invite friends and earn *30 coins* for each referral!\n"
         f"Tap the button below to start earning! \U0001f680",
         reply_markup=markup,
         parse_mode="Markdown",
