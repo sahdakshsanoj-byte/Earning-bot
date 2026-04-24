@@ -20,6 +20,17 @@ const CONFIG = {
     // Paste the exact SDK script URL from your Monetag dashboard
     MONETAG_SDK_URL: "https://libtl.com/sdk.js",
 
+    // ──────────────────────────────────────────────────────────
+    // YOUTUBE TASKS LOCK
+    //
+    //   true  → YouTube tasks unlocked & visible (normal)
+    //   false → YouTube tasks LOCKED with 🔒 animation overlay
+    //
+    //   Use this when you have no YT videos ready, or want to
+    //   pause YT earning temporarily.
+    // ──────────────────────────────────────────────────────────
+    YT_TASKS_ACTIVE: true,
+
     // YouTube video links for Task tab (replace with your own)
     YT_LINKS: {
         yt1: "https://youtu.be/YOUR_VIDEO_1",
@@ -54,8 +65,9 @@ const CONFIG = {
     //
     //   type "channel"  →  Join button (link = t.me/...)
     //   type "task"     →  Open link + claim button (link = website)
+    //   type "verify"   →  Visit + enter code (admin sets via /settask)
     //
-    //   Slot 4 bhi yahan se control hoti hai (nayi feature)
+    //   Slot 4 bhi yahan se control hoti hai
     // ──────────────────────────────────────────────────────────
     SPONSORS: {
 
