@@ -49,7 +49,7 @@ const CONFIG = {
     CHANNELS: {
         official: "https://t.me/cdoternoffical",
         channel2: "https://t.me/chatdotern",
-        channel3: "https://t.me/chatdotern"
+        channel3: "https://t.me/Cdotchat"
     },
 
     // Partner task links — used by Partner Slot code-verify tasks
