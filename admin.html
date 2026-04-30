@@ -99,9 +99,9 @@
         background:#0f172a; border:1px solid #334155; border-radius:10px;
         padding:14px; margin-bottom:10px;
     }
-    .wd-row { display:flex; justify-content:space-between; margin-bottom:6px; }
-    .wd-label { font-size:11px; color:#64748b; }
-    .wd-value { font-size:12px; color:#e2e8f0; font-weight:600; }
+    .wd-row { display:flex; justify-content:space-between; gap:10px; margin-bottom:6px; align-items:flex-start; }
+    .wd-label { font-size:11px; color:#64748b; flex-shrink:0; }
+    .wd-value { font-size:12px; color:#e2e8f0; font-weight:600; word-break:break-all; text-align:right; }
     .wd-actions { display:flex; gap:8px; margin-top:10px; }
 
     /* ── Stats ── */
@@ -221,19 +221,20 @@
             </div>
         </div>
 
-        <div class="card">
-            <h4>🌟 Partner Task Codes</h4>
+        <!-- ── Sponsor Slot 3 Verify Code ── -->
+        <div class="card" style="border-color:#a855f7;">
+            <h4 style="color:#a855f7;">🌟 Sponsor Slot 3 — Verify Code</h4>
+            <p style="font-size:11px; color:#64748b; margin-top:-8px; margin-bottom:14px;">
+                Yeh code users Sponsor Slot 3 mein enter karke 4 coins claim karte hain. One-time task hai.
+                Bot command: <code style="color:#a855f7;">/settask slot3 CODE</code>
+            </p>
             <div class="code-row">
-                <span class="code-label">Partner 1</span>
-                <input class="code-input" id="code-partner1" placeholder="PARTNER1">
-            </div>
-            <div class="code-row">
-                <span class="code-label">Partner 2</span>
-                <input class="code-input" id="code-partner2" placeholder="PARTNER2">
+                <span class="code-label">Slot 3 Code</span>
+                <input class="code-input" id="code-slot3" placeholder="SLOT3CODE" style="border-color:#a855f7; color:#a855f7;">
             </div>
         </div>
 
-        <!-- ── NEW: Sponsor Slot 4 Verify Code ── -->
+        <!-- ── Sponsor Slot 4 Verify Code ── -->
         <div class="card" style="border-color:#3498db;">
             <h4 style="color:#3498db;">🔐 Sponsor Slot 4 — Verify Code</h4>
             <p style="font-size:11px; color:#64748b; margin-top:-8px; margin-bottom:14px;">
@@ -245,6 +246,14 @@
                 <input class="code-input" id="code-slot4" placeholder="SLOT4CODE" style="border-color:#3498db; color:#3498db;">
             </div>
         </div>
+
+        <!-- ── Notify checkbox ── -->
+        <label style="display:flex; align-items:center; gap:10px; padding:10px 14px;
+                      background:#1e293b; border:1px solid #334155; border-radius:10px;
+                      margin-bottom:10px; cursor:pointer; font-size:13px; color:#94a3b8;">
+            <input type="checkbox" id="notify-users-codes" style="width:18px; height:18px; accent-color:#a855f7;">
+            <span>📢 Notify all users that codes were updated (uncheck for silent save)</span>
+        </label>
 
         <button class="btn-save" onclick="saveCodes()">💾 Save All Codes</button>
 
@@ -372,12 +381,20 @@
 <div id="toast"></div>
 
 <script>
+// ── Backend URL config ──
+// ⚠️ IMPORTANT: If admin.html is hosted SEPARATELY from the bot backend
+// (e.g. on GitHub Pages while bot runs on Render), set BACKEND_URL to
+// your Render service URL — for example:
+//   const BACKEND_URL = 'https://your-bot.onrender.com';
+// If admin.html is served by Flask itself (same-origin), leave it empty.
+const BACKEND_URL = '';
+const API = BACKEND_URL || window.location.origin;
+
 // ── State ──
 let adminToken = sessionStorage.getItem('admin_token') || '';
-const API = window.location.origin;
 
-// ── All task code keys (including slot4) ──
-const CODE_KEYS = ['yt1','yt2','yt3','web1','web2','web3','partner1','partner2','slot4'];
+// ── All task code keys (must match TASK_CODES in main.py) ──
+const CODE_KEYS = ['yt1','yt2','yt3','web1','web2','web3','slot3','slot4'];
 
 // ── Toast ──
 function toast(msg, type='ok') {
@@ -480,15 +497,22 @@ async function saveCodes() {
         const v = document.getElementById('code-' + k)?.value.trim().toUpperCase();
         if (v) codes[k] = v;
     });
+    if (!Object.keys(codes).length) {
+        return toast('❌ No codes to save', 'err');
+    }
+    const notify = document.getElementById('notify-users-codes')?.checked || false;
     try {
         const res  = await fetch(`${API}/admin/update_codes`, {
             method: 'POST',
             headers: authHeaders(),
-            body: JSON.stringify({ codes })
+            body: JSON.stringify({ codes, notify })
         });
         const data = await res.json();
-        if (data.status === 'success') toast('✅ Codes saved!', 'ok');
-        else toast('❌ Failed to save', 'err');
+        if (data.status === 'success') {
+            toast(notify ? '✅ Codes saved & broadcasting!' : '✅ Codes saved (silent)', 'ok');
+        } else {
+            toast('❌ ' + (data.message || 'Failed to save'), 'err');
+        }
     } catch(e) { toast('❌ Network error', 'err'); }
 }
 
