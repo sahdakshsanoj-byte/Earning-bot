@@ -366,6 +366,9 @@ async function fetchLiveData() {
 
             // Promo tasks (inline script in index.html)
             if (typeof loadPromoTasks === 'function') loadPromoTasks();
+
+            // Lottery card refresh
+            loadLotteryStatus();
         }
     } catch (err) {
         showToast("⚠️ Connection error. Retrying...", "error");
@@ -376,6 +379,129 @@ async function fetchLiveData() {
 function getRefCount(referrals) {
     if (!referrals || referrals === "" || referrals === "none") return 0;
     return referrals.split(',').filter(id => id.trim() !== '').length;
+}
+
+// ============================================================
+// LOTTERY
+// ============================================================
+async function loadLotteryStatus() {
+    if (!userId) return;
+    const card = document.getElementById('lottery-card');
+    if (!card) return;
+
+    // ── Frontend config lock ──
+    // Set CONFIG.LOTTERY_ACTIVE = false in config.js to show lock animation.
+    if (CONFIG.LOTTERY_ACTIVE === false) {
+        card.style.display = 'block';
+        if (!card.querySelector('.lottery-lock-overlay')) {
+            const ov = document.createElement('div');
+            ov.className = 'lottery-lock-overlay';
+            ov.innerHTML = `
+                <span class="lottery-lock-icon">🔒</span>
+                <span class="lottery-lock-label">Lottery Coming Soon!</span>
+                <span class="lottery-lock-sub">Stay tuned for updates</span>`;
+            card.appendChild(ov);
+        }
+        return;
+    }
+
+    // Remove any stale lock overlay (in case config was just unlocked)
+    const staleOv = card.querySelector('.lottery-lock-overlay');
+    if (staleOv) staleOv.remove();
+
+    try {
+        const res  = await fetch(`${CONFIG.API_BASE_URL}/get_lottery_status?user_id=${userId}`);
+        const data = await res.json();
+        if (data.status !== 'success') {
+            card.style.display = 'none';
+            return;
+        }
+        if (!data.active) {
+            card.style.display = 'none';
+            return;
+        }
+
+        card.style.display = 'block';
+
+        const priceEl   = document.getElementById('lottery-ticket-price');
+        const prizeEl   = document.getElementById('lottery-prize');
+        const playersEl = document.getElementById('lottery-players');
+        const btn       = document.getElementById('lottery-btn');
+        const winnerEl  = document.getElementById('lottery-last-winner');
+
+        if (priceEl)   priceEl.innerText   = data.ticket_price ?? '--';
+        if (prizeEl)   prizeEl.innerText   = data.prize ?? '--';
+        if (playersEl) playersEl.innerText = data.tickets_sold ?? 0;
+
+        if (winnerEl) {
+            if (data.last_winner && data.last_winner.user_id) {
+                const wid   = String(data.last_winner.user_id);
+                const masked = wid.length > 4 ? `***${wid.slice(-4)}` : wid;
+                winnerEl.innerText   = `🏆 Last winner: ${masked} won ${data.last_winner.prize} 🪙`;
+                winnerEl.style.display = 'block';
+            } else {
+                winnerEl.style.display = 'none';
+            }
+        }
+
+        if (btn) {
+            if (data.drawn) {
+                btn.disabled = true;
+                btn.innerText = '🎲 Today\'s round drawn — back at 00:00 UTC';
+                btn.style.background = '#7f8c8d';
+                btn.style.color = '#fff';
+            } else if (data.has_ticket) {
+                btn.disabled = true;
+                btn.innerText = '✅ You\'re in! Good luck 🍀';
+                btn.style.background = '#27ae60';
+                btn.style.color = '#fff';
+            } else {
+                btn.disabled = false;
+                btn.innerText = `🎫 Buy Ticket (${data.ticket_price} 🪙)`;
+                btn.style.background = '#ffd700';
+                btn.style.color = '#1a1a1a';
+            }
+        }
+    } catch (err) {
+        // Silent fail — lottery card just won't show
+        card.style.display = 'none';
+    }
+}
+
+async function buyLotteryTicket() {
+    if (!userId) {
+        showToast('⚠️ User ID error.', 'error');
+        return;
+    }
+    const btn = document.getElementById('lottery-btn');
+    if (btn && btn.disabled) return;
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '⏳ Buying...';
+    }
+
+    try {
+        const res = await fetch(`${CONFIG.API_BASE_URL}/buy_lottery_ticket`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId }),
+        });
+        const data = await res.json();
+
+        if (data.status === 'success') {
+            showToast(data.message || '🎫 Ticket purchased!', 'success');
+            // Refresh balance + lottery card
+            if (typeof refreshBalance === 'function') refreshBalance();
+            loadLotteryStatus();
+        } else {
+            showToast(data.message || 'Could not buy ticket.', 'error');
+            loadLotteryStatus();
+        }
+    } catch (err) {
+        showToast('⚠️ Network error. Try again.', 'error');
+        loadLotteryStatus();
+    }
 }
 
 // ============================================================
@@ -465,7 +591,7 @@ async function requestWithdraw() {
     if (!rawAmount)                        return showToast("Please enter the coin amount!", "error");
     if (isNaN(reqAmount))                  return showToast("Please enter a valid number!", "error");
     if (reqAmount <= 0)                    return showToast("Amount cannot be zero or negative!", "error");
-    if (reqAmount < MIN_WITHDRAW_COINS)    return showToast(`Minimum ${MIN_WITHDRAW_COINS} coins required (₹100).`, "error");
+    if (reqAmount < MIN_WITHDRAW_COINS)    return showToast(`Minimum ${MIN_WITHDRAW_COINS} coins required.`, "error");
     if (reqAmount > totalCoins)            return showToast(`Insufficient balance. You have ${totalCoins} coins.`, "error");
     if (!upi || !upi.includes('@'))        return showToast("Please enter a valid UPI ID! (Example: name@upi)", "error");
 
@@ -638,7 +764,7 @@ async function claimChannel(channelId, channelUrl) {
     const reqKey = `channel_${channelId}`;
     if (_pendingRequests.has(reqKey)) return;
 
-    if (channelId === 'slot1' || channelId === 'slot2' || channelId === 'slot3') {
+    if (channelId === 'slot1' || channelId === 'slot2' || channelId === 'slot3' || channelId === 'slot4') {
         trackSponsorClick(channelId, channelUrl);
     }
 
@@ -868,7 +994,7 @@ async function showAd() {
         });
         monetagPreloaded = false;
 
-        if (adResult?.reward_event_type && adResult.reward_event_type !== 'valued') {
+        if (!adResult?.reward_event_type || adResult.reward_event_type !== 'valued') {
             showToast("Ad was skipped. Watch the full ad to earn coins.", "error");
             preloadMonetagAd();
             return;
@@ -1037,7 +1163,7 @@ async function loadHistory() {
                             : h.status.includes('Rejected') ? '#e74c3c' : '#f1c40f';
                 html += `
                     <div class="history-item">
-                        <div>💸 <b>${h.amount} coins</b> (₹${(h.amount * 0.02).toFixed(2)}) — UPI: ${h.upi_id}</div>
+                        <div>💸 <b>${h.amount} coins</b> — UPI: ${h.upi_id}</div>
                         <div class="history-status" style="color:${color}">${h.status} • ${h.date}</div>
                     </div>`;
             });
@@ -1333,7 +1459,7 @@ window.addEventListener('DOMContentLoaded', () => {
         adminEl.textContent = u.startsWith('@') ? u : '@' + u;
     }
 
-    renderSponsorSlots({});
+    renderSponsorSlots({}, [], {});
     fetchLiveData();
     checkDevice();
     preloadMonetagAd();
