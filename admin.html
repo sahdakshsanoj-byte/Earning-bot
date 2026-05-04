@@ -271,9 +271,13 @@
     <div id="tab-users" class="section" style="padding:16px;">
         <div class="card">
             <h4>👤 Search & Manage User</h4>
+            <div class="code-row" style="margin-bottom:8px;">
+                <input class="code-input" id="search-uid" placeholder="Telegram User ID (numeric)" type="number" style="flex:1;">
+                <button class="btn-success" onclick="searchUser('id')" style="white-space:nowrap;">Search by ID</button>
+            </div>
             <div class="code-row">
-                <input class="code-input" id="search-uid" placeholder="Telegram User ID" type="number" style="flex:1;">
-                <button class="btn-success" onclick="searchUser()" style="white-space:nowrap;">Search</button>
+                <input class="code-input" id="search-uname" placeholder="@username (without @)" type="text" style="flex:1;">
+                <button class="btn-success" onclick="searchUser('username')" style="white-space:nowrap;">Search by Name</button>
             </div>
         </div>
         <div id="user-result"></div>
@@ -327,6 +331,17 @@
             </div>
         </div>
         <button class="btn-save" style="background:#38bdf8;" onclick="loadStats()">🔄 Refresh Stats</button>
+
+        <!-- Server Health -->
+        <div class="card" style="margin-top:16px; border-color:#22c55e;">
+            <h4 style="color:#22c55e; display:flex; justify-content:space-between; align-items:center;">
+                <span>🖥️ Server Health</span>
+                <button class="btn-save" style="background:#22c55e; padding:4px 10px; font-size:11px;" onclick="loadHealth()">🔄 Refresh</button>
+            </h4>
+            <div id="health-display">
+                <p class="empty" style="font-size:12px;">Click Refresh Stats or Refresh to load.</p>
+            </div>
+        </div>
 
         <!-- Sponsor Click Counter -->
         <div class="card" style="margin-top:16px; border-color:#38bdf8;">
@@ -636,28 +651,96 @@ async function loadStats() {
     } catch(e) {
         console.error('loadStats error:', e);
     }
+    // Also refresh health when stats tab is refreshed
+    loadHealth();
+}
+
+// ── Server Health ──
+async function loadHealth() {
+    const el = document.getElementById('health-display');
+    if (!el) return;
+    el.innerHTML = '<p class="empty" style="font-size:12px;">Loading...</p>';
+    try {
+        const res  = await fetch(`${API}/admin/health`, { headers: authHeaders() });
+        const d    = await res.json();
+        if (d.status !== 'ok') {
+            el.innerHTML = '<p class="empty">❌ Health check failed.</p>';
+            return;
+        }
+        function bar(pct) {
+            const filled = Math.round(pct / 100 * 12);
+            const color  = pct < 60 ? '#22c55e' : pct < 85 ? '#f1c40f' : '#e74c3c';
+            return `<span style="font-family:monospace; color:${color};">${'█'.repeat(filled)}${'░'.repeat(12-filled)}</span>`;
+        }
+        function dot(pct) {
+            return pct < 60 ? '🟢' : pct < 85 ? '🟡' : '🔴';
+        }
+        el.innerHTML = `
+            <div style="font-size:12px; color:#64748b; margin-bottom:12px;">
+                ⏱️ Uptime: <span style="color:#e2e8f0; font-weight:600;">${d.uptime}</span>
+            </div>
+            <div style="margin-bottom:10px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <span style="font-size:12px;">${dot(d.cpu_pct)} CPU</span>
+                    <span style="font-size:12px; font-weight:700; color:${d.cpu_pct<60?'#22c55e':d.cpu_pct<85?'#f1c40f':'#e74c3c'};">${d.cpu_pct.toFixed(1)}%</span>
+                </div>
+                <div>${bar(d.cpu_pct)}</div>
+            </div>
+            <div style="margin-bottom:10px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <span style="font-size:12px;">${dot(d.mem_pct)} Memory</span>
+                    <span style="font-size:12px; font-weight:700; color:${d.mem_pct<60?'#22c55e':d.mem_pct<85?'#f1c40f':'#e74c3c'};">${d.mem_pct.toFixed(1)}% &nbsp;<span style="color:#64748b; font-size:10px;">${d.mem_used_mb} / ${d.mem_total_mb} MB</span></span>
+                </div>
+                <div>${bar(d.mem_pct)}</div>
+            </div>
+            <div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <span style="font-size:12px;">${dot(d.disk_pct)} Disk</span>
+                    <span style="font-size:12px; font-weight:700; color:${d.disk_pct<60?'#22c55e':d.disk_pct<85?'#f1c40f':'#e74c3c'};">${d.disk_pct.toFixed(1)}% &nbsp;<span style="color:#64748b; font-size:10px;">${d.disk_used_gb} / ${d.disk_total_gb} GB</span></span>
+                </div>
+                <div>${bar(d.disk_pct)}</div>
+            </div>
+            <div style="margin-top:12px; font-size:11px; color:#64748b; text-align:right;">
+                🟢 Flask &amp; Bot: Online
+            </div>`;
+    } catch(e) {
+        el.innerHTML = '<p class="empty">❌ Network error</p>';
+    }
 }
 
 // ── Search User ──
-async function searchUser() {
-    const uid = document.getElementById('search-uid').value.trim();
-    if (!uid) return toast('❌ Enter a User ID', 'err');
+async function searchUser(mode) {
     const result = document.getElementById('user-result');
+    let url;
+
+    if (mode === 'username') {
+        const uname = document.getElementById('search-uname').value.trim().replace(/^@/, '');
+        if (!uname) return toast('❌ Enter a username', 'err');
+        url = `${API}/admin/search_user?username=${encodeURIComponent(uname)}`;
+    } else {
+        const uid = document.getElementById('search-uid').value.trim();
+        if (!uid) return toast('❌ Enter a User ID', 'err');
+        url = `${API}/admin/search_user?user_id=${uid}`;
+    }
+
     result.innerHTML = '<p class="empty">Searching...</p>';
     try {
-        const res  = await fetch(`${API}/admin/search_user?user_id=${uid}`, { headers: authHeaders() });
+        const res  = await fetch(url, { headers: authHeaders() });
         const data = await res.json();
         if (data.status === 'success') {
             const u = data.user;
             const banned = u.blocked ? true : false;
+            const refCount = u.referral_count !== undefined
+                ? u.referral_count
+                : (u.referrals || '').split(',').filter(Boolean).length;
             result.innerHTML = `
                 <div class="card">
                     <h4>${banned ? '⛔ BANNED USER' : '✅ Active User'}</h4>
                     <div class="wd-card">
                         <div class="wd-row"><span class="wd-label">User ID</span><span class="wd-value">${u.user_id}</span></div>
-                        <div class="wd-row"><span class="wd-label">Name</span><span class="wd-value">${u.username || '—'}</span></div>
+                        <div class="wd-row"><span class="wd-label">Username</span><span class="wd-value">${u.username ? '@' + u.username : '—'}</span></div>
                         <div class="wd-row"><span class="wd-label">Coins</span><span class="wd-value" style="color:#f1c40f;">${u.coins || 0} 🪙</span></div>
-                        <div class="wd-row"><span class="wd-label">Referrals</span><span class="wd-value">${(u.referrals || '').split(',').filter(Boolean).length}</span></div>
+                        <div class="wd-row"><span class="wd-label">Referrals</span><span class="wd-value">${refCount}</span></div>
                         <div class="wd-row"><span class="wd-label">Status</span><span class="wd-value" style="color:${banned ? '#e74c3c' : '#2ecc71'};">${banned ? '⛔ Banned' : '✅ Active'}</span></div>
                         <div class="wd-row"><span class="wd-label">Joined</span><span class="wd-value">${u.joined || '—'}</span></div>
                         ${u.ip_flagged ? '<div class="wd-row"><span class="wd-label">IP Flag</span><span class="wd-value" style="color:#f39c12;">⚠️ Flagged</span></div>' : ''}
@@ -689,7 +772,10 @@ async function banAction(userId, action) {
         const data = await res.json();
         if (data.status === 'success') {
             toast(`✅ User ${label}ned!`, 'ok');
-            searchUser();
+            // Re-run search using whichever field still has a value
+            const hasName = document.getElementById('search-uname').value.trim();
+            const hasId   = document.getElementById('search-uid').value.trim();
+            searchUser(hasName && !hasId ? 'username' : 'id');
         } else {
             toast('❌ Failed', 'err');
         }
@@ -699,7 +785,9 @@ async function banAction(userId, action) {
 // ── Enter key on search ──
 document.addEventListener('DOMContentLoaded', () => {
     const s = document.getElementById('search-uid');
-    if (s) s.addEventListener('keydown', e => { if (e.key === 'Enter') searchUser(); });
+    if (s) s.addEventListener('keydown', e => { if (e.key === 'Enter') searchUser('id'); });
+    const su = document.getElementById('search-uname');
+    if (su) su.addEventListener('keydown', e => { if (e.key === 'Enter') searchUser('username'); });
     const b = document.getElementById('ban-uid');
     if (b) b.addEventListener('keydown', e => { if (e.key === 'Enter') quickBan(); });
 });
@@ -770,18 +858,28 @@ async function loadBannedUsers() {
                 list.innerHTML = '<p class="empty">✅ No banned users found.</p>';
                 return;
             }
-            list.innerHTML = `<p style="font-size:11px; color:#64748b; margin-bottom:10px;">Showing ${users.length} banned user(s). Tap Unban to restore.</p>`
-                + users.map(u => `
-                <div class="ban-card">
-                    <span class="ban-avatar">⛔</span>
-                    <div class="ban-info">
-                        <div class="ban-name">${u.username || 'Unknown'}</div>
-                        <div class="ban-id">ID: ${u.user_id}</div>
-                        <div class="ban-coins">${u.coins || 0} 🪙</div>
-                    </div>
-                    <button class="btn-success" style="padding:6px 12px; font-size:11px;" onclick="inlineUnban(${u.user_id}, this)">✅ Unban</button>
-                </div>
-            `).join('');
+            const total = data.total || users.length;
+            list.innerHTML = `<p style="font-size:11px; color:#64748b; margin-bottom:10px;">Showing ${users.length} of ${total} banned user(s). Tap Unban to restore.</p>`
+                + users.map(u => {
+                    const reason = u.block_reason
+                        ? `<div class="ban-id" style="color:#e74c3c;">⚠️ ${u.block_reason.replace(/_/g,' ')}</div>`
+                        : '';
+                    const at = u.blocked_at
+                        ? `<div class="ban-id">${u.blocked_at.slice(0,10)}</div>`
+                        : '';
+                    const flags = (u.fp_flagged ? '🖐️FP ' : '') + (u.ip_flagged ? '🌐IP' : '');
+                    return `
+                    <div class="ban-card">
+                        <span class="ban-avatar">⛔</span>
+                        <div class="ban-info">
+                            <div class="ban-name">${u.username ? '@'+u.username : 'Unknown'}</div>
+                            <div class="ban-id">ID: ${u.user_id}</div>
+                            <div class="ban-coins">${u.coins || 0} 🪙${flags ? ' · '+flags : ''}</div>
+                            ${reason}${at}
+                        </div>
+                        <button class="btn-success" style="padding:6px 12px; font-size:11px;" onclick="inlineUnban(${u.user_id}, this)">✅ Unban</button>
+                    </div>`;
+                }).join('');
         } else {
             list.innerHTML = '<p class="empty">❌ Error loading banned users.</p>';
         }
