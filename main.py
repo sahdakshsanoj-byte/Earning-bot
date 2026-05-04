@@ -3021,6 +3021,7 @@ def admin_panel_command(message):
         "📊 *Stats & Info*\n"
         "• /stats — Bot statistics\n"
         "• /balance `<user_id>` — User balance\n"
+        "• /health — Server CPU/RAM/uptime status\n"
         "\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "💰 *Coins*\n"
@@ -3053,6 +3054,8 @@ def admin_panel_command(message):
         "🚫 *User Management*\n"
         "• /block `<user_id>` — Block user\n"
         "• /unblock `<user_id>` — Unblock user\n"
+        "• /listbanned — List all banned users\n"
+        "• /searchuser `<user_id or @username>` — Find user info\n"
         "\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "📣 *Broadcast*\n"
@@ -3289,6 +3292,85 @@ def unblock_user(message):
     except Exception as notify_exc:
         logger.warning("Notify failed for unblock %s: %s", target_id, notify_exc)
     bot.reply_to(message, f"\u2705 User {target_id} unblocked!")
+
+
+@bot.message_handler(commands=["listbanned"])
+def cmd_list_banned(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        total  = users_col.count_documents({"blocked": True})
+        banned = list(
+            users_col.find(
+                {"blocked": True},
+                {"user_id": 1, "username": 1, "coins": 1,
+                 "block_reason": 1, "blocked_at": 1, "_id": 0},
+            ).sort("blocked_at", -1).limit(20)
+        )
+        if not banned:
+            return bot.reply_to(message, "✅ No banned users found.")
+        lines = [f"🚫 *Banned Users* (Total: {total}, showing latest 20)\n"]
+        for u in banned:
+            uid      = u.get("user_id", "?")
+            uname    = f"@{u['username']}" if u.get("username") else "—"
+            coins    = u.get("coins", 0)
+            reason   = u.get("block_reason") or "No reason"
+            blk_at   = u.get("blocked_at")
+            blk_str  = blk_at.strftime("%Y-%m-%d") if blk_at else "Unknown"
+            lines.append(
+                f"• `{uid}` {uname}\n"
+                f"  💰 {coins} coins | 📅 {blk_str}\n"
+                f"  ❗ {reason}"
+            )
+        bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("listbanned error: %s", exc)
+        bot.reply_to(message, "❌ Error fetching banned users.")
+
+
+@bot.message_handler(commands=["searchuser"])
+def cmd_search_user(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /searchuser <user_id> or /searchuser @username")
+    query_raw = parts[1].strip()
+    try:
+        if query_raw.lstrip("-").isdigit():
+            user = users_col.find_one({"user_id": int(query_raw)})
+        else:
+            uname = query_raw.lstrip("@")
+            user  = users_col.find_one({"username": {"$regex": f"^{uname}$", "$options": "i"}})
+        if not user:
+            return bot.reply_to(message, f"❌ User not found: `{query_raw}`", parse_mode="Markdown")
+        uid      = user.get("user_id", "?")
+        uname    = f"@{user['username']}" if user.get("username") else "—"
+        coins    = user.get("coins", 0)
+        blocked  = "🚫 Banned" if user.get("blocked") else "✅ Active"
+        reason   = user.get("block_reason") or "—"
+        joined   = user.get("joined")
+        joined_s = joined.strftime("%Y-%m-%d") if joined else "Unknown"
+        refs     = user.get("referral_count", 0)
+        earned   = user.get("total_earned", 0)
+        wds      = user.get("total_withdrawn", 0)
+        text = (
+            f"👤 *User Info*\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"🆔 ID: `{uid}`\n"
+            f"📛 Username: {uname}\n"
+            f"📅 Joined: {joined_s}\n"
+            f"💰 Coins: {coins}\n"
+            f"👥 Referrals: {refs}\n"
+            f"💸 Total Earned: {earned}\n"
+            f"🏧 Total Withdrawn: {wds}\n"
+            f"🔒 Status: {blocked}\n"
+            f"❗ Ban Reason: {reason}"
+        )
+        bot.reply_to(message, text, parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("searchuser error: %s", exc)
+        bot.reply_to(message, "❌ Error searching user.")
 
 
 # Friendly display names for task IDs (used in user-facing notifications)
