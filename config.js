@@ -14,6 +14,18 @@ const CONFIG = {
     // Admin Telegram username for support contact (with or without @)
     ADMIN_TELEGRAM: "@cdotern_help",
 
+    // ──────────────────────────────────────────────────────────
+    // LOTTERY LOCK
+    //
+    //   true  → Lottery card visible & active (users can buy tickets)
+    //   false → Lottery card shows 🔒 lock animation (coming soon)
+    //
+    //   Backend switch (/setlottery) controls prize/price/active.
+    //   This config switch is the FRONTEND lock — set to false to
+    //   hide/lock the lottery without touching the backend at all.
+    // ──────────────────────────────────────────────────────────
+    LOTTERY_ACTIVE: true,
+
     // Monetag Telegram Mini App Rewarded Interstitial Zone ID
     MONETAG_ZONE_ID: "10822310",
 
@@ -23,11 +35,11 @@ const CONFIG = {
     // ──────────────────────────────────────────────────────────
     // YOUTUBE TASKS LOCK
     //
-    //   true  → YouTube tasks unlocked & visible (normal)
+    //   true  → YouTube tasks unlocked & visible (normal mode)
     //   false → YouTube tasks LOCKED with 🔒 animation overlay
     //
-    //   Use this when you have no YT videos ready, or want to
-    //   pause YT earning temporarily.
+    //   Default: false (locked) — change to true when you have
+    //   YT videos ready and want users to start earning from them.
     // ──────────────────────────────────────────────────────────
     YT_TASKS_ACTIVE: false,
 
@@ -49,7 +61,7 @@ const CONFIG = {
     CHANNELS: {
         official: "https://t.me/cdoternoffical",
         channel2: "https://t.me/chatdotern",
-        channel3: "https://t.me/Cdotchat"
+        channel3: "https://t.me/chatdotern"
     },
 
     // Partner task links — used by Partner Slot code-verify tasks
@@ -94,11 +106,11 @@ const CONFIG = {
         slot3: {
             active: false,
             icon:   "🌟",
-            name:   "Partner Task",
-            desc:   "Complete the task & claim to earn",
+            name:   "Code Verification Partner",
+            desc:   "Visit the channel & enter the code to earn",
             link:   "https://t.me/cdoternoffical",
             reward: 4,
-            type:   "task"
+            type:   "verify"
         },
 
         slot4: {
