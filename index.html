@@ -39,6 +39,38 @@
             50%      { transform: scale(1.2); opacity: 0.5; }
         }
 
+        /* ── Lottery Lock Overlay ── */
+        .lottery-lock-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15,23,42,0.82);
+            border-radius: 16px;
+            z-index: 10;
+            backdrop-filter: blur(3px);
+            pointer-events: none;
+        }
+        .lottery-lock-icon {
+            font-size: 36px;
+            animation: lock-pulse 1.6s ease-in-out infinite;
+            display: block;
+        }
+        .lottery-lock-label {
+            font-size: 13px;
+            color: #e8d5ff;
+            margin-top: 8px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .lottery-lock-sub {
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 3px;
+        }
+
         /* ── Ad Counter Badge ── */
         .ad-counter-badge {
             display: inline-block;
@@ -157,7 +189,7 @@
         <div class="card balance-card" style="text-align:center;">
             <p style="font-size:12px; color:#94a3b8; margin-bottom:6px;">Your Balance</p>
             <h1 id="balance" style="font-size:40px; color:#f1c40f;">0 🪙</h1>
-            <p style="font-size:11px; color:#64748b; margin-top:4px;">5000 🪙 = ₹100 &nbsp;|&nbsp; 1 🪙 = ₹0.02</p>
+            <p style="font-size:11px; color:#64748b; margin-top:4px;">Keep earning to unlock withdrawal! 🚀</p>
         </div>
 
         <!-- Daily Bonus -->
@@ -170,6 +202,46 @@
                 </p>
             </div>
             <button class="btn" id="daily-btn" onclick="claimDaily()" style="width:auto; padding:10px 20px;">Claim Now</button>
+        </div>
+
+        <!-- Lottery -->
+        <div class="card" id="lottery-card" style="display:none; background:linear-gradient(135deg,#9b59b6,#8e44ad); color:#fff; position:relative; overflow:hidden;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+                <div style="flex:1;">
+                    <h4 style="margin-bottom:4px; color:#fff;">🎰 Daily Lottery</h4>
+                    <p style="font-size:12px; color:#f3e7ff; margin-bottom:8px;">
+                        Buy a ticket. Win the jackpot at end of day!
+                    </p>
+                    <div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:6px;">
+                        <div>
+                            <p style="font-size:10px; color:#e8d5ff; margin:0;">🎫 Ticket</p>
+                            <p style="font-size:16px; font-weight:700; margin:0;">
+                                <span id="lottery-ticket-price">--</span> 🪙
+                            </p>
+                        </div>
+                        <div>
+                            <p style="font-size:10px; color:#e8d5ff; margin:0;">🏆 Prize</p>
+                            <p style="font-size:16px; font-weight:700; margin:0; color:#ffd700;">
+                                <span id="lottery-prize">--</span> 🪙
+                            </p>
+                        </div>
+                        <div>
+                            <p style="font-size:10px; color:#e8d5ff; margin:0;">👥 Players</p>
+                            <p style="font-size:16px; font-weight:700; margin:0;">
+                                <span id="lottery-players">0</span>
+                            </p>
+                        </div>
+                    </div>
+                    <p id="lottery-last-winner" style="font-size:10px; color:#e8d5ff; margin-top:6px; display:none;"></p>
+                </div>
+            </div>
+            <button
+                class="btn"
+                id="lottery-btn"
+                onclick="buyLotteryTicket()"
+                style="background:#ffd700; color:#1a1a1a; font-weight:700; margin-top:10px;">
+                🎫 Buy Ticket
+            </button>
         </div>
 
         <!-- Promo Code -->
@@ -241,7 +313,6 @@
                 <div style="background:#1e293b; border-radius:20px; height:8px; overflow:hidden;">
                     <div id="coins-progress-bar" style="height:100%; background:linear-gradient(90deg,#f1c40f,#f39c12); border-radius:20px; width:0%; transition:width 0.5s;"></div>
                 </div>
-                <p style="font-size:10px; color:#475569; margin-top:6px;">5000 coins = ₹100</p>
             </div>
 
             <div style="background:#0f172a; border-radius:10px; padding:12px; margin-bottom:14px; border:1px solid #334155;">
@@ -485,11 +556,6 @@
             </div>
             <div style="padding:16px;">
 
-                <div style="background:rgba(241,196,15,0.08); border-left:3px solid #f1c40f; border-radius:0 8px 8px 0; padding:10px 14px; margin-bottom:10px;">
-                    <p style="font-size:13px; font-weight:700; color:#f1c40f; margin:0 0 4px 0;">💰 Coin Value</p>
-                    <p style="font-size:15px; font-weight:600; color:#e2e8f0; margin:0;">5000 🪙 = ₹100 &nbsp;|&nbsp; 1 🪙 = ₹0.02</p>
-                </div>
-
                 <div style="background:rgba(46,204,113,0.08); border-left:3px solid #2ecc71; border-radius:0 8px 8px 0; padding:10px 14px; margin-bottom:10px;">
                     <p style="font-size:13px; font-weight:700; color:#2ecc71; margin:0 0 8px 0;">🎯 Earning Rates</p>
                     <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Watch Ad: <b style="color:#f1c40f;">+5 🪙</b> (max 10/day)</p>
@@ -501,7 +567,7 @@
 
                 <div style="background:rgba(46,204,113,0.08); border-left:3px solid #2ecc71; border-radius:0 8px 8px 0; padding:10px 14px; margin-bottom:10px;">
                     <p style="font-size:13px; font-weight:700; color:#2ecc71; margin:0 0 8px 0;">📤 Withdrawal Rules</p>
-                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Minimum Withdrawal: <b style="color:#f1c40f;">5000 🪙 (₹100)</b></p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Minimum Withdrawal: <b style="color:#f1c40f;">5000 🪙</b></p>
                     <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Referral Requirement: <b style="color:#f1c40f;">5 Users</b></p>
                     <p style="font-size:13px; color:#e2e8f0; margin:0;">• Cooldown: <b style="color:#f1c40f;">1 Request per 24 Hours</b></p>
                 </div>
@@ -705,16 +771,30 @@
     // ============================================================
     function applyYtLockState() {
         const section = document.getElementById('yt-tasks-section');
-        if (!section || typeof CONFIG === 'undefined') return;
+        if (!section) {
+            console.warn('[YT-Lock] #yt-tasks-section not found in DOM');
+            return;
+        }
+        if (typeof CONFIG === 'undefined') {
+            console.warn('[YT-Lock] CONFIG not loaded yet, will retry');
+            return;
+        }
 
         // Default to active (true) if flag missing — backward compatible.
         const isActive = CONFIG.YT_TASKS_ACTIVE !== false;
+        console.log('[YT-Lock] CONFIG.YT_TASKS_ACTIVE =', CONFIG.YT_TASKS_ACTIVE,
+                    '→ isActive:', isActive, '→', isActive ? 'UNLOCKED' : 'LOCKED 🔒');
+
+        // Always force section to be a positioning context
+        if (getComputedStyle(section).position === 'static') {
+            section.style.position = 'relative';
+        }
 
         // Remove any existing overlay first
         const existing = section.querySelector('.lock-overlay');
         if (existing) existing.remove();
 
-        // Re-enable any previously-disabled buttons/inputs inside the section
+        // Re-enable previously-disabled controls
         section.querySelectorAll('button, input').forEach(el => {
             if (el.dataset.ytLockedDisabled === '1') {
                 el.disabled = false;
@@ -723,11 +803,13 @@
         });
         section.style.pointerEvents = '';
         section.style.filter = '';
+        section.style.userSelect = '';
 
         if (!isActive) {
-            // Lock: dim section, disable interactions, show 🔒 overlay
+            // Lock: dim, disable, show 🔒 overlay
             section.style.pointerEvents = 'none';
             section.style.filter = 'blur(2px) grayscale(0.4)';
+            section.style.userSelect = 'none';
             section.querySelectorAll('button, input').forEach(el => {
                 if (!el.disabled) {
                     el.disabled = true;
@@ -737,30 +819,73 @@
 
             const overlay = document.createElement('div');
             overlay.className = 'lock-overlay';
-            overlay.style.pointerEvents = 'auto';
+            // Force inline so even if CSS file is stale-cached the overlay shows
+            overlay.style.cssText =
+                'position:absolute;inset:0;display:flex;flex-direction:column;' +
+                'align-items:center;justify-content:center;' +
+                'background:rgba(15,23,42,0.85);border-radius:10px;' +
+                'z-index:9999;pointer-events:auto;';
             overlay.innerHTML =
-                '<span class="lock-icon">🔒</span>' +
-                '<span class="lock-label">YouTube tasks coming soon</span>';
+                '<span style="font-size:42px;animation:lock-pulse 1.8s ease-in-out infinite;">🔒</span>' +
+                '<span style="font-size:13px;color:#f1c40f;margin-top:8px;font-weight:700;letter-spacing:0.5px;">YouTube tasks coming soon</span>';
             section.appendChild(overlay);
+            console.log('[YT-Lock] Lock overlay applied ✓');
         }
+    }
+
+    // Retry until CONFIG is available (handles any script-load race)
+    function applyYtLockStateWhenReady(attempts) {
+        attempts = attempts || 0;
+        if (typeof CONFIG !== 'undefined' && document.getElementById('yt-tasks-section')) {
+            applyYtLockState();
+            return;
+        }
+        if (attempts > 30) {
+            console.error('[YT-Lock] Gave up waiting for CONFIG / DOM after 3s');
+            return;
+        }
+        setTimeout(function() { applyYtLockStateWhenReady(attempts + 1); }, 100);
     }
 
     document.addEventListener('DOMContentLoaded', function() {
         // Set admin Telegram display once config.js is loaded
         setTimeout(function() {
             const el = document.getElementById('admin-tg-username');
-            if (el && CONFIG && CONFIG.ADMIN_TELEGRAM) {
+            if (el && typeof CONFIG !== 'undefined' && CONFIG.ADMIN_TELEGRAM) {
                 const u = CONFIG.ADMIN_TELEGRAM.startsWith('@') ? CONFIG.ADMIN_TELEGRAM : '@' + CONFIG.ADMIN_TELEGRAM;
                 el.textContent = u;
             }
-            applyYtLockState();
         }, 200);
+        applyYtLockStateWhenReady();
         loadPromoTasks();
     });
+
+    // Re-apply whenever user opens the Tasks tab (in case of any DOM rerender)
+    (function hookTabSwitchForLock() {
+        const origSwitch = window.switchTab;
+        // switchTab is defined in script.js, which loads after this inline block.
+        // Hook lazily on first call.
+        const tryHook = setInterval(function() {
+            if (typeof window.switchTab === 'function' && !window._ytLockHooked) {
+                const original = window.switchTab;
+                window.switchTab = function(tab, el) {
+                    const r = original.apply(this, arguments);
+                    if (tab === 'tasks') {
+                        setTimeout(applyYtLockStateWhenReady, 50);
+                    }
+                    return r;
+                };
+                window._ytLockHooked = true;
+                clearInterval(tryHook);
+            }
+        }, 200);
+        setTimeout(function() { clearInterval(tryHook); }, 5000);
+    })();
     </script>
 
-    <script src="config.js"></script>
-    <script src="script.js"></script>
+    <!-- Cache-bust query param: bump v=N every time you deploy a change -->
+    <script src="config.js?v=3"></script>
+    <script src="script.js?v=5"></script>
 
 </body>
 </html>
