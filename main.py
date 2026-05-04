@@ -3922,5 +3922,5 @@ if __name__ == "__main__":
     Thread(target=refresh_leaderboard_loop, daemon=True).start()
     Thread(target=_cleanup_rate_cache, daemon=True).start()
     port = int(os.getenv("PORT", 5000))
-    ogger.info("Starting Flask on port %s...", port)
+    logger.info("Starting Flask on port %s...", port)
     app.run(host="0.0.0.0", port=port, debug=False)
