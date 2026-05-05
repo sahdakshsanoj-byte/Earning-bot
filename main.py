@@ -3305,27 +3305,44 @@ def cmd_list_banned(message):
                 {"blocked": True},
                 {"user_id": 1, "username": 1, "coins": 1,
                  "block_reason": 1, "blocked_at": 1, "_id": 0},
-            ).sort("blocked_at", -1).limit(20)
+            ).limit(20)
         )
         if not banned:
             return bot.reply_to(message, "✅ No banned users found.")
-        lines = [f"🚫 *Banned Users* (Total: {total}, showing latest 20)\n"]
+
+        def _safe_date(val):
+            if val is None:
+                return "Unknown"
+            if hasattr(val, "strftime"):
+                return val.strftime("%Y-%m-%d")
+            return str(val)[:10]
+
+        def _esc(text):
+            return str(text).replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
+
+        lines = [f"🚫 *Banned Users* (Total: {total}, showing up to 20)\n"]
         for u in banned:
-            uid      = u.get("user_id", "?")
-            uname    = f"@{u['username']}" if u.get("username") else "—"
-            coins    = u.get("coins", 0)
-            reason   = u.get("block_reason") or "No reason"
-            blk_at   = u.get("blocked_at")
-            blk_str  = blk_at.strftime("%Y-%m-%d") if blk_at else "Unknown"
+            uid    = u.get("user_id", "?")
+            uname  = f"@{_esc(u['username'])}" if u.get("username") else "—"
+            coins  = u.get("coins", 0)
+            reason = _esc(u.get("block_reason") or "No reason")
+            blk_str = _safe_date(u.get("blocked_at"))
             lines.append(
                 f"• `{uid}` {uname}\n"
                 f"  💰 {coins} coins | 📅 {blk_str}\n"
                 f"  ❗ {reason}"
             )
-        bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
+
+        text = "\n".join(lines)
+        # Telegram message limit is 4096 chars — split if needed
+        if len(text) <= 4096:
+            bot.reply_to(message, text, parse_mode="Markdown")
+        else:
+            for i in range(0, len(text), 4000):
+                bot.send_message(message.chat.id, text[i:i+4000], parse_mode="Markdown")
     except Exception as exc:
         logger.error("listbanned error: %s", exc)
-        bot.reply_to(message, "❌ Error fetching banned users.")
+        bot.reply_to(message, f"❌ Error: {exc}")
 
 
 @bot.message_handler(commands=["searchuser"])
@@ -3334,23 +3351,66 @@ def cmd_search_user(message):
         return
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
-        return bot.reply_to(message, "Usage: /searchuser <user_id> or /searchuser @username")
-    query_raw = parts[1].strip()
+        return bot.reply_to(
+            message,
+            "Usage:\n"
+            "• `/searchuser 123456789` — search by Telegram ID\n"
+            "• `/searchuser Daksh` — search by name (partial OK)",
+            parse_mode="Markdown",
+        )
+    query_raw = parts[1].strip().lstrip("@")
     try:
+        user = None
+        # 1. Try exact numeric user_id first
         if query_raw.lstrip("-").isdigit():
             user = users_col.find_one({"user_id": int(query_raw)})
-        else:
-            uname = query_raw.lstrip("@")
-            user  = users_col.find_one({"username": {"$regex": f"^{uname}$", "$options": "i"}})
+
+        # 2. Partial name search on `username` field (stores first_name)
         if not user:
-            return bot.reply_to(message, f"❌ User not found: `{query_raw}`", parse_mode="Markdown")
+            safe_q = re.escape(query_raw)
+            users_found = list(
+                users_col.find(
+                    {"username": {"$regex": safe_q, "$options": "i"}},
+                    {"user_id": 1, "username": 1, "coins": 1, "blocked": 1,
+                     "block_reason": 1, "joined": 1, "referral_count": 1,
+                     "total_earned": 1, "total_withdrawn": 1, "_id": 0},
+                ).limit(5)
+            )
+            if len(users_found) == 1:
+                user = users_found[0]
+            elif len(users_found) > 1:
+                # Multiple matches — show a list
+                lines = [f"🔍 *{len(users_found)} users found for* `{query_raw}`:\n"]
+                for u in users_found:
+                    uid2   = u.get("user_id", "?")
+                    uname2 = u.get("username") or "—"
+                    coins2 = u.get("coins", 0)
+                    status = "🚫" if u.get("blocked") else "✅"
+                    lines.append(f"{status} `{uid2}` — {uname2} | 💰{coins2}")
+                lines.append("\n_Use /searchuser <ID> to get full details._")
+                return bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
+
+        if not user:
+            return bot.reply_to(
+                message,
+                f"❌ No user found for `{query_raw}`\n"
+                f"_Tip: Search by the name shown in bot (e.g. Daksh, Rahul)_",
+                parse_mode="Markdown",
+            )
+
+        def _safe_date(val):
+            if val is None:
+                return "Unknown"
+            if hasattr(val, "strftime"):
+                return val.strftime("%Y-%m-%d")
+            return str(val)[:10]
+
         uid      = user.get("user_id", "?")
-        uname    = f"@{user['username']}" if user.get("username") else "—"
+        uname    = user.get("username") or "—"
         coins    = user.get("coins", 0)
         blocked  = "🚫 Banned" if user.get("blocked") else "✅ Active"
         reason   = user.get("block_reason") or "—"
-        joined   = user.get("joined")
-        joined_s = joined.strftime("%Y-%m-%d") if joined else "Unknown"
+        joined_s = _safe_date(user.get("joined"))
         refs     = user.get("referral_count", 0)
         earned   = user.get("total_earned", 0)
         wds      = user.get("total_withdrawn", 0)
@@ -3358,7 +3418,7 @@ def cmd_search_user(message):
             f"👤 *User Info*\n"
             f"━━━━━━━━━━━━━━\n"
             f"🆔 ID: `{uid}`\n"
-            f"📛 Username: {uname}\n"
+            f"📛 Name: {uname}\n"
             f"📅 Joined: {joined_s}\n"
             f"💰 Coins: {coins}\n"
             f"👥 Referrals: {refs}\n"
@@ -3370,7 +3430,7 @@ def cmd_search_user(message):
         bot.reply_to(message, text, parse_mode="Markdown")
     except Exception as exc:
         logger.error("searchuser error: %s", exc)
-        bot.reply_to(message, "❌ Error searching user.")
+        bot.reply_to(message, f"❌ Error: {exc}")
 
 
 # Friendly display names for task IDs (used in user-facing notifications)
