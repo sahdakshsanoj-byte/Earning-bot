@@ -24,7 +24,7 @@ const CONFIG = {
     //   This config switch is the FRONTEND lock — set to false to
     //   hide/lock the lottery without touching the backend at all.
     // ──────────────────────────────────────────────────────────
-    LOTTERY_ACTIVE: false,
+    LOTTERY_ACTIVE: true,
 
     // Monetag Telegram Mini App Rewarded Interstitial Zone ID
     MONETAG_ZONE_ID: "10822310",
