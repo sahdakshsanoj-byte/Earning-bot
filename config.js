@@ -24,13 +24,25 @@ const CONFIG = {
     //   This config switch is the FRONTEND lock — set to false to
     //   hide/lock the lottery without touching the backend at all.
     // ──────────────────────────────────────────────────────────
-    LOTTERY_ACTIVE: false,
+    LOTTERY_ACTIVE: true,
 
     // Monetag Telegram Mini App Rewarded Interstitial Zone ID
     MONETAG_ZONE_ID: "10822310",
 
     // Paste the exact SDK script URL from your Monetag dashboard
     MONETAG_SDK_URL: "https://libtl.com/sdk.js",
+
+    // ──────────────────────────────────────────────────────────
+    // MANDATORY AD GATE
+    //
+    //   true  → User MUST watch a Monetag ad before every coin
+    //            claim (daily bonus, tasks, channels, all-bonus)
+    //   false → Ads are optional (old behaviour — Watch Ad button
+    //            only, no gate on other claims)
+    //
+    //   Requires MONETAG_ZONE_ID to be set above.
+    // ──────────────────────────────────────────────────────────
+    CLAIM_AD_ENABLED: true,
 
     // ──────────────────────────────────────────────────────────
     // YOUTUBE TASKS LOCK
