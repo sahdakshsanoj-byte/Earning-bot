@@ -265,8 +265,18 @@ async function claimDaily() {
     _pendingRequests.add('claimDaily');
 
     const btn = document.getElementById('daily-btn');
-    if (btn) { btn.disabled = true; btn.innerText = 'Claiming...'; }
+    if (btn) { btn.disabled = true; btn.innerText = '📺 Watch Ad...'; }
 
+    try {
+        await requireAdWatch();
+    } catch (e) {
+        showToast('📺 Watch the full ad to claim your daily bonus!', 'error');
+        if (btn) { btn.disabled = false; btn.innerText = 'Claim Now'; }
+        _pendingRequests.delete('claimDaily');
+        return;
+    }
+
+    if (btn) btn.innerText = 'Claiming...';
     try {
         const res  = await fetchWithRetry(
             `${CONFIG.API_BASE_URL}/claim_daily/${userId}`,
@@ -276,12 +286,10 @@ async function claimDaily() {
 
         if (data.status === 'success') {
             showToast('🎁 10 coins added to your balance!', 'success');
-            // Start fresh 24-hour countdown
             startDailyCountdown(24 * 3600);
             fetchLiveData();
         } else {
             showToast(data.message || 'Already claimed today.', 'error');
-            // Use precise remaining seconds from server if available
             const remSecs = data.data?.remaining_seconds;
             if (remSecs && remSecs > 0) {
                 startDailyCountdown(remSecs);
@@ -659,6 +667,17 @@ async function verifyTask(taskId, inputId, sponsorLink) {
     startCountdown(10,
         (s) => { if (verifyBtn) verifyBtn.innerText = `Wait ${s}s...`; },
         async () => {
+            // Ad gate — must watch before coins credited
+            if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.innerText = '📺 Watch Ad...'; }
+            try {
+                await requireAdWatch();
+            } catch (e) {
+                showToast('📺 Watch the full ad to claim your reward!', 'error');
+                if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.innerText = 'Verify'; }
+                _pendingRequests.delete(reqKey);
+                return;
+            }
+            if (verifyBtn) verifyBtn.innerText = 'Verifying...';
             try {
                 const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/verify_task`, {
                     method:  'POST',
@@ -777,6 +796,21 @@ async function claimChannel(channelId, channelUrl) {
     startCountdown(15,
         (s) => { if (btn) btn.innerText = `Join & wait ${s}s...`; },
         async () => {
+            // Ad gate — must watch before coins credited
+            if (btn) { btn.disabled = true; btn.innerText = '📺 Watch Ad...'; }
+            try {
+                await requireAdWatch();
+            } catch (e) {
+                showToast('📺 Watch the full ad to claim your reward!', 'error');
+                if (btn) {
+                    btn.disabled  = false;
+                    btn.innerText = '🔄 Retry';
+                    btn.onclick   = () => claimChannel(channelId, channelUrl);
+                }
+                _pendingRequests.delete(reqKey);
+                return;
+            }
+            if (btn) btn.innerText = 'Claiming...';
             try {
                 const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_channel`, {
                     method:  'POST',
@@ -936,8 +970,18 @@ async function claimAllBonus() {
     _pendingRequests.add('allbonus');
 
     const btn = document.getElementById('allbonus-btn');
-    if (btn) { btn.disabled = true; btn.innerText = 'Claiming...'; }
+    if (btn) { btn.disabled = true; btn.innerText = '📺 Watch Ad...'; }
 
+    try {
+        await requireAdWatch();
+    } catch (e) {
+        showToast('📺 Watch the full ad to claim your bonus!', 'error');
+        if (btn) { btn.disabled = false; btn.innerText = '🏅 Claim Bonus 10 Coins'; }
+        _pendingRequests.delete('allbonus');
+        return;
+    }
+
+    if (btn) btn.innerText = 'Claiming...';
     try {
         const res  = await fetchWithRetry(
             `${CONFIG.API_BASE_URL}/claim_allcomplete_bonus/${userId}`,
@@ -957,6 +1001,28 @@ async function claimAllBonus() {
         if (btn) { btn.disabled = false; btn.innerText = '🏅 Claim Bonus 10 Coins'; }
     } finally {
         _pendingRequests.delete('allbonus');
+    }
+}
+
+// ============================================================
+// MANDATORY AD GATE — called before every coin claim
+// Resolves silently if ads disabled / not configured.
+// Throws 'ad_skipped' if user does not watch the full ad.
+// ============================================================
+async function requireAdWatch() {
+    if (!CONFIG.CLAIM_AD_ENABLED) return;
+    const zoneId = getMonetagZoneId();
+    if (!zoneId) return; // no ad zone configured — skip silently
+    try {
+        await loadMonetagSdk();
+    } catch (e) {
+        return; // SDK failed to load — allow claim anyway
+    }
+    const showMonetagAd = getMonetagShowFunction();
+    if (!showMonetagAd) return; // function not ready — skip silently
+    const result = await showMonetagAd({ ymid: String(userId), requestVar: 'claim_gate' });
+    if (!result?.reward_event_type || result.reward_event_type !== 'valued') {
+        throw new Error('ad_skipped');
     }
 }
 
