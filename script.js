@@ -144,24 +144,15 @@ function startCountdown(seconds, updateFn, doneFn) {
 // ============================================================
 let _dailyCountdownInterval = null;
 
-/**
- * Parse an ISO timestamp from server (may or may not have Z suffix).
- * Always treat as UTC.
- */
 function parseUTCTimestamp(ts) {
     if (!ts) return null;
     try {
-        // Append Z if missing so browser treats it as UTC, not local time
         const str = ts.includes('Z') || ts.includes('+') ? ts : ts + 'Z';
         const d = new Date(str);
         return isNaN(d.getTime()) ? null : d;
     } catch (e) { return null; }
 }
 
-/**
- * Start a live HH:MM:SS countdown on the daily bonus button.
- * @param {number} remainingSeconds - seconds remaining until next claim
- */
 function startDailyCountdown(remainingSeconds) {
     if (_dailyCountdownInterval) clearInterval(_dailyCountdownInterval);
 
@@ -186,7 +177,6 @@ function startDailyCountdown(remainingSeconds) {
         const s = secs % 60;
         const display = `${fmt(h)}:${fmt(m)}:${fmt(s)}`;
         if (countEl) countEl.textContent = display;
-        // Also reflect in button text so it's visible even if timer element is hidden
         if (btn) btn.innerText = `⏰ ${display} left`;
     }
 
@@ -210,10 +200,6 @@ function startDailyCountdown(remainingSeconds) {
     }, 1000);
 }
 
-/**
- * Check lastClaimTs from server and start countdown if needed.
- * Called from fetchLiveData after getting user data.
- */
 function checkDailyBonus(lastClaimTs) {
     const btn = document.getElementById('daily-btn');
     if (!btn) return;
@@ -237,16 +223,14 @@ function checkDailyBonus(lastClaimTs) {
 
     const diffMs  = Date.now() - lastDt.getTime();
     const diffSec = diffMs / 1000;
-    const totalSec = 24 * 3600; // 24 hours in seconds
+    const totalSec = 24 * 3600;
 
     if (diffSec < totalSec) {
         const remaining = Math.ceil(totalSec - diffSec);
-        // Only restart countdown if not already running to avoid flicker
         if (!_dailyCountdownInterval) {
             startDailyCountdown(remaining);
         }
     } else {
-        // Already past 24h — enable button
         if (_dailyCountdownInterval) {
             clearInterval(_dailyCountdownInterval);
             _dailyCountdownInterval = null;
@@ -332,7 +316,6 @@ async function fetchLiveData() {
             const balEl = document.getElementById('balance');
             if (balEl) balEl.innerText = `${coins} 🪙`;
 
-            // Progress bars — based on 5000 coins minimum withdrawal
             const coinsPct = Math.min((coins / MIN_WITHDRAW_COINS) * 100, 100);
             const refPct   = Math.min((refCount / 5) * 100, 100);
 
@@ -351,7 +334,9 @@ async function fetchLiveData() {
             if (coinsText) coinsText.innerText = `${coins} / ${MIN_WITHDRAW_COINS}${coins >= MIN_WITHDRAW_COINS ? ' ✅' : ''}`;
             if (refText)   refText.innerText   = `${refCount} / 5${refCount >= 5 ? ' ✅' : ''}`;
 
-            // Leaderboard
+            // ── Referral lock apply karo ──
+            applyReferralLock();
+
             if (data.leaderboard && data.leaderboard !== "none") {
                 updateLeaderboardUI(data.leaderboard);
             }
@@ -366,16 +351,12 @@ async function fetchLiveData() {
             updateChannelButtons(data.channel_claims || {});
             renderSponsorSlots(data.channel_claims || {}, data.completed_tasks || [], data.verify_completions || {});
 
-            // Promo task completions (for index.html inline scripts)
             window._promoTaskCompletions = data.promo_task_completions || [];
 
-            // All-tasks bonus checklist
             updateAllBonusUI(data);
 
-            // Promo tasks (inline script in index.html)
             if (typeof loadPromoTasks === 'function') loadPromoTasks();
 
-            // Lottery card refresh
             loadLotteryStatus();
         }
     } catch (err) {
@@ -397,8 +378,6 @@ async function loadLotteryStatus() {
     const card = document.getElementById('lottery-card');
     if (!card) return;
 
-    // ── Frontend config lock ──
-    // Set CONFIG.LOTTERY_ACTIVE = false in config.js to show lock animation.
     if (CONFIG.LOTTERY_ACTIVE === false) {
         card.style.display = 'block';
         if (!card.querySelector('.lottery-lock-overlay')) {
@@ -413,7 +392,6 @@ async function loadLotteryStatus() {
         return;
     }
 
-    // Remove any stale lock overlay (in case config was just unlocked)
     const staleOv = card.querySelector('.lottery-lock-overlay');
     if (staleOv) staleOv.remove();
 
@@ -471,7 +449,6 @@ async function loadLotteryStatus() {
             }
         }
     } catch (err) {
-        // Silent fail — lottery card just won't show
         card.style.display = 'none';
     }
 }
@@ -499,7 +476,6 @@ async function buyLotteryTicket() {
 
         if (data.status === 'success') {
             showToast(data.message || '🎫 Ticket purchased!', 'success');
-            // Refresh balance + lottery card
             if (typeof refreshBalance === 'function') refreshBalance();
             loadLotteryStatus();
         } else {
@@ -513,7 +489,7 @@ async function buyLotteryTicket() {
 }
 
 // ============================================================
-// BALANCE REFRESH (called after ad/task claims)
+// BALANCE REFRESH
 // ============================================================
 async function refreshBalance() {
     if (!userId) return;
@@ -595,12 +571,19 @@ async function requestWithdraw() {
     const rawAmount = amountEl ? amountEl.value.trim() : '';
     const reqAmount = parseInt(rawAmount);
     const totalCoins = userData.coins || 0;
+    const refCount   = getRefCount(userData.referrals);
 
     if (!rawAmount)                        return showToast("Please enter the coin amount!", "error");
     if (isNaN(reqAmount))                  return showToast("Please enter a valid number!", "error");
     if (reqAmount <= 0)                    return showToast("Amount cannot be zero or negative!", "error");
     if (reqAmount < MIN_WITHDRAW_COINS)    return showToast(`Minimum ${MIN_WITHDRAW_COINS} coins required.`, "error");
     if (reqAmount > totalCoins)            return showToast(`Insufficient balance. You have ${totalCoins} coins.`, "error");
+
+    // Referral check — sirf tab karo jab REFERRAL_ACTIVE = true ho
+    if (CONFIG.REFERRAL_ACTIVE !== false && refCount < 5) {
+        return showToast(`You need 5 referrals to withdraw. You have ${refCount}/5.`, "error");
+    }
+
     if (!upi || !upi.includes('@'))        return showToast("Please enter a valid UPI ID! (Example: name@upi)", "error");
 
     _pendingRequests.add('withdraw');
@@ -653,8 +636,6 @@ async function verifyTask(taskId, inputId, sponsorLink) {
     if (_pendingRequests.has(reqKey)) return;
     _pendingRequests.add(reqKey);
 
-    // Accept both 2-arg (legacy) and 3-arg invocations. Resolve link from
-    // CONFIG.SPONSORS if not explicitly passed (covers slot* IDs).
     let linkToSend = sponsorLink || "";
     if (!linkToSend && typeof CONFIG !== 'undefined' && CONFIG.SPONSORS && CONFIG.SPONSORS[taskId]) {
         linkToSend = CONFIG.SPONSORS[taskId].link || "";
@@ -667,7 +648,6 @@ async function verifyTask(taskId, inputId, sponsorLink) {
     startCountdown(10,
         (s) => { if (verifyBtn) verifyBtn.innerText = `Wait ${s}s...`; },
         async () => {
-            // Ad gate — must watch before coins credited
             if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.innerText = '📺 Watch Ad...'; }
             try {
                 await requireAdWatch();
@@ -796,7 +776,6 @@ async function claimChannel(channelId, channelUrl) {
     startCountdown(15,
         (s) => { if (btn) btn.innerText = `Join & wait ${s}s...`; },
         async () => {
-            // Ad gate — must watch before coins credited
             if (btn) { btn.disabled = true; btn.innerText = '📺 Watch Ad...'; }
             try {
                 await requireAdWatch();
@@ -871,7 +850,7 @@ async function claimChannel(channelId, channelUrl) {
 }
 
 // ============================================================
-// AD COUNTER — Updated to 10 ads/day
+// AD COUNTER
 // ============================================================
 function updateAdCounter(adsToday, adsDate) {
     const today   = new Date().toISOString().split('T')[0];
@@ -902,28 +881,23 @@ function updateAllBonusUI(data) {
 
     const today = new Date().toISOString().slice(0, 10);
 
-    // Daily bonus: check if last_claim was today (UTC)
     const lastClaim = data.last_claim || '';
     const lastClaimDt = parseUTCTimestamp(lastClaim);
     const dailyDone = lastClaimDt
         ? (lastClaimDt.toISOString().slice(0, 10) === today)
         : false;
 
-    // Ads done today
     const adsDate   = data.ads_date || '';
     const adsToday  = (adsDate === today) ? (data.ads_today || 0) : 0;
     const adsFull   = adsToday >= MAX_ADS_PER_DAY;
 
-    // Task completions
     const completed = data.completed_tasks || [];
     const ytDone    = ['yt1','yt2','yt3'].filter(t => completed.includes(t)).length;
     const webDone   = ['web1','web2','web3'].filter(t => completed.includes(t)).length;
 
-    // Bonus already claimed today?
     const bonusDate     = data.allcomplete_bonus_date || '';
     const alreadyClaimed = (bonusDate === today);
 
-    // Update checkmarks
     const setCheck = (id, done) => {
         const el = document.getElementById(id);
         if (el) el.textContent = done ? '✅' : '⬜';
@@ -933,18 +907,15 @@ function updateAllBonusUI(data) {
     setCheck('check-yt',    ytDone  >= MAX_YT_PER_DAY);
     setCheck('check-web',   webDone >= MAX_WEB_PER_DAY);
 
-    // Update counts
     const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
     setText('allbonus-ads-count', `(${Math.min(adsToday, MAX_ADS_PER_DAY)}/${MAX_ADS_PER_DAY})`);
     setText('allbonus-yt-count',  `(${ytDone}/${MAX_YT_PER_DAY})`);
     setText('allbonus-web-count', `(${webDone}/${MAX_WEB_PER_DAY})`);
 
-    // Badge
     const doneCount = [dailyDone, adsFull, ytDone >= MAX_YT_PER_DAY, webDone >= MAX_WEB_PER_DAY].filter(Boolean).length;
     const badge = document.getElementById('allbonus-status-badge');
     if (badge) badge.textContent = `${doneCount}/4`;
 
-    // Claim button
     const allDone = dailyDone && adsFull && ytDone >= MAX_YT_PER_DAY && webDone >= MAX_WEB_PER_DAY;
     const btn = document.getElementById('allbonus-btn');
     if (!btn) return;
@@ -1005,21 +976,19 @@ async function claimAllBonus() {
 }
 
 // ============================================================
-// MANDATORY AD GATE — called before every coin claim
-// Resolves silently if ads disabled / not configured.
-// Throws 'ad_skipped' if user does not watch the full ad.
+// MANDATORY AD GATE
 // ============================================================
 async function requireAdWatch() {
     if (!CONFIG.CLAIM_AD_ENABLED) return;
     const zoneId = getMonetagZoneId();
-    if (!zoneId) return; // no ad zone configured — skip silently
+    if (!zoneId) return;
     try {
         await loadMonetagSdk();
     } catch (e) {
-        return; // SDK failed to load — allow claim anyway
+        return;
     }
     const showMonetagAd = getMonetagShowFunction();
-    if (!showMonetagAd) return; // function not ready — skip silently
+    if (!showMonetagAd) return;
     const result = await showMonetagAd({ ymid: String(userId), requestVar: 'claim_gate' });
     if (!result?.reward_event_type || result.reward_event_type !== 'valued') {
         throw new Error('ad_skipped');
@@ -1027,7 +996,7 @@ async function requireAdWatch() {
 }
 
 // ============================================================
-// MONETAG REWARDED AD — coins only after full ad completion
+// MONETAG REWARDED AD
 // ============================================================
 async function showAd() {
     if (!userId) return showToast("User ID not found!", "error");
@@ -1080,7 +1049,6 @@ async function showAd() {
 
         if (data.status === "success") {
             showToast(`✅ ${data.message}`, "success");
-            // Update counter immediately without full reload
             const counterEl = document.getElementById('ad-counter');
             if (counterEl && adsDone !== undefined) counterEl.innerText = adsDone;
             fetchLiveData();
@@ -1099,8 +1067,6 @@ async function showAd() {
 // ============================================================
 // DEVICE CHECK
 // ============================================================
-// Strong device fingerprint via FingerprintJS open source (50+ signals).
-// Falls back to a weak hash (prefixed `wk_`) only if the CDN is blocked.
 let _fpPromise = null;
 function loadFingerprintJS() {
     if (_fpPromise) return _fpPromise;
@@ -1123,7 +1089,6 @@ async function generateFingerprint() {
         if (result?.visitorId) return result.visitorId;
         throw new Error('no visitorId');
     } catch (e) {
-        // Fallback (weak) — better than nothing if CDN blocked
         try {
             const data = [
                 navigator.userAgent, navigator.language,
@@ -1145,7 +1110,7 @@ async function checkDevice() {
     if (!userId) return;
     try {
         const fingerprint = await generateFingerprint();
-        if (!fingerprint) return; // empty fp backend ko mat bhejo
+        if (!fingerprint) return;
         const res = await fetch(`${CONFIG.API_BASE_URL}/check_device`, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1243,7 +1208,7 @@ async function loadHistory() {
 }
 
 // ============================================================
-// SUPPORT — 1 message per day
+// SUPPORT
 // ============================================================
 async function sendSupport() {
     if (_pendingRequests.has('support')) return;
@@ -1366,18 +1331,14 @@ function switchTab(tabId, el) {
 
     if (tabId === 'leaderboard') refreshLeaderboard();
     if (tabId === 'history')     loadHistory();
+
+    // Re-apply referral lock jab refer tab khule
+    if (tabId === 'refer') setTimeout(applyReferralLock, 50);
 }
 
 // ============================================================
 // SPONSOR SLOTS — Dynamic render from CONFIG.SPONSORS
 // ============================================================
-
-/**
- * Render all sponsor slots (slot1–slot4) from CONFIG.SPONSORS.
- * Called on init and after fetchLiveData so claimed state is fresh.
- * @param {object} channelClaims   - user's channel_claims map from server
- * @param {Array}  completedTasks  - user's completed task IDs (for verify type)
- */
 function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
     const container = document.getElementById('sponsor-slots-container');
     if (!container) return;
@@ -1391,7 +1352,7 @@ function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
 
     slots.forEach(slotId => {
         const s = sponsors[slotId];
-        if (!s) return; // slot not defined in config → skip
+        if (!s) return;
 
         const icon   = s.icon   || '💼';
         const name   = s.name   || ('Sponsor ' + slotId);
@@ -1402,7 +1363,6 @@ function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
         const active = s.active === true;
 
         if (!active) {
-            // Locked slot
             html += `
             <div style="position:relative; display:flex; align-items:center; gap:12px; padding:10px;
                         background:rgba(255,255,255,0.04); border-radius:10px; margin-bottom:8px;
@@ -1421,7 +1381,6 @@ function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
             return;
         }
 
-        // Check if already claimed
         const claim = claims[slotId];
         let alreadyClaimed = false;
         if (claim) {
@@ -1433,10 +1392,6 @@ function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
         }
 
         if (type === 'verify') {
-            // Verify type — open site + enter code + verify (one-time per
-            // (code,link) pair). If admin rotates either the code (via
-            // /settask) or the sponsor link (in config.js), the slot
-            // automatically re-opens for everyone.
             const vc = (verifyCompletions || {})[slotId] || {};
             const linkMatches = !vc.link || vc.link === link;
             const isVerifyDone = done.includes(slotId) && linkMatches;
@@ -1470,7 +1425,6 @@ function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
             </div>`;
 
         } else if (type === 'task') {
-            // Task type — open link + claim button (no code)
             html += `
             <div class="partner-card" style="margin-bottom:8px;">
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
@@ -1490,7 +1444,6 @@ function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
                 }
             </div>`;
         } else {
-            // Channel type — join button
             html += `
             <div style="display:flex; align-items:center; gap:12px; padding:10px;
                         background:rgba(255,255,255,0.05); border-radius:10px; margin-bottom:8px;">
@@ -1515,10 +1468,79 @@ function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
 }
 
 // ============================================================
+// REFERRAL LOCK — CONFIG.REFERRAL_ACTIVE se control hota hai
+// ============================================================
+function applyReferralLock() {
+    const referTab   = document.getElementById('refer');
+    const refBox     = document.getElementById('ref-requirement-box');
+    const refText    = document.getElementById('ref-progress-text');
+    const refBarWrap = document.getElementById('ref-bar-wrap');
+    const helpRef    = document.getElementById('help-ref-rule');
+
+    if (CONFIG.REFERRAL_ACTIVE === false) {
+
+        // ── Refer Tab: Lock Overlay ──
+        if (referTab && !referTab.querySelector('.refer-lock-overlay')) {
+            const ov = document.createElement('div');
+            ov.className = 'refer-lock-overlay';
+            ov.style.cssText = [
+                'position:absolute',
+                'inset:0',
+                'display:flex',
+                'flex-direction:column',
+                'align-items:center',
+                'justify-content:center',
+                'background:rgba(15,23,42,0.88)',
+                'backdrop-filter:blur(4px)',
+                'z-index:20',
+                'pointer-events:none',
+            ].join(';');
+            ov.innerHTML =
+                '<span style="font-size:40px;animation:lock-pulse 1.6s ease-in-out infinite;display:block;">🔒</span>' +
+                '<span style="font-size:15px;color:#e8d5ff;font-weight:700;margin-top:10px;letter-spacing:0.5px;">Referral Coming Soon!</span>' +
+                '<span style="font-size:12px;color:#94a3b8;margin-top:4px;">Stay tuned for updates</span>';
+            referTab.appendChild(ov);
+        }
+
+        // ── Withdrawal: "Not Required" dikhao ──
+        if (refBox) {
+            refBox.style.borderColor = '#2ecc71';
+            refBox.style.opacity     = '1';
+        }
+        if (refText) {
+            refText.innerText   = '✅ Not Required';
+            refText.style.color = '#2ecc71';
+        }
+        if (refBarWrap) {
+            refBarWrap.innerHTML =
+                '<div style="height:100%;background:linear-gradient(90deg,#2ecc71,#27ae60);' +
+                'border-radius:20px;width:100%;transition:width 0.5s;"></div>';
+        }
+
+        // ── Help tab rule update ──
+        if (helpRef) {
+            helpRef.innerHTML = '• Referral Requirement: <b style="color:#2ecc71;">Not Required ✅</b>';
+        }
+
+    } else {
+
+        // ── Active: stale lock hata do ──
+        if (referTab) {
+            const stale = referTab.querySelector('.refer-lock-overlay');
+            if (stale) stale.remove();
+        }
+        if (refText)  refText.style.color = '';
+        if (refBox)   { refBox.style.borderColor = '#334155'; refBox.style.opacity = '1'; }
+        if (helpRef) {
+            helpRef.innerHTML = '• Referral Requirement: <b style="color:#f1c40f;">5 Users</b>';
+        }
+    }
+}
+
+// ============================================================
 // APP INIT
 // ============================================================
 window.addEventListener('DOMContentLoaded', () => {
-    // Set admin Telegram username display
     const adminEl = document.getElementById('admin-tg-username');
     if (adminEl && CONFIG.ADMIN_TELEGRAM) {
         const u = String(CONFIG.ADMIN_TELEGRAM);
@@ -1529,6 +1551,9 @@ window.addEventListener('DOMContentLoaded', () => {
     fetchLiveData();
     checkDevice();
     preloadMonetagAd();
+
+    // Referral lock initial apply
+    applyReferralLock();
 
     // Auto-refresh data every 5 minutes
     setInterval(fetchLiveData, 300000);
