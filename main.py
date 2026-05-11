@@ -5,17 +5,17 @@ Runs on Render with MongoDB as the database.
 Uses pyTelegramBotAPI (telebot) for Telegram integration.
 
 Environment Variables Required:
-    BOT_TOKEN    : Telegram Bot Token
-    MONGO_URI    : MongoDB connection string
-    ADMIN_ID     : Telegram user ID of the admin
-    BOT_USERNAME : Bot username (without @)
-    RENDER_URL   : Render deploy URL (for uptime ping)
-    FRONTEND_URL : Frontend GitHub Pages URL
-    ADMIN_TOKEN  : Secret token for Admin Panel API
-
-Coin Economy:
-    5000 coins = ₹100
-    1 coin = ₹0.02
+    BOT_TOKEN        : Telegram Bot Token
+    MONGO_URI        : MongoDB connection string
+    ADMIN_ID         : Telegram user ID of the admin
+    BOT_USERNAME     : Bot username (without @)
+    RENDER_URL       : Render deploy URL (for uptime ping)
+    FRONTEND_URL     : Frontend GitHub Pages URL
+    ADMIN_TOKEN      : Secret token for Admin Panel API
+    REFERRAL_ACTIVE  : "true" = referrals required for withdraw (default)
+                       "false" = referral check bypassed
+    LOTTERY_CHANNEL  : (optional) Channel username/ID for auto-draw announcements
+                       e.g. "@MyChannel" or "-100xxxxxxxxx"
 """
 
 import hmac
@@ -55,15 +55,25 @@ logger = logging.getLogger(__name__)
 # 2. ENVIRONMENT VARIABLES
 # ============================================================
 
-BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
-MONGO_URI = (os.getenv("MONGO_URI") or "").strip()
-ADMIN_ID_STR = (os.getenv("ADMIN_ID") or "").strip()
-BOT_USERNAME = (os.getenv("BOT_USERNAME") or "YourBotUsername").strip()
-RENDER_URL = (os.getenv("RENDER_URL") or "").strip()
-FRONTEND_URL = (os.getenv("FRONTEND_URL") or "https://sahdakshsanoj-byte.github.io").strip()
+BOT_TOKEN      = (os.getenv("BOT_TOKEN")      or "").strip()
+MONGO_URI      = (os.getenv("MONGO_URI")      or "").strip()
+ADMIN_ID_STR   = (os.getenv("ADMIN_ID")       or "").strip()
+BOT_USERNAME   = (os.getenv("BOT_USERNAME")   or "YourBotUsername").strip()
+RENDER_URL     = (os.getenv("RENDER_URL")     or "").strip()
+FRONTEND_URL   = (os.getenv("FRONTEND_URL")   or "https://sahdakshsanoj-byte.github.io").strip()
 ADMIN_TOKEN    = (os.getenv("ADMIN_TOKEN")    or "").strip()
 MOD_TOKEN      = (os.getenv("MOD_TOKEN")      or "").strip()
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:32] if BOT_TOKEN else ""
+
+# ── Referral Lock ──────────────────────────────────────────────────────────
+# Render dashboard mein set karo: REFERRAL_ACTIVE = false  → bypass referral check
+# Default: true  (5 referrals required before withdrawal)
+REFERRAL_ACTIVE = os.getenv("REFERRAL_ACTIVE", "true").strip().lower() == "true"
+
+# ── Lottery Channel ────────────────────────────────────────────────────────
+# Optional: set to a channel username/ID for auto-draw announcements
+# e.g.  LOTTERY_CHANNEL = @MyChannel   or   LOTTERY_CHANNEL = -100xxxxxxxxx
+LOTTERY_CHANNEL = (os.getenv("LOTTERY_CHANNEL") or "").strip()
 
 if not BOT_TOKEN:
     raise EnvironmentError("FATAL: BOT_TOKEN environment variable is not set!")
@@ -93,18 +103,18 @@ try:
     )
     db = client["earning_bot_db"]
 
-    users_col = db["users"]
-    withdrawals_col = db["withdrawals"]
-    rate_col = db["rate_limits"]
-    config_col = db["config"]
-    sponsor_clicks_col   = db["sponsor_clicks"]
-    promos_col           = db["promos"]
-    support_messages_col = db["support_messages"]
-    ad_reward_tokens_col = db["ad_reward_tokens"]
-    code_filter_rules_col = db["code_filter_rules"]
-    group_code_violations_col = db["group_code_violations"]
-    promo_tasks_col = db["promo_tasks"]
-    lottery_col          = db["lottery"]
+    users_col                  = db["users"]
+    withdrawals_col            = db["withdrawals"]
+    rate_col                   = db["rate_limits"]
+    config_col                 = db["config"]
+    sponsor_clicks_col         = db["sponsor_clicks"]
+    promos_col                 = db["promos"]
+    support_messages_col       = db["support_messages"]
+    ad_reward_tokens_col       = db["ad_reward_tokens"]
+    code_filter_rules_col      = db["code_filter_rules"]
+    group_code_violations_col  = db["group_code_violations"]
+    promo_tasks_col            = db["promo_tasks"]
+    lottery_col                = db["lottery"]
 
     try:
         rate_col.create_index("expires_at", expireAfterSeconds=0)
@@ -141,86 +151,71 @@ except Exception as db_exc:
 
 
 # ============================================================
-# 4. CONSTANTS  (UPDATED coin economy)
+# 4. CONSTANTS
 # ============================================================
-
-# Coin conversion: 5000 coins = ₹100,  1 coin = ₹0.02
 
 TASK_CODES = {
-    "yt1": "CODE1",
-    "yt2": "CODE2",
-    "yt3": "CODE3",
-    "web1": "DASH98",
-    "web2": "GYM567",
-    "web3": "SHU234",
-    "slot3": "SLOT3",   # Sponsor slot 3 verification code (change with /settask slot3 CODE)
-    "slot4": "SLOT4",   # Sponsor slot 4 verification code (change with /settask slot4 CODE)
+    "yt1":   "CODE1",
+    "yt2":   "CODE2",
+    "yt3":   "CODE3",
+    "web1":  "DASH98",
+    "web2":  "GYM567",
+    "web3":  "SHU234",
+    "slot3": "SLOT3",
+    "slot4": "SLOT4",
 }
 
-# Updated rewards per spec
 TASK_REWARDS = {
-    "yt1": 5,    # YouTube tasks: 5 coins each
-    "yt2": 5,
-    "yt3": 5,
-    "web1": 3,   # Website/link tasks: 3 coins each
-    "web2": 3,
-    "web3": 3,
-    "slot3": 4,  # Sponsor slot 3 verify task: 4 coins (one-time)
-    "slot4": 4,  # Sponsor slot 4 verify task: 4 coins (one-time)
+    "yt1":   5,
+    "yt2":   5,
+    "yt3":   5,
+    "web1":  3,
+    "web2":  3,
+    "web3":  3,
+    "slot3": 4,
+    "slot4": 4,
 }
 
-# Task IDs that are one-time ever (not daily) — slot verify tasks
-ONE_TIME_TASK_IDS = {"slot3", "slot4"}
+ONE_TIME_TASK_IDS      = {"slot3", "slot4"}
+MAX_YT_TASKS_PER_DAY  = 3
+MAX_WEB_TASKS_PER_DAY = 3
 
-# Daily limits per task type
-MAX_YT_TASKS_PER_DAY = 3      # max 3 YouTube tasks per day
-MAX_WEB_TASKS_PER_DAY = 3     # max 3 website tasks per day
+CHANNEL_IDS                  = ["official", "channel2", "channel3", "slot1", "slot2", "slot3", "slot4"]
+CHANNEL_REWARD_PER_CHANNEL   = 5
+CHANNEL_TOTAL_REWARD         = 15
 
-# Telegram channel one-time rewards (5 coins each, reward only after ALL 3 joined)
-# slot1/slot2 are channel-join sponsor slots; slot3/slot4 are verify-type but
-# share the claim_channel path for their "task" variant so must be listed here.
-CHANNEL_IDS = ["official", "channel2", "channel3", "slot1", "slot2", "slot3", "slot4"]
-CHANNEL_REWARD_PER_CHANNEL = 5
-CHANNEL_TOTAL_REWARD = 15     # 5 * 3 channels, credited once after all joined
+MAX_ADS_PER_DAY             = 10
+AD_COIN_REWARD              = 5
+AD_CLAIM_TOKEN_TTL_SECONDS  = 300
+AD_MIN_PER_DAY              = 8
 
-# Ads
-MAX_ADS_PER_DAY = 10           # 8-10 ads/day limit
-AD_COIN_REWARD = 5             # 5 coins per ad completion
-AD_CLAIM_TOKEN_TTL_SECONDS = 300
-AD_MIN_PER_DAY = 8             # informational minimum shown to user
-
-# Promotion tasks: fixed 5 coins, admin-managed, one-time per user per task
 PROMO_TASK_REWARD = 5
+ALL_TASKS_BONUS   = 10
 
-# All-tasks-complete daily bonus
-ALL_TASKS_BONUS = 10           # Extra 10 coins for completing all daily tasks
-
-# Withdrawal
-MIN_WITHDRAW = 5000            # 5000 coins = ₹100
+MIN_WITHDRAW      = 5000
+MAX_WITHDRAW      = 100000
+WITHDRAW_COOLDOWN = 86400
 
 # ============================================================
-# 5b. LOTTERY DEFAULTS (admin can override via /setlottery)
+# 4b. LOTTERY DEFAULTS
 # ============================================================
+
 LOTTERY_DEFAULTS = {
     "ticket_price": 50,
-    "prize": 500,
-    "active": True,
+    "prize":        500,
+    "active":       True,
 }
-_lottery_cfg_cache = None
+_lottery_cfg_cache      = None
 _lottery_cfg_cache_time = 0.0
-LOTTERY_CFG_CACHE_TTL = 60  # seconds
-MAX_WITHDRAW = 100000
-WITHDRAW_COOLDOWN = 86400      # 24 hours
+LOTTERY_CFG_CACHE_TTL   = 60
 
-SUPPORT_MAX_MSGS = 1
-SUPPORT_WINDOW_HRS = 24
-TASK_FAIL_COOLDOWN = 60
-TASK_MAX_FAILS = 3
-
-VALID_TASK_IDS = set(TASK_CODES.keys())
-
-GROUP_CODE_FILTER_ENABLED = True
-GROUP_CODE_MAX_VIOLATIONS = 3
+SUPPORT_MAX_MSGS                 = 1
+SUPPORT_WINDOW_HRS               = 24
+TASK_FAIL_COOLDOWN               = 60
+TASK_MAX_FAILS                   = 3
+VALID_TASK_IDS                   = set(TASK_CODES.keys())
+GROUP_CODE_FILTER_ENABLED        = True
+GROUP_CODE_MAX_VIOLATIONS        = 3
 GROUP_CODE_VIOLATION_WINDOW_HOURS = 24
 DEFAULT_GROUP_CODE_PATTERNS = [
     r"\b[A-Z]{3}\b",
@@ -233,11 +228,10 @@ DEFAULT_GROUP_CODE_PATTERNS = [
 # ============================================================
 
 _rate_cache: dict = {}
-_rate_cache_lock = threading.Lock()
+_rate_cache_lock  = threading.Lock()
 
 
 def is_rate_limited(key: str, cooldown_seconds: int) -> bool:
-    """Check and set a rate limit using an in-memory TTL cache."""
     now = time.time()
     with _rate_cache_lock:
         expires = _rate_cache.get(key, 0.0)
@@ -248,7 +242,6 @@ def is_rate_limited(key: str, cooldown_seconds: int) -> bool:
 
 
 def _cleanup_rate_cache() -> None:
-    """Background thread: remove expired entries from the rate cache every 5 min."""
     while True:
         time.sleep(300)
         now = time.time()
@@ -264,9 +257,9 @@ def _cleanup_rate_cache() -> None:
 # 6. LEADERBOARD CACHE
 # ============================================================
 
-_leaderboard_cache = "none"
+_leaderboard_cache      = "none"
 _leaderboard_cache_time = 0.0
-LEADERBOARD_TTL = 600
+LEADERBOARD_TTL         = 600
 
 
 def get_leaderboard_cached() -> str:
@@ -274,7 +267,7 @@ def get_leaderboard_cached() -> str:
     now = time.time()
     if now - _leaderboard_cache_time < LEADERBOARD_TTL:
         return _leaderboard_cache
-    _leaderboard_cache = get_leaderboard()
+    _leaderboard_cache      = get_leaderboard()
     _leaderboard_cache_time = now
     return _leaderboard_cache
 
@@ -284,7 +277,7 @@ def refresh_leaderboard_loop() -> None:
     while True:
         time.sleep(LEADERBOARD_TTL)
         try:
-            _leaderboard_cache = get_leaderboard()
+            _leaderboard_cache      = get_leaderboard()
             _leaderboard_cache_time = time.time()
             logger.info("Leaderboard cache refreshed.")
         except Exception as exc:
@@ -295,13 +288,12 @@ def refresh_leaderboard_loop() -> None:
 # 6b. TASK CODES CACHE
 # ============================================================
 
-_task_codes_cache = None
+_task_codes_cache      = None
 _task_codes_cache_time = 0.0
-TASK_CODES_CACHE_TTL = 300
+TASK_CODES_CACHE_TTL   = 300
 
 
 def get_live_task_codes() -> dict:
-    """Return task verification codes from MongoDB with 5-minute cache."""
     global _task_codes_cache, _task_codes_cache_time
     now = time.time()
     if _task_codes_cache is not None and now - _task_codes_cache_time < TASK_CODES_CACHE_TTL:
@@ -309,12 +301,12 @@ def get_live_task_codes() -> dict:
     try:
         cfg = config_col.find_one({"_id": "task_codes"})
         if cfg and cfg.get("codes"):
-            _task_codes_cache = cfg["codes"]
+            _task_codes_cache      = cfg["codes"]
             _task_codes_cache_time = now
             return _task_codes_cache
     except Exception:
         pass
-    _task_codes_cache = TASK_CODES
+    _task_codes_cache      = TASK_CODES
     _task_codes_cache_time = now
     return TASK_CODES
 
@@ -338,7 +330,7 @@ def verify_telegram_init_data(init_data: str) -> dict | None:
     if not init_data:
         return None
     try:
-        params = dict(parse_qsl(init_data, strict_parsing=True))
+        params        = dict(parse_qsl(init_data, strict_parsing=True))
         received_hash = params.pop("hash", None)
         if not received_hash:
             return None
@@ -384,11 +376,11 @@ def get_verified_user_id(request_data: dict) -> int | None:
 
 
 # ============================================================
-# 9. RATE LIMITING (MongoDB-backed for persistence)
+# 9. RATE LIMITING (MongoDB-backed)
 # ============================================================
 
 def check_support_limit(user_id: int) -> tuple[bool, str]:
-    now = datetime.utcnow()
+    now  = datetime.utcnow()
     user = users_col.find_one(
         {"user_id": user_id},
         {"support_window_start": 1, "support_count": 1},
@@ -397,8 +389,8 @@ def check_support_limit(user_id: int) -> tuple[bool, str]:
         return False, "User not found."
 
     window_start_str = user.get("support_window_start", "")
-    count = user.get("support_count", 0)
-    window_expired = True
+    count            = user.get("support_count", 0)
+    window_expired   = True
 
     if window_start_str:
         try:
@@ -416,7 +408,7 @@ def check_support_limit(user_id: int) -> tuple[bool, str]:
         return True, ""
 
     if count >= SUPPORT_MAX_MSGS:
-        start_dt = datetime.fromisoformat(window_start_str)
+        start_dt  = datetime.fromisoformat(window_start_str)
         remaining = timedelta(hours=SUPPORT_WINDOW_HRS) - (now - start_dt)
         h = int(remaining.total_seconds() // 3600)
         m = int((remaining.total_seconds() % 3600) // 60)
@@ -431,7 +423,7 @@ def check_support_limit(user_id: int) -> tuple[bool, str]:
 
 def is_task_attempt_blocked(user_id: int, task_id: str) -> bool:
     block_key = f"task_block_{user_id}_{task_id}"
-    now = datetime.utcnow()
+    now       = datetime.utcnow()
     try:
         doc = rate_col.find_one({"_id": block_key})
         if doc and doc.get("expires_at") > now:
@@ -444,12 +436,12 @@ def is_task_attempt_blocked(user_id: int, task_id: str) -> bool:
 
 def record_task_fail(user_id: int, task_id: str) -> None:
     counter_key = f"task_fail_{user_id}_{task_id}"
-    block_key = f"task_block_{user_id}_{task_id}"
-    now = datetime.utcnow()
+    block_key   = f"task_block_{user_id}_{task_id}"
+    now         = datetime.utcnow()
     try:
-        doc = rate_col.find_one({"_id": counter_key})
+        doc           = rate_col.find_one({"_id": counter_key})
         current_count = doc.get("count", 0) if doc else 0
-        new_count = current_count + 1
+        new_count     = current_count + 1
         rate_col.update_one(
             {"_id": counter_key},
             {"$set": {"count": new_count, "expires_at": now + timedelta(seconds=TASK_FAIL_COOLDOWN)}},
@@ -510,10 +502,8 @@ def verify_channel_membership(
                 "Membership check attempt %d/%d failed for %s (user %s): %s",
                 attempt, max_retries, channel_id_or_username, user_id, exc,
             )
-
         if attempt < max_retries:
             time.sleep(retry_delay)
-
     logger.info(
         "Membership check: user %s NOT confirmed in %s after %d attempts.",
         user_id, channel_id_or_username, max_retries,
@@ -550,13 +540,13 @@ def bot_has_group_moderation_rights(chat_id: int) -> tuple[bool, bool]:
     if not bot_id:
         return False, False
     try:
-        member = bot.get_chat_member(chat_id, bot_id)
+        member    = bot.get_chat_member(chat_id, bot_id)
         if member.status == "creator":
             return True, True
         if member.status != "administrator":
             return False, False
         can_delete = bool(getattr(member, "can_delete_messages", False))
-        can_ban = bool(getattr(member, "can_restrict_members", False))
+        can_ban    = bool(getattr(member, "can_restrict_members", False))
         return can_delete, can_ban
     except Exception as exc:
         logger.warning("Unable to check bot moderation rights in chat %s: %s", chat_id, exc)
@@ -586,7 +576,7 @@ def message_matches_group_code_filter(text: str) -> str | None:
 
 
 def record_group_code_violation(chat_id: int, user_id: int) -> int:
-    now = datetime.utcnow()
+    now          = datetime.utcnow()
     window_start = now - timedelta(hours=GROUP_CODE_VIOLATION_WINDOW_HOURS)
     try:
         current = group_code_violations_col.find_one({"chat_id": chat_id, "user_id": user_id})
@@ -596,20 +586,12 @@ def record_group_code_violation(chat_id: int, user_id: int) -> int:
                 last_violation_at = datetime.fromisoformat(last_violation_raw)
             except Exception:
                 last_violation_at = now
-            if last_violation_at < window_start:
-                count = 1
-            else:
-                count = int(current.get("count", 0)) + 1
+            count = 1 if last_violation_at < window_start else int(current.get("count", 0)) + 1
         else:
             count = 1
         group_code_violations_col.update_one(
             {"chat_id": chat_id, "user_id": user_id},
-            {
-                "$set": {
-                    "count": count,
-                    "last_violation_at": now.isoformat(),
-                }
-            },
+            {"$set": {"count": count, "last_violation_at": now.isoformat()}},
             upsert=True,
         )
         return count
@@ -633,10 +615,10 @@ CORS(app, origins=[FRONTEND_URL], supports_credentials=False)
 
 @app.after_request
 def add_security_headers(response):
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Frame-Options"]         = "DENY"
+    response.headers["X-Content-Type-Options"]  = "nosniff"
+    response.headers["X-XSS-Protection"]        = "1; mode=block"
+    response.headers["Referrer-Policy"]         = "no-referrer"
     return response
 
 
@@ -676,15 +658,14 @@ def get_referral_link(user_id: int) -> str:
 
 def send_referral_link(user_id: int) -> bool:
     referral_link = get_referral_link(user_id)
-    share_text = "💰 Earn coins daily by watching ads & completing tasks! 🚀 Join now and start earning instantly!"
-    share_url = (
+    share_text    = "💰 Earn coins daily by watching ads & completing tasks! 🚀 Join now and start earning instantly!"
+    share_url     = (
         "https://t.me/share/url"
         f"?url={quote(referral_link, safe='')}"
         f"&text={quote(share_text, safe='')}"
     )
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("📤 Share Now", url=share_url))
-
     try:
         bot.send_message(
             user_id,
@@ -704,24 +685,24 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
         user = users_col.find_one({"user_id": user_id})
         if not user:
             new_user = {
-                "user_id": user_id,
-                "username": username,
-                "coins": 0,
-                "referred_by": None,
-                "referral_count": 0,
-                "task_completions": {},
-                "channel_claims": {},
-                "promo_task_completions": [],
-                "last_claim_ts": "",
-                "allcomplete_bonus_date": "",
-                "ads_today": 0,
-                "ads_date": "",
-                "support_count": 0,
-                "support_window_start": "",
-                "ip_flagged": False,
-                "fp_flagged": False,
-                "blocked": False,
-                "joined": str(date.today()),
+                "user_id":               user_id,
+                "username":              username,
+                "coins":                 0,
+                "referred_by":           None,
+                "referral_count":        0,
+                "task_completions":      {},
+                "channel_claims":        {},
+                "promo_task_completions":[],
+                "last_claim_ts":         "",
+                "allcomplete_bonus_date":"",
+                "ads_today":             0,
+                "ads_date":              "",
+                "support_count":         0,
+                "support_window_start":  "",
+                "ip_flagged":            False,
+                "fp_flagged":            False,
+                "blocked":               False,
+                "joined":                str(date.today()),
             }
             if referrer_id and str(referrer_id) != str(user_id):
                 referrer = users_col.find_one({"user_id": int(referrer_id)})
@@ -748,7 +729,6 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
 
 
 def count_task_type_completions_today(task_completions: dict, prefix: str, today: str, live_codes: dict) -> int:
-    """Count how many tasks of a given type prefix (yt/web) user completed today."""
     count = 0
     for tid, info in task_completions.items():
         if tid.startswith(prefix) and isinstance(info, dict):
@@ -761,9 +741,9 @@ def count_task_type_completions_today(task_completions: dict, prefix: str, today
 # 16. STATS CACHE
 # ============================================================
 
-_stats_cache: dict = {}
+_stats_cache: dict      = {}
 _stats_cache_time: float = 0.0
-STATS_CACHE_TTL = 60
+STATS_CACHE_TTL          = 60
 
 
 # ============================================================
@@ -786,25 +766,22 @@ def get_user_data_api(user_id: int):
         if user.get("blocked"):
             return jsonify({"status": "blocked"})
 
-        today = str(date.today())
+        today    = str(date.today())
         ads_date = user.get("ads_date", "")
         ads_today = user.get("ads_today", 0) if ads_date == today else 0
 
-        task_completions = user.get("task_completions", {})
-        live_task_codes = get_live_task_codes()
-        completed_today = []
+        task_completions  = user.get("task_completions", {})
+        live_task_codes   = get_live_task_codes()
+        completed_today   = []
         verify_completions = {}
         for tid, info in task_completions.items():
             if isinstance(info, dict):
                 code_matches = info.get("code") == live_task_codes.get(tid, "")
                 if tid in ONE_TIME_TASK_IDS:
-                    # Expose stored {code, link} to frontend so it can also
-                    # invalidate completion when sponsor link changes.
                     verify_completions[tid] = {
                         "code": info.get("code", ""),
                         "link": info.get("link", ""),
                     }
-                    # One-time tasks: show as done forever once code matches
                     if code_matches:
                         completed_today.append(tid)
                 else:
@@ -813,23 +790,21 @@ def get_user_data_api(user_id: int):
 
         promo_task_completions = user.get("promo_task_completions", [])
 
-        return jsonify(
-            {
-                "status": "success",
-                "coins": user.get("coins", 0),
-                "leaderboard": get_leaderboard_cached(),
-                "referrals": get_referral_list(user_id),
-                "completed_tasks": completed_today,
-                "verify_completions": verify_completions,
-                "last_claim": user.get("last_claim_ts", ""),
-                "referred_by": user.get("referred_by", ""),
-                "ads_today": ads_today,
-                "ads_date": ads_date,
-                "channel_claims": user.get("channel_claims", {}),
-                "promo_task_completions": promo_task_completions,
-                "allcomplete_bonus_date": user.get("allcomplete_bonus_date", ""),
-            }
-        )
+        return jsonify({
+            "status":               "success",
+            "coins":                user.get("coins", 0),
+            "leaderboard":          get_leaderboard_cached(),
+            "referrals":            get_referral_list(user_id),
+            "completed_tasks":      completed_today,
+            "verify_completions":   verify_completions,
+            "last_claim":           user.get("last_claim_ts", ""),
+            "referred_by":          user.get("referred_by", ""),
+            "ads_today":            ads_today,
+            "ads_date":             ads_date,
+            "channel_claims":       user.get("channel_claims", {}),
+            "promo_task_completions": promo_task_completions,
+            "allcomplete_bonus_date": user.get("allcomplete_bonus_date", ""),
+        })
     except Exception as exc:
         logger.error("get_user error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
@@ -851,28 +826,26 @@ def claim_daily_api(user_id: int):
         if user.get("blocked"):
             return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
 
-        now = datetime.utcnow()
+        now   = datetime.utcnow()
         today = str(date.today())
         last_ts = user.get("last_claim_ts", "")
         if last_ts:
             try:
                 last_dt = datetime.fromisoformat(last_ts)
-                # Same UTC calendar day → already claimed today
                 if last_dt.date().isoformat() == today:
-                    # Still compute remaining so frontend countdown is accurate
                     next_claim_dt = last_dt + timedelta(hours=24)
-                    remaining = next_claim_dt - now
-                    total_secs = max(0, int(remaining.total_seconds()))
+                    remaining     = next_claim_dt - now
+                    total_secs    = max(0, int(remaining.total_seconds()))
                     h = total_secs // 3600
                     m = (total_secs % 3600) // 60
                     s = total_secs % 60
                     return (
                         jsonify({
-                            "status": "error",
+                            "status":  "error",
                             "message": f"Already claimed today! Come back in {h}h {m}m {s}s.",
-                            "data": {
+                            "data":    {
                                 "remaining_seconds": total_secs,
-                                "next_claim_utc": next_claim_dt.isoformat(),
+                                "next_claim_utc":    next_claim_dt.isoformat(),
                             },
                         }),
                         400,
@@ -894,16 +867,6 @@ def claim_daily_api(user_id: int):
 
 @app.route("/claim_allcomplete_bonus/<int:user_id>", methods=["POST"])
 def claim_allcomplete_bonus_api(user_id: int):
-    """Credit 10 extra coins when user completes ALL daily tasks in one day.
-
-    All-tasks required:
-      - Daily bonus claimed today
-      - All 10 ads watched today
-      - All 3 YouTube tasks completed today
-      - All 3 website tasks completed today
-
-    One bonus per day per user.
-    """
     if is_rate_limited(f"allbonus_{user_id}", 30):
         return jsonify({"status": "error", "message": "Please wait before trying again."}), 429
 
@@ -916,12 +879,10 @@ def claim_allcomplete_bonus_api(user_id: int):
 
         today = str(date.today())
 
-        # Already claimed today?
         if user.get("allcomplete_bonus_date") == today:
             return jsonify({"status": "error", "message": "All-tasks bonus already claimed today! Come back tomorrow."}), 400
 
-        # Check daily bonus claimed today (same UTC calendar day)
-        last_ts = user.get("last_claim_ts", "")
+        last_ts    = user.get("last_claim_ts", "")
         daily_done = False
         if last_ts:
             try:
@@ -933,53 +894,42 @@ def claim_allcomplete_bonus_api(user_id: int):
         if not daily_done:
             return jsonify({"status": "error", "message": "Claim your daily bonus first!"}), 400
 
-        # Check ads — must have done MAX_ADS_PER_DAY today
-        ads_date = user.get("ads_date", "")
+        ads_date  = user.get("ads_date", "")
         ads_today = user.get("ads_today", 0) if ads_date == today else 0
         if ads_today < MAX_ADS_PER_DAY:
-            remaining_ads = MAX_ADS_PER_DAY - ads_today
             return jsonify({
-                "status": "error",
-                "message": f"Watch {remaining_ads} more ad(s) to complete all tasks!"
+                "status":  "error",
+                "message": f"Watch {MAX_ADS_PER_DAY - ads_today} more ad(s) to complete all tasks!"
             }), 400
 
-        # Check YT tasks (yt1, yt2, yt3) and web tasks (web1, web2, web3)
         task_completions = user.get("task_completions", {})
-        live_codes = get_live_task_codes()
-
-        yt_done = count_task_type_completions_today(task_completions, "yt", today, live_codes)
+        live_codes       = get_live_task_codes()
+        yt_done  = count_task_type_completions_today(task_completions, "yt",  today, live_codes)
         web_done = count_task_type_completions_today(task_completions, "web", today, live_codes)
 
         if yt_done < MAX_YT_TASKS_PER_DAY:
-            return jsonify({
-                "status": "error",
-                "message": f"Complete {MAX_YT_TASKS_PER_DAY - yt_done} more YouTube task(s) first!"
-            }), 400
-
+            return jsonify({"status": "error", "message": f"Complete {MAX_YT_TASKS_PER_DAY - yt_done} more YouTube task(s) first!"}), 400
         if web_done < MAX_WEB_TASKS_PER_DAY:
-            return jsonify({
-                "status": "error",
-                "message": f"Complete {MAX_WEB_TASKS_PER_DAY - web_done} more website task(s) first!"
-            }), 400
+            return jsonify({"status": "error", "message": f"Complete {MAX_WEB_TASKS_PER_DAY - web_done} more website task(s) first!"}), 400
 
-        # All conditions met — credit bonus
         users_col.update_one(
             {"user_id": user_id},
-            {
-                "$inc": {"coins": ALL_TASKS_BONUS},
-                "$set": {"allcomplete_bonus_date": today},
-            },
+            {"$inc": {"coins": ALL_TASKS_BONUS}, "$set": {"allcomplete_bonus_date": today}},
         )
         logger.info("All-tasks bonus of %s coins credited to user %s", ALL_TASKS_BONUS, user_id)
         return jsonify({
-            "status": "success",
+            "status":  "success",
             "message": f"🎉 All tasks complete! Bonus {ALL_TASKS_BONUS} coins credited!",
-            "data": {"bonus": ALL_TASKS_BONUS},
+            "data":    {"bonus": ALL_TASKS_BONUS},
         })
     except Exception as exc:
         logger.error("claim_allcomplete_bonus error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
 
+
+# ============================================================
+# WITHDRAW — REFERRAL_ACTIVE env var se control hota hai
+# ============================================================
 
 @app.route("/withdraw", methods=["POST"])
 def withdraw_api():
@@ -987,15 +937,15 @@ def withdraw_api():
     if not data:
         return jsonify({"status": "error", "message": "No data received."}), 400
 
-    user_id_raw = data.get("user_id")
-    upi_id = sanitize_text(data.get("upi_id", ""))
-    requested_amount = data.get("amount")
+    user_id_raw       = data.get("user_id")
+    upi_id            = sanitize_text(data.get("upi_id", ""))
+    requested_amount  = data.get("amount")
 
     if not user_id_raw or not upi_id or requested_amount is None:
         return jsonify({"status": "error", "message": "Missing required fields."}), 400
 
     try:
-        user_id = int(user_id_raw)
+        user_id          = int(user_id_raw)
         requested_amount = int(requested_amount)
     except (ValueError, TypeError):
         return jsonify({"status": "error", "message": "Invalid user ID or amount."}), 400
@@ -1016,12 +966,14 @@ def withdraw_api():
             {"status": "error", "message": "One withdrawal request allowed per day. Please try again tomorrow."}
         ), 429
 
-    _ref_user = users_col.find_one({"user_id": user_id}, {"referral_count": 1, "_id": 0})
-    ref_count = _ref_user.get("referral_count", 0) if _ref_user else 0
-    if ref_count < 5:
-        return jsonify(
-            {"status": "error", "message": f"You need {5 - ref_count} more referrals to withdraw."}
-        ), 400
+    # ── Referral check — bypass karo jab REFERRAL_ACTIVE = False ──
+    if REFERRAL_ACTIVE:
+        _ref_user = users_col.find_one({"user_id": user_id}, {"referral_count": 1, "_id": 0})
+        ref_count = _ref_user.get("referral_count", 0) if _ref_user else 0
+        if ref_count < 5:
+            return jsonify(
+                {"status": "error", "message": f"You need {5 - ref_count} more referrals to withdraw."}
+            ), 400
 
     result = users_col.find_one_and_update(
         {"user_id": user_id, "coins": {"$gte": requested_amount}, "blocked": {"$ne": True}},
@@ -1038,15 +990,15 @@ def withdraw_api():
             {"status": "error", "message": f"Insufficient balance. You have {user.get('coins', 0)} coins."}
         ), 400
 
-    inr_value = requested_amount * 0.02
+    inr_value  = requested_amount * 0.02
     withdrawal = {
-        "user_id": user_id,
-        "upi_id": upi_id,
-        "amount": requested_amount,
+        "user_id":   user_id,
+        "upi_id":    upi_id,
+        "amount":    requested_amount,
         "inr_value": inr_value,
-        "status": "Pending \u23f3",
+        "status":    "Pending \u23f3",
         "timestamp": datetime.utcnow(),
-        "date": datetime.utcnow().strftime("%d %b %Y, %I:%M %p UTC"),
+        "date":      datetime.utcnow().strftime("%d %b %Y, %I:%M %p UTC"),
     }
     withdrawals_col.insert_one(withdrawal)
     try:
@@ -1082,13 +1034,6 @@ def get_history_api(user_id: int):
 
 @app.route("/verify_task", methods=["POST"])
 def verify_task_api():
-    """Verify a task completion code and credit coins if correct.
-
-    Enforces:
-    - Daily limits: max 3 YouTube tasks, max 3 website/link tasks
-    - Anti-cheat: rate limits + fail attempt tracking
-    - One completion per task per day
-    """
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"status": "error", "message": "No data received."}), 400
@@ -1098,8 +1043,8 @@ def verify_task_api():
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Invalid user ID."}), 400
 
-    task_id = sanitize_text(data.get("task_id", "")).lower()
-    user_code = sanitize_text(data.get("code", "")).upper()
+    task_id      = sanitize_text(data.get("task_id", "")).lower()
+    user_code    = sanitize_text(data.get("code", "")).upper()
     sponsor_link = sanitize_text(data.get("link", ""), max_length=512)
 
     if not task_id or not user_code:
@@ -1135,12 +1080,11 @@ def verify_task_api():
         if user.get("blocked"):
             return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
 
-        today = str(date.today())
+        today            = str(date.today())
         task_completions = user.get("task_completions", {})
-        live_codes = get_live_task_codes()
+        live_codes       = get_live_task_codes()
+        existing         = task_completions.get(task_id, {})
 
-        existing = task_completions.get(task_id, {})
-        # One-time tasks (slot verify): block if ever completed, not just today
         if task_id in ONE_TIME_TASK_IDS:
             if isinstance(existing, dict) and existing.get("code") == correct_code:
                 return jsonify({"status": "error", "message": "You have already completed this task!"}), 400
@@ -1152,30 +1096,19 @@ def verify_task_api():
             ):
                 return jsonify({"status": "error", "message": "Task already completed today! Come back tomorrow."}), 400
 
-        # Enforce daily task-type limits
         if task_id.startswith("yt"):
             done_today = count_task_type_completions_today(task_completions, "yt", today, live_codes)
             if done_today >= MAX_YT_TASKS_PER_DAY:
-                return jsonify({
-                    "status": "error",
-                    "message": f"Daily YouTube task limit reached ({MAX_YT_TASKS_PER_DAY}/{MAX_YT_TASKS_PER_DAY}). Come back tomorrow!"
-                }), 400
+                return jsonify({"status": "error", "message": f"Daily YouTube task limit reached ({MAX_YT_TASKS_PER_DAY}/{MAX_YT_TASKS_PER_DAY}). Come back tomorrow!"}), 400
         elif task_id.startswith("web"):
             done_today = count_task_type_completions_today(task_completions, "web", today, live_codes)
             if done_today >= MAX_WEB_TASKS_PER_DAY:
-                return jsonify({
-                    "status": "error",
-                    "message": f"Daily website task limit reached ({MAX_WEB_TASKS_PER_DAY}/{MAX_WEB_TASKS_PER_DAY}). Come back tomorrow!"
-                }), 400
+                return jsonify({"status": "error", "message": f"Daily website task limit reached ({MAX_WEB_TASKS_PER_DAY}/{MAX_WEB_TASKS_PER_DAY}). Come back tomorrow!"}), 400
 
-        # Atomic guard: only credit if THIS exact completion record isn't already
-        # set. Prevents double-reward from concurrent requests (same task, same
-        # day, same code). For one-time tasks we additionally guard on "code".
         completion_field = f"task_completions.{task_id}"
         if task_id in ONE_TIME_TASK_IDS:
             guard_filter = {
-                "user_id": user_id,
-                "blocked": {"$ne": True},
+                "user_id": user_id, "blocked": {"$ne": True},
                 "$or": [
                     {completion_field: {"$exists": False}},
                     {f"{completion_field}.code": {"$ne": correct_code}},
@@ -1183,8 +1116,7 @@ def verify_task_api():
             }
         else:
             guard_filter = {
-                "user_id": user_id,
-                "blocked": {"$ne": True},
+                "user_id": user_id, "blocked": {"$ne": True},
                 "$or": [
                     {completion_field: {"$exists": False}},
                     {f"{completion_field}.date": {"$ne": today}},
@@ -1198,37 +1130,25 @@ def verify_task_api():
 
         upd = users_col.update_one(
             guard_filter,
-            {
-                "$inc": {"coins": reward},
-                "$set": {completion_field: completion_record},
-            },
+            {"$inc": {"coins": reward}, "$set": {completion_field: completion_record}},
         )
         if upd.modified_count == 0:
-            # Lost the race — already credited by a parallel request
             return jsonify({"status": "error", "message": "Task already completed."}), 400
 
         clear_task_fail_counter(user_id, task_id)
-        return jsonify(
-            {
-                "status": "success",
-                "message": f"{reward} coins added to your balance!",
-                "data": {"reward": reward},
-            }
-        )
+        return jsonify({"status": "success", "message": f"{reward} coins added to your balance!", "data": {"reward": reward}})
     except Exception as exc:
         logger.error("verify_task error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
 # ============================================================
-# AD REWARD SYSTEM (SDK-based, reward only after completion)
+# AD REWARD SYSTEM
 # ============================================================
 
 def create_ad_claim_token(user_id: int) -> tuple[dict, int]:
-    """Create a short-lived one-time token before showing an ad."""
     if user_id <= 0:
         return {"status": "error", "message": "Invalid user ID."}, 400
-
     try:
         user = users_col.find_one({"user_id": user_id})
         if not user:
@@ -1241,62 +1161,41 @@ def create_ad_claim_token(user_id: int) -> tuple[dict, int]:
             try:
                 last_ad_claim_dt = datetime.fromisoformat(last_ad_claim)
                 if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=30):
-                    return {
-                        "status": "error",
-                        "message": "Please wait 30 seconds before watching the next ad.",
-                    }, 429
+                    return {"status": "error", "message": "Please wait 30 seconds before watching the next ad."}, 429
             except ValueError:
                 pass
 
-        today = str(date.today())
-        ads_date = user.get("ads_date", "")
+        today     = str(date.today())
+        ads_date  = user.get("ads_date", "")
         ads_today = user.get("ads_today", 0) if ads_date == today else 0
 
         if ads_today >= MAX_ADS_PER_DAY:
-            return {
-                "status": "error",
-                "message": f"Daily ad limit reached ({MAX_ADS_PER_DAY}/{MAX_ADS_PER_DAY}). Come back tomorrow!",
-                "data": {
-                    "ads_done": ads_today,
-                    "ads_total": MAX_ADS_PER_DAY,
-                    "remaining": 0,
-                },
-            }, 400
+            return {"status": "error", "message": f"Daily ad limit reached ({MAX_ADS_PER_DAY}/{MAX_ADS_PER_DAY}). Come back tomorrow!", "data": {"ads_done": ads_today, "ads_total": MAX_ADS_PER_DAY, "remaining": 0}}, 400
 
-        raw_token = secrets.token_urlsafe(32)
+        raw_token  = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         expires_at = datetime.utcnow() + timedelta(seconds=AD_CLAIM_TOKEN_TTL_SECONDS)
         ad_reward_tokens_col.insert_one({
-            "_id": token_hash,
-            "user_id": user_id,
+            "_id":        token_hash,
+            "user_id":    user_id,
             "created_at": datetime.utcnow(),
             "expires_at": expires_at,
-            "source": "sdk_ad",
+            "source":     "sdk_ad",
         })
-        return {
-            "status": "success",
-            "token": raw_token,
-            "expires_in": AD_CLAIM_TOKEN_TTL_SECONDS,
-        }, 200
+        return {"status": "success", "token": raw_token, "expires_in": AD_CLAIM_TOKEN_TTL_SECONDS}, 200
     except Exception as exc:
         logger.error("create_ad_claim_token error for %s: %s", user_id, exc)
         return {"status": "error", "message": "Server error."}, 500
 
 
 def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
-    """Credit coins only after SDK confirms ad completion."""
     if user_id <= 0:
         return {"status": "error", "message": "Invalid user ID."}, 400
-
     if not claim_token:
         return {"status": "error", "message": "Ad verification token missing."}, 400
-
     try:
         token_hash = hashlib.sha256(claim_token.encode()).hexdigest()
-        token_doc = ad_reward_tokens_col.find_one_and_delete({
-            "_id": token_hash,
-            "user_id": user_id,
-        })
+        token_doc  = ad_reward_tokens_col.find_one_and_delete({"_id": token_hash, "user_id": user_id})
         if not token_doc:
             return {"status": "error", "message": "Invalid or already used ad token."}, 403
         if token_doc.get("expires_at") and token_doc["expires_at"] < datetime.utcnow():
@@ -1313,52 +1212,24 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
             try:
                 last_ad_claim_dt = datetime.fromisoformat(last_ad_claim)
                 if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=30):
-                    return {
-                        "status": "error",
-                        "message": "Please wait 30 seconds before claiming the next ad reward.",
-                    }, 429
+                    return {"status": "error", "message": "Please wait 30 seconds before claiming the next ad reward."}, 429
             except ValueError:
                 pass
 
-        today = str(date.today())
-        ads_date = user.get("ads_date", "")
+        today     = str(date.today())
+        ads_date  = user.get("ads_date", "")
         ads_today = user.get("ads_today", 0) if ads_date == today else 0
 
         if ads_today >= MAX_ADS_PER_DAY:
-            return {
-                "status": "error",
-                "message": f"Daily ad limit reached ({MAX_ADS_PER_DAY}/{MAX_ADS_PER_DAY}). Come back tomorrow!",
-                "data": {
-                    "ads_done": ads_today,
-                    "ads_total": MAX_ADS_PER_DAY,
-                    "remaining": 0,
-                },
-            }, 400
+            return {"status": "error", "message": f"Daily ad limit reached ({MAX_ADS_PER_DAY}/{MAX_ADS_PER_DAY}). Come back tomorrow!", "data": {"ads_done": ads_today, "ads_total": MAX_ADS_PER_DAY, "remaining": 0}}, 400
 
-        done = ads_today + 1
+        done      = ads_today + 1
         remaining = MAX_ADS_PER_DAY - done
         users_col.update_one(
             {"user_id": user_id},
-            {
-                "$inc": {"coins": AD_COIN_REWARD},
-                "$set": {
-                    "ads_date": today,
-                    "ads_today": done,
-                    "last_ad_claim_at": datetime.utcnow().isoformat(),
-                },
-            },
+            {"$inc": {"coins": AD_COIN_REWARD}, "$set": {"ads_date": today, "ads_today": done, "last_ad_claim_at": datetime.utcnow().isoformat()}},
         )
-
-        return {
-            "status": "success",
-            "message": f"{AD_COIN_REWARD} coins earned! ({done}/{MAX_ADS_PER_DAY} ads watched today)",
-            "data": {
-                "reward": AD_COIN_REWARD,
-                "ads_done": done,
-                "ads_total": MAX_ADS_PER_DAY,
-                "remaining": remaining,
-            },
-        }, 200
+        return {"status": "success", "message": f"{AD_COIN_REWARD} coins earned! ({done}/{MAX_ADS_PER_DAY} ads watched today)", "data": {"reward": AD_COIN_REWARD, "ads_done": done, "ads_total": MAX_ADS_PER_DAY, "remaining": remaining}}, 200
     except Exception as exc:
         logger.error("manual_ad_reward error for %s: %s", user_id, exc)
         return {"status": "error", "message": "Server error."}, 500
@@ -1366,7 +1237,6 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
 
 @app.route("/claim_ad/<int:user_id>", methods=["POST"])
 def claim_ad_api(user_id: int):
-    """Reward endpoint called only after SDK ad completion."""
     data = request.get_json(silent=True) or {}
     payload, status_code = manual_ad_reward(user_id, (data.get("token") or "").strip())
     return jsonify(payload), status_code
@@ -1374,24 +1244,16 @@ def claim_ad_api(user_id: int):
 
 @app.route("/ad_claim_token/<int:user_id>", methods=["POST"])
 def ad_claim_token_api(user_id: int):
-    """Create a short-lived one-time token for an ad reward attempt."""
     payload, status_code = create_ad_claim_token(user_id)
     return jsonify(payload), status_code
 
 
 # ============================================================
-# CHANNEL CLAIM (One-time, reward only after ALL 3 channels joined)
+# CHANNEL CLAIM
 # ============================================================
 
 @app.route("/claim_channel", methods=["POST"])
 def claim_channel_api():
-    """Claim coins for joining all required Telegram channels.
-
-    Rules:
-    - Each of the 3 channels can be claimed once (one-time)
-    - Reward (CHANNEL_REWARD_PER_CHANNEL coins) credited per channel
-    - Prevents duplicate claims per channel
-    """
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"status": "error", "message": "No data received."}), 400
@@ -1401,7 +1263,7 @@ def claim_channel_api():
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Invalid user ID."}), 400
 
-    channel_id = sanitize_text(data.get("channel_id", "")).lower()
+    channel_id  = sanitize_text(data.get("channel_id", "")).lower()
     channel_url = sanitize_text(data.get("channel_url", ""), max_length=500)
 
     if channel_id not in CHANNEL_IDS:
@@ -1422,7 +1284,6 @@ def claim_channel_api():
             return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
 
         channel_claims = user.get("channel_claims", {})
-
         if channel_claims.get(channel_id):
             return jsonify({"status": "error", "message": "Reward already claimed for this channel! ✅"}), 400
 
@@ -1431,40 +1292,24 @@ def claim_channel_api():
             if ch_username:
                 is_member = verify_channel_membership(ch_username, user_id)
                 if not is_member:
-                    return jsonify(
-                        {"status": "not_joined", "message": "Please join the channel first, then tap Retry!"}
-                    ), 400
+                    return jsonify({"status": "not_joined", "message": "Please join the channel first, then tap Retry!"}), 400
 
         users_col.update_one(
             {"user_id": user_id},
-            {
-                "$inc": {"coins": CHANNEL_REWARD_PER_CHANNEL},
-                "$set": {f"channel_claims.{channel_id}": True}
-            },
+            {"$inc": {"coins": CHANNEL_REWARD_PER_CHANNEL}, "$set": {f"channel_claims.{channel_id}": True}},
         )
-        return jsonify(
-            {
-                "status": "success",
-                "message": f"{CHANNEL_REWARD_PER_CHANNEL} coins credited for joining the channel!",
-                "data": {"reward": CHANNEL_REWARD_PER_CHANNEL},
-            }
-        )
+        return jsonify({"status": "success", "message": f"{CHANNEL_REWARD_PER_CHANNEL} coins credited for joining the channel!", "data": {"reward": CHANNEL_REWARD_PER_CHANNEL}})
     except Exception as exc:
         logger.error("claim_channel error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
 # ============================================================
-# PROMOTION TASKS (Manual, admin-only, one-time per user)
+# PROMOTION TASKS
 # ============================================================
 
 @app.route("/get_promo_tasks", methods=["GET"])
 def get_promo_tasks_api():
-    """Return all active promotion tasks (visible to all users).
-
-    Returns:
-        JSON: List of active promo task objects.
-    """
     try:
         tasks = list(promo_tasks_col.find({"active": True}, {"_id": 0}))
         return jsonify({"status": "success", "tasks": tasks})
@@ -1475,16 +1320,6 @@ def get_promo_tasks_api():
 
 @app.route("/claim_promo_task", methods=["POST"])
 def claim_promo_task_api():
-    """Claim reward for a promotion task.
-
-    Rules:
-    - Fixed reward: PROMO_TASK_REWARD coins per task
-    - Each user can only complete each promo task once (one-time)
-    - Task must exist and be active
-
-    Returns:
-        JSON: Success with reward, or error.
-    """
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"status": "error", "message": "No data received."}), 400
@@ -1495,7 +1330,6 @@ def claim_promo_task_api():
         return jsonify({"status": "error", "message": "Invalid user ID."}), 400
 
     task_id = sanitize_text(data.get("task_id", "")).strip()
-
     if not task_id:
         return jsonify({"status": "error", "message": "Missing task ID."}), 400
 
@@ -1518,57 +1352,32 @@ def claim_promo_task_api():
             return jsonify({"status": "error", "message": "Promotion task not found or no longer active."}), 404
 
         reward = task.get("reward", PROMO_TASK_REWARD)
-
         users_col.update_one(
             {"user_id": user_id},
-            {
-                "$inc": {"coins": reward},
-                "$addToSet": {"promo_task_completions": task_id},
-            },
+            {"$inc": {"coins": reward}, "$addToSet": {"promo_task_completions": task_id}},
         )
-        return jsonify(
-            {
-                "status": "success",
-                "message": f"{reward} coins added for completing the promotion task!",
-                "data": {"reward": reward},
-            }
-        )
+        return jsonify({"status": "success", "message": f"{reward} coins added for completing the promotion task!", "data": {"reward": reward}})
     except Exception as exc:
         logger.error("claim_promo_task error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
 # ============================================================
-# ADMIN: PROMO TASK MANAGEMENT
+# ADMIN: PROMO TASK MANAGEMENT (API)
 # ============================================================
 
 @app.route("/admin/add_promo_task", methods=["POST"])
 def admin_add_promo_task():
-    """Admin only: Add a new promotion task.
-
-    Body fields:
-        task_id   : Unique task identifier string
-        title     : Task title (shown to users)
-        description: Short description (optional)
-        link      : URL for the task (optional, e.g. channel or website)
-        reward    : Coin reward (defaults to PROMO_TASK_REWARD = 5)
-
-    Returns:
-        JSON: Success or error.
-    """
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
-
-    data = request.get_json(silent=True) or {}
-    task_id = sanitize_text(data.get("task_id", "")).strip()
-    title = sanitize_text(data.get("title", "")).strip()
+    data        = request.get_json(silent=True) or {}
+    task_id     = sanitize_text(data.get("task_id", "")).strip()
+    title       = sanitize_text(data.get("title", "")).strip()
     description = sanitize_text(data.get("description", ""), max_length=300).strip()
-    link = sanitize_text(data.get("link", ""), max_length=500).strip()
-
+    link        = sanitize_text(data.get("link", ""), max_length=500).strip()
     try:
         reward = int(data.get("reward", PROMO_TASK_REWARD))
-        if reward <= 0:
-            reward = PROMO_TASK_REWARD
+        if reward <= 0: reward = PROMO_TASK_REWARD
     except (TypeError, ValueError):
         reward = PROMO_TASK_REWARD
 
@@ -1579,16 +1388,7 @@ def admin_add_promo_task():
         existing = promo_tasks_col.find_one({"task_id": task_id})
         if existing:
             return jsonify({"status": "error", "message": f"Task '{task_id}' already exists."}), 400
-
-        promo_tasks_col.insert_one({
-            "task_id": task_id,
-            "title": title,
-            "description": description,
-            "link": link,
-            "reward": reward,
-            "active": True,
-            "created_at": datetime.utcnow().isoformat(),
-        })
+        promo_tasks_col.insert_one({"task_id": task_id, "title": title, "description": description, "link": link, "reward": reward, "active": True, "created_at": datetime.utcnow().isoformat()})
         logger.info("Admin added promo task: %s", task_id)
         return jsonify({"status": "success", "message": f"Promo task '{task_id}' added."})
     except Exception as exc:
@@ -1598,30 +1398,15 @@ def admin_add_promo_task():
 
 @app.route("/admin/remove_promo_task", methods=["POST"])
 def admin_remove_promo_task():
-    """Admin only: Deactivate a promotion task.
-
-    Body fields:
-        task_id: Task identifier to deactivate.
-
-    Returns:
-        JSON: Success or error.
-    """
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
-
-    data = request.get_json(silent=True) or {}
+    data    = request.get_json(silent=True) or {}
     task_id = sanitize_text(data.get("task_id", "")).strip()
-
     if not task_id:
         return jsonify({"status": "error", "message": "task_id is required."}), 400
-
     try:
-        result = promo_tasks_col.update_one(
-            {"task_id": task_id},
-            {"$set": {"active": False, "deactivated_at": datetime.utcnow().isoformat()}}
-        )
+        result = promo_tasks_col.update_one({"task_id": task_id}, {"$set": {"active": False, "deactivated_at": datetime.utcnow().isoformat()}})
         if result.matched_count:
-            logger.info("Admin deactivated promo task: %s", task_id)
             return jsonify({"status": "success", "message": f"Promo task '{task_id}' deactivated."})
         return jsonify({"status": "error", "message": "Task not found."}), 404
     except Exception as exc:
@@ -1630,7 +1415,7 @@ def admin_remove_promo_task():
 
 
 # ============================================================
-# SPONSOR CLICK TRACKING (kept for compatibility, no auto-reward)
+# SPONSOR CLICK TRACKING
 # ============================================================
 
 @app.route("/click_sponsor", methods=["POST"])
@@ -1638,18 +1423,16 @@ def click_sponsor_api():
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"status": "ok"})
-
     try:
         user_id = int(data.get("user_id", 0))
     except (TypeError, ValueError):
         return jsonify({"status": "ok"})
 
-    slot_id = sanitize_text(data.get("slot_id", ""), max_length=20).lower()
+    slot_id  = sanitize_text(data.get("slot_id", ""), max_length=20).lower()
     link_url = sanitize_text(data.get("link_url", ""), max_length=500)
 
     if slot_id not in ("slot1", "slot2", "slot3", "slot4") or not link_url:
         return jsonify({"status": "ok"})
-
     if is_rate_limited(f"sponsorclick_{user_id}_{slot_id}", 600):
         return jsonify({"status": "ok"})
 
@@ -1673,6 +1456,10 @@ def click_sponsor_api():
         logger.error("click_sponsor error: %s", exc)
         return jsonify({"status": "ok"})
 
+
+# ============================================================
+# DEVICE CHECK
+# ============================================================
 
 @app.route("/check_device", methods=["POST"])
 def check_device_api():
@@ -1698,100 +1485,52 @@ def check_device_api():
         if current_user.get("blocked"):
             return jsonify({"status": "blocked"})
 
-        # ---------- FINGERPRINT CHECK (HARD AUTO-BAN) ----------
-        # Fingerprint device-unique hai. Same fp wale duplicate accounts
-        # ko turant block karo. Sabse purana account "original" rehta hai.
         if fingerprint:
-            fp_siblings = list(users_col.find(
-                {"fingerprint": fingerprint, "user_id": {"$ne": user_id}},
-                {"user_id": 1, "joined": 1, "blocked": 1},
-            ).limit(50))
+            fp_siblings    = list(users_col.find({"fingerprint": fingerprint, "user_id": {"$ne": user_id}}, {"user_id": 1, "joined": 1, "blocked": 1}).limit(50))
             active_siblings = [s for s in fp_siblings if not s.get("blocked")]
 
             if active_siblings:
-                # Pick the OLDEST UN-BLOCKED account as original. Skipping
-                # blocked accounts prevents a banned account from "owning" the
-                # fingerprint and getting every new genuine signup auto-banned.
-                all_accounts = active_siblings + [{
-                    "user_id": user_id,
-                    "joined": current_user.get("joined"),
-                    "blocked": False,
-                }]
+                all_accounts = active_siblings + [{"user_id": user_id, "joined": current_user.get("joined"), "blocked": False}]
                 all_accounts.sort(key=lambda u: u.get("joined") or "")
-                original = all_accounts[0]
+                original   = all_accounts[0]
                 duplicates = all_accounts[1:]
 
                 banned_ids = []
                 for dup in duplicates:
                     dup_id = dup["user_id"]
-                    res = users_col.update_one(
+                    res    = users_col.update_one(
                         {"user_id": dup_id, "blocked": {"$ne": True}},
-                        {"$set": {
-                            "blocked": True,
-                            "block_reason": "duplicate_device_fingerprint",
-                            "blocked_at": datetime.utcnow().isoformat(),
-                            "fp_flagged": True,
-                        }},
+                        {"$set": {"blocked": True, "block_reason": "duplicate_device_fingerprint", "blocked_at": datetime.utcnow().isoformat(), "fp_flagged": True}},
                     )
                     if res.modified_count:
                         banned_ids.append(dup_id)
-                        logger.warning(
-                            "AUTO-BAN: user %s blocked (duplicate fingerprint of %s)",
-                            dup_id, original["user_id"],
-                        )
+                        logger.warning("AUTO-BAN: user %s blocked (duplicate fingerprint of %s)", dup_id, original["user_id"])
                         try:
-                            bot.send_message(
-                                dup_id,
-                                "🚫 Your account has been blocked.\n"
-                                "Reason: Another account from the same device is already registered.\n"
-                                "Only one account per device is allowed.",
-                            )
+                            bot.send_message(dup_id, "🚫 Your account has been blocked.\nReason: Another account from the same device is already registered.\nOnly one account per device is allowed.")
                         except Exception:
                             pass
 
                 if banned_ids:
                     try:
-                        bot.send_message(
-                            ADMIN_ID,
-                            "🚫 *Auto-Ban (Duplicate Device)*\n"
-                            f"Original: `{original['user_id']}`\n"
-                            f"Banned: {', '.join('`' + str(b) + '`' for b in banned_ids)}",
-                            parse_mode="Markdown",
-                        )
+                        bot.send_message(ADMIN_ID, "🚫 *Auto-Ban (Duplicate Device)*\n" + f"Original: `{original['user_id']}`\n" + f"Banned: {', '.join('`' + str(b) + '`' for b in banned_ids)}", parse_mode="Markdown")
                     except Exception:
                         pass
 
                 if user_id != original["user_id"]:
                     return jsonify({"status": "blocked"})
 
-        # ---------- IP CHECK (SOFT FLAG ONLY) ----------
-        # IP shared ho sakti hai (family WiFi, mobile NAT). Auto-ban mat
-        # karo — sirf admin ko notify karo review ke liye.
         if ip:
-            ip_siblings_count = users_col.count_documents(
-                {"ip": ip, "user_id": {"$ne": user_id}, "blocked": {"$ne": True}}
-            )
+            ip_siblings_count = users_col.count_documents({"ip": ip, "user_id": {"$ne": user_id}, "blocked": {"$ne": True}})
             if ip_siblings_count > 0 and not current_user.get("ip_flagged"):
-                users_col.update_one(
-                    {"user_id": user_id},
-                    {"$set": {"ip_flagged": True}},
-                )
+                users_col.update_one({"user_id": user_id}, {"$set": {"ip_flagged": True}})
                 try:
-                    bot.send_message(
-                        ADMIN_ID,
-                        f"⚠️ IP Conflict (review only, no auto-ban)\n"
-                        f"User `{user_id}` shares IP `{ip}` with {ip_siblings_count} other account(s).",
-                        parse_mode="Markdown",
-                    )
+                    bot.send_message(ADMIN_ID, f"⚠️ IP Conflict (review only, no auto-ban)\nUser `{user_id}` shares IP `{ip}` with {ip_siblings_count} other account(s).", parse_mode="Markdown")
                 except Exception:
                     pass
 
-        # ---------- STORE / UPDATE FIELDS ----------
         update_fields = {}
-        # IP latest rakho (network change ho sakta hai)
         if ip:
             update_fields["ip"] = ip
-        # Fingerprint sticky — pehli baar set hone ke baad change nahi
         if fingerprint and not current_user.get("fingerprint"):
             update_fields["fingerprint"] = fingerprint
         if update_fields:
@@ -1804,7 +1543,7 @@ def check_device_api():
 
 
 # ============================================================
-# PROMO CODE (web app endpoint)
+# PROMO CODE
 # ============================================================
 
 @app.route("/redeem_promo", methods=["POST"])
@@ -1838,7 +1577,7 @@ def redeem_promo_api():
         if not promo.get("active", True):
             return jsonify({"status": "error", "message": "This promo code has expired."}), 400
 
-        used_by = promo.get("used_by", [])
+        used_by  = promo.get("used_by", [])
         if user_id in used_by:
             return jsonify({"status": "error", "message": "You have already used this promo code."}), 400
 
@@ -1852,20 +1591,15 @@ def redeem_promo_api():
 
         promos_col.update_one({"code": code}, {"$push": {"used_by": user_id}})
         users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins}})
-
         logger.info("Promo '%s' redeemed by user %s for %s coins.", code, user_id, coins)
-        return jsonify({
-            "status": "success",
-            "message": f"{coins} coins added to your balance!",
-            "data": {"reward": coins}
-        })
+        return jsonify({"status": "success", "message": f"{coins} coins added to your balance!", "data": {"reward": coins}})
     except Exception as exc:
         logger.error("redeem_promo_api error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
 
 
 # ============================================================
-# SUPPORT ENDPOINT
+# SUPPORT
 # ============================================================
 
 @app.route("/send_support", methods=["POST"])
@@ -1888,11 +1622,7 @@ def send_support_api():
         return jsonify({"status": "error", "message": err_msg}), 429
 
     try:
-        bot.send_message(
-            ADMIN_ID,
-            f"🎧 *Support Message*\n\nUser ID: `{user_id}`\n\n{msg_text}",
-            parse_mode="Markdown",
-        )
+        bot.send_message(ADMIN_ID, f"🎧 *Support Message*\n\nUser ID: `{user_id}`\n\n{msg_text}", parse_mode="Markdown")
         users_col.update_one({"user_id": user_id}, {"$inc": {"support_count": 1}})
         return jsonify({"status": "success", "message": "Message sent to admin!"})
     except Exception as exc:
@@ -1909,22 +1639,14 @@ def admin_get_users():
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     try:
-        page = max(1, int(request.args.get("page", 1)))
+        page  = max(1, int(request.args.get("page", 1)))
         limit = min(50, int(request.args.get("limit", 20)))
     except (ValueError, TypeError):
         page, limit = 1, 20
     skip = (page - 1) * limit
     try:
         total = users_col.count_documents({})
-        users = list(
-            users_col.find(
-                {},
-                {"user_id": 1, "username": 1, "coins": 1, "referral_count": 1, "blocked": 1, "joined": 1, "_id": 0},
-            )
-            .sort("coins", -1)
-            .skip(skip)
-            .limit(limit)
-        )
+        users = list(users_col.find({}, {"user_id": 1, "username": 1, "coins": 1, "referral_count": 1, "blocked": 1, "joined": 1, "_id": 0}).sort("coins", -1).skip(skip).limit(limit))
         return jsonify({"status": "success", "total": total, "users": users})
     except Exception as exc:
         logger.error("admin_get_users error: %s", exc)
@@ -1937,10 +1659,8 @@ def admin_get_withdrawals():
         return jsonify({"status": "error"}), 401
     try:
         status_filter = request.args.get("status", "")
-        query = {"status": status_filter} if status_filter else {}
-        withdrawals = list(
-            withdrawals_col.find(query, {"_id": 0}).sort("timestamp", -1).limit(50)
-        )
+        query         = {"status": status_filter} if status_filter else {}
+        withdrawals   = list(withdrawals_col.find(query, {"_id": 0}).sort("timestamp", -1).limit(50))
         return jsonify({"status": "success", "withdrawals": withdrawals})
     except Exception as exc:
         logger.error("admin_get_withdrawals error: %s", exc)
@@ -1956,10 +1676,7 @@ def admin_approve_withdrawal():
         uid = int(data.get("user_id", 0))
     except (ValueError, TypeError):
         return jsonify({"status": "error", "message": "Invalid user ID"}), 400
-    result = withdrawals_col.update_one(
-        {"user_id": uid, "status": "Pending \u23f3"},
-        {"$set": {"status": "Approved \u2705"}},
-    )
+    result = withdrawals_col.update_one({"user_id": uid, "status": "Pending \u23f3"}, {"$set": {"status": "Approved \u2705"}})
     if result.modified_count:
         try:
             bot.send_message(uid, "\U0001f389 *Your withdrawal has been approved!* Payment is being processed. \u2705", parse_mode="Markdown")
@@ -1981,10 +1698,7 @@ def admin_reject_withdrawal():
     withdraw = withdrawals_col.find_one({"user_id": uid, "status": "Pending \u23f3"})
     if withdraw:
         users_col.update_one({"user_id": uid}, {"$inc": {"coins": withdraw["amount"]}})
-        withdrawals_col.update_one(
-            {"user_id": uid, "status": "Pending \u23f3"},
-            {"$set": {"status": "Rejected \u274c"}},
-        )
+        withdrawals_col.update_one({"user_id": uid, "status": "Pending \u23f3"}, {"$set": {"status": "Rejected \u274c"}})
         try:
             bot.send_message(uid, f"\u274c Your withdrawal was rejected. {withdraw['amount']} coins have been refunded.")
         except Exception:
@@ -1999,7 +1713,7 @@ def admin_add_coins():
         return jsonify({"status": "error"}), 401
     data = request.json or {}
     try:
-        uid = int(data.get("user_id", 0))
+        uid    = int(data.get("user_id", 0))
         amount = int(data.get("amount", 0))
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Invalid user ID or amount"}), 400
@@ -2040,10 +1754,7 @@ def admin_unban_user():
         uid = int(data.get("user_id", 0))
     except (ValueError, TypeError):
         return jsonify({"status": "error", "message": "Invalid user ID"}), 400
-    users_col.update_one(
-        {"user_id": uid},
-        {"$set": {"blocked": False, "fp_flagged": False, "ip_flagged": False}},
-    )
+    users_col.update_one({"user_id": uid}, {"$set": {"blocked": False, "fp_flagged": False, "ip_flagged": False}})
     try:
         bot.send_message(uid, "\u2705 Your account has been reinstated. Welcome back!")
     except Exception:
@@ -2057,22 +1768,13 @@ def admin_list_banned():
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     try:
-        page = max(1, int(request.args.get("page", 1)))
+        page  = max(1, int(request.args.get("page", 1)))
     except (ValueError, TypeError):
         page = 1
-    limit = 100
-    skip = (page - 1) * limit
-    total = users_col.count_documents({"blocked": True})
-    banned = list(
-        users_col.find(
-            {"blocked": True},
-            {
-                "user_id": 1, "username": 1, "coins": 1,
-                "block_reason": 1, "blocked_at": 1, "joined": 1,
-                "ip_flagged": 1, "fp_flagged": 1, "_id": 0,
-            },
-        ).sort("blocked_at", -1).skip(skip).limit(limit)
-    )
+    limit  = 100
+    skip   = (page - 1) * limit
+    total  = users_col.count_documents({"blocked": True})
+    banned = list(users_col.find({"blocked": True}, {"user_id": 1, "username": 1, "coins": 1, "block_reason": 1, "blocked_at": 1, "joined": 1, "ip_flagged": 1, "fp_flagged": 1, "_id": 0}).sort("blocked_at", -1).skip(skip).limit(limit))
     return jsonify({"status": "success", "banned_users": banned, "total": total, "page": page})
 
 
@@ -2107,7 +1809,7 @@ def admin_sponsor_clicks():
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     try:
-        docs = list(sponsor_clicks_col.find({}, {"_id": 1, "link_url": 1, "count": 1}))
+        docs   = list(sponsor_clicks_col.find({}, {"_id": 1, "link_url": 1, "count": 1}))
         result = {d["_id"]: {"count": d.get("count", 0), "link_url": d.get("link_url", "")} for d in docs}
         return jsonify({"status": "success", "clicks": result})
     except Exception as exc:
@@ -2116,7 +1818,7 @@ def admin_sponsor_clicks():
 
 
 # ============================================================
-# SERVER HEALTH ENDPOINT
+# SERVER HEALTH
 # ============================================================
 
 _SERVER_START_TIME = time.time()
@@ -2124,7 +1826,6 @@ _SERVER_START_TIME = time.time()
 
 @app.route("/admin/health", methods=["GET"])
 def admin_health():
-    """Admin-only: returns CPU, memory, disk usage and uptime."""
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     try:
@@ -2169,7 +1870,7 @@ def admin_broadcast():
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     data = request.json or {}
-    msg = (data.get("message") or "").strip()
+    msg  = (data.get("message") or "").strip()
     if not msg:
         return jsonify({"status": "error", "message": "Empty message"}), 400
     total = users_col.count_documents({})
@@ -2178,13 +1879,12 @@ def admin_broadcast():
 
 
 # ============================================================
-# 19b. ADMIN PANEL (admin.html) ENDPOINTS
+# ADMIN PANEL ENDPOINTS
 # ============================================================
 
 @app.route("/admin/login", methods=["POST"])
 def admin_login():
-    """Verify admin token. Used by admin.html on initial load + password entry."""
-    data = request.json or {}
+    data      = request.json or {}
     submitted = (data.get("token") or "").strip()
     if not ADMIN_TOKEN:
         return jsonify({"status": "error", "message": "ADMIN_TOKEN not configured on server"}), 500
@@ -2195,12 +1895,10 @@ def admin_login():
 
 @app.route("/admin/get_config", methods=["GET"])
 def admin_get_config():
-    """Return current task verification codes (DB-backed via cache)."""
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     try:
-        codes = get_live_task_codes() or {}
-        # Fill defaults so UI always has every key, even if DB doc is partial
+        codes  = get_live_task_codes() or {}
         merged = {**TASK_CODES, **codes}
         return jsonify({"status": "success", "task_codes": merged})
     except Exception as exc:
@@ -2210,21 +1908,15 @@ def admin_get_config():
 
 @app.route("/admin/update_codes", methods=["POST"])
 def admin_update_codes():
-    """
-    Bulk-update task verification codes from admin.html.
-    Body: { "codes": {"yt1":"ABC", ...}, "notify": false }
-    If notify=true, sends a single combined broadcast to all users.
-    """
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
-    data = request.json or {}
+    data     = request.json or {}
     codes_in = data.get("codes") or {}
-    notify = bool(data.get("notify", False))
+    notify   = bool(data.get("notify", False))
 
     if not isinstance(codes_in, dict) or not codes_in:
         return jsonify({"status": "error", "message": "No codes provided"}), 400
 
-    # Sanitize: only allow known task IDs, uppercase + alphanum
     accepted = {}
     rejected = []
     for k, v in codes_in.items():
@@ -2238,24 +1930,15 @@ def admin_update_codes():
         accepted[k] = v_clean
 
     if not accepted:
-        return jsonify({
-            "status": "error",
-            "message": f"No valid codes. Rejected: {', '.join(rejected) or 'all'}",
-        }), 400
+        return jsonify({"status": "error", "message": f"No valid codes. Rejected: {', '.join(rejected) or 'all'}"}), 400
 
     try:
-        # Update in-memory dict + persist to DB so /settask cache reload works
         for k, v in accepted.items():
             TASK_CODES[k] = v
         merged = {**TASK_CODES}
-        config_col.update_one(
-            {"_id": "task_codes"},
-            {"$set": {"codes": merged, "updated_at": datetime.utcnow().isoformat()}},
-            upsert=True,
-        )
-        # Bust cache so next get_live_task_codes() re-reads
+        config_col.update_one({"_id": "task_codes"}, {"$set": {"codes": merged, "updated_at": datetime.utcnow().isoformat()}}, upsert=True)
         global _task_codes_cache, _task_codes_cache_time
-        _task_codes_cache = None
+        _task_codes_cache      = None
         _task_codes_cache_time = 0.0
 
         logger.info("Admin panel updated codes: %s (notify=%s)", list(accepted.keys()), notify)
@@ -2267,19 +1950,9 @@ def admin_update_codes():
                 lines.append(f"\u2022 {display}: `{v}`")
             lines.append("\nOpen the Mini App and use the new codes to earn coins! \U0001fa99")
             notice = "\n".join(lines)
-            _spawn_broadcast(
-                notice,
-                admin_chat_id=ADMIN_ID,
-                summary_label=f"Codes updated: {', '.join(accepted.keys())}",
-            )
+            _spawn_broadcast(notice, admin_chat_id=ADMIN_ID, summary_label=f"Codes updated: {', '.join(accepted.keys())}")
 
-        return jsonify({
-            "status": "success",
-            "message": f"{len(accepted)} code(s) updated"
-                       + (", broadcasting…" if notify else " (silent)"),
-            "updated": accepted,
-            "rejected": rejected,
-        })
+        return jsonify({"status": "success", "message": f"{len(accepted)} code(s) updated" + (", broadcasting…" if notify else " (silent)"), "updated": accepted, "rejected": rejected})
     except Exception as exc:
         logger.error("admin_update_codes error: %s", exc)
         return jsonify({"status": "error", "message": "Server error"}), 500
@@ -2287,11 +1960,6 @@ def admin_update_codes():
 
 @app.route("/admin/withdrawals", methods=["GET"])
 def admin_withdrawals_panel():
-    """
-    Panel-friendly withdrawals list. By default returns only Pending,
-    matching admin.html's Pending Withdrawals card.
-    Optional ?status=all returns everything (most recent first).
-    """
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     try:
@@ -2305,10 +1973,7 @@ def admin_withdrawals_panel():
         else:
             query = {"status": "Pending \u23f3"}
 
-        rows = list(
-            withdrawals_col.find(query, {"_id": 0}).sort("date", -1).limit(100)
-        )
-        # Normalize fields admin.html expects
+        rows = list(withdrawals_col.find(query, {"_id": 0}).sort("date", -1).limit(100))
         for w in rows:
             if "amount" in w and "coins" not in w:
                 w["coins"] = w["amount"]
@@ -2320,10 +1985,6 @@ def admin_withdrawals_panel():
 
 @app.route("/admin/update_withdrawal", methods=["POST"])
 def admin_update_withdrawal():
-    """
-    Single dispatcher for the admin panel.
-    Body: { "user_id": 123, "action": "approve" | "reject" }
-    """
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     data = request.json or {}
@@ -2336,39 +1997,25 @@ def admin_update_withdrawal():
         return jsonify({"status": "error", "message": "Action must be 'approve' or 'reject'"}), 400
 
     pending_status = "Pending \u23f3"
-    withdraw = withdrawals_col.find_one({"user_id": uid, "status": pending_status})
+    withdraw       = withdrawals_col.find_one({"user_id": uid, "status": pending_status})
     if not withdraw:
         return jsonify({"status": "error", "message": "No pending withdrawal found"}), 404
 
     try:
         if action == "approve":
-            withdrawals_col.update_one(
-                {"user_id": uid, "status": pending_status},
-                {"$set": {"status": "Approved \u2705"}},
-            )
+            withdrawals_col.update_one({"user_id": uid, "status": pending_status}, {"$set": {"status": "Approved \u2705"}})
             try:
-                bot.send_message(
-                    uid,
-                    "\U0001f389 *Your withdrawal has been approved!* Payment is being processed. \u2705",
-                    parse_mode="Markdown",
-                )
+                bot.send_message(uid, "\U0001f389 *Your withdrawal has been approved!* Payment is being processed. \u2705", parse_mode="Markdown")
             except Exception:
                 pass
             logger.info("Admin panel approved withdrawal for %s", uid)
             return jsonify({"status": "success", "message": f"Withdrawal approved for user {uid}"})
 
-        # reject — refund coins
         amount = int(withdraw.get("amount", withdraw.get("coins", 0)))
         users_col.update_one({"user_id": uid}, {"$inc": {"coins": amount}})
-        withdrawals_col.update_one(
-            {"user_id": uid, "status": pending_status},
-            {"$set": {"status": "Rejected \u274c"}},
-        )
+        withdrawals_col.update_one({"user_id": uid, "status": pending_status}, {"$set": {"status": "Rejected \u274c"}})
         try:
-            bot.send_message(
-                uid,
-                f"\u274c Your withdrawal was rejected. {amount} coins have been refunded to your balance.",
-            )
+            bot.send_message(uid, f"\u274c Your withdrawal was rejected. {amount} coins have been refunded to your balance.")
         except Exception:
             pass
         logger.info("Admin panel rejected withdrawal for %s (refund %s)", uid, amount)
@@ -2380,66 +2027,26 @@ def admin_update_withdrawal():
 
 @app.route("/admin/stats", methods=["GET"])
 def admin_stats():
-    """High-level stats for the admin panel dashboard."""
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     try:
         total_users = users_col.count_documents({})
-        pending = withdrawals_col.count_documents({"status": "Pending \u23f3"})
-        approved = withdrawals_col.count_documents({"status": "Approved \u2705"})
-
-        # Total coins currently held by all users (not lifetime earned)
-        agg = list(users_col.aggregate([
-            {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$coins", 0]}}}}
-        ]))
+        pending     = withdrawals_col.count_documents({"status": "Pending \u23f3"})
+        approved    = withdrawals_col.count_documents({"status": "Approved \u2705"})
+        agg         = list(users_col.aggregate([{"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$coins", 0]}}}}]))
         total_coins = int(agg[0]["total"]) if agg else 0
-
-        return jsonify({
-            "status": "success",
-            "total_users": total_users,
-            "pending": pending,
-            "approved": approved,
-            "total_coins": total_coins,
-        })
+        return jsonify({"status": "success", "total_users": total_users, "pending": pending, "approved": approved, "total_coins": total_coins})
     except Exception as exc:
         logger.error("admin_stats error: %s", exc)
         return jsonify({"status": "error", "message": "Server error"}), 500
 
 
-@app.route("/admin/lottery", methods=["GET"])
-def admin_lottery_status():
-    """Admin: see current lottery config + today's round."""
-    if not check_admin_token(request):
-        return jsonify({"status": "error"}), 401
-    try:
-        cfg = get_lottery_config()
-        round_doc = lottery_col.find_one({"_id": _today_round_id()}, {"_id": 0}) or {}
-        participants = round_doc.get("participants", [])
-        return jsonify({
-            "status": "success",
-            "config": cfg,
-            "today": {
-                "round_id": _today_round_id(),
-                "ticket_price": round_doc.get("ticket_price", cfg["ticket_price"]),
-                "prize": round_doc.get("prize", cfg["prize"]),
-                "tickets_sold": len(participants),
-                "pool_coins": len(participants) * round_doc.get("ticket_price", cfg["ticket_price"]),
-                "drawn": round_doc.get("drawn", False),
-                "winner": round_doc.get("winner"),
-            },
-        })
-    except Exception as exc:
-        logger.error("admin_lottery_status error: %s", exc)
-        return jsonify({"status": "error", "message": "Server error"}), 500
-
-
 @app.route("/admin/search_user", methods=["GET"])
 def admin_search_user():
-    """Look up a single user by Telegram ID for the admin panel."""
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
-    user_id_raw = (request.args.get("user_id") or "").strip()
-    username_raw = (request.args.get("username") or "").strip().lstrip("@")
+    user_id_raw  = (request.args.get("user_id")   or "").strip()
+    username_raw = (request.args.get("username")  or "").strip().lstrip("@")
     query = {}
     if user_id_raw:
         try:
@@ -2451,115 +2058,217 @@ def admin_search_user():
     else:
         return jsonify({"status": "error", "message": "User ID or username is required"}), 400
 
-    user = users_col.find_one(
-        query,
-        {
-            "_id": 0,
-            "user_id": 1,
-            "username": 1,
-            "coins": 1,
-            "referrals": 1,
-            "referral_count": 1,
-            "blocked": 1,
-            "joined": 1,
-            "joined_at": 1,
-            "ip_flagged": 1,
-            "fp_flagged": 1,
-            "task_completions": 1,
-            "promo_task_completions": 1,
-            "channel_claims": 1,
-            "ads_today": 1,
-            "ads_date": 1,
-        },
-    )
+    user = users_col.find_one(query, {"_id": 0, "user_id": 1, "username": 1, "coins": 1, "referrals": 1, "referral_count": 1, "blocked": 1, "joined": 1, "joined_at": 1, "ip_flagged": 1, "fp_flagged": 1, "task_completions": 1, "promo_task_completions": 1, "channel_claims": 1, "ads_today": 1, "ads_date": 1})
     if not user:
         return jsonify({"status": "error", "message": "User not found"}), 404
 
-    referrals = get_referral_list(int(user["user_id"]))
+    referrals     = get_referral_list(int(user["user_id"]))
     referred_users = [r for r in referrals.split(",") if r.strip()]
-
-    # Normalize "joined" field for the panel (try a few common keys)
     if "joined" not in user:
         user["joined"] = user.get("joined_at", "—")
-    user["referral_count"] = user.get("referral_count", len(referred_users))
-    user["referrals"] = referrals
-    user["referrals_made"] = len(referred_users)
+    user["referral_count"]  = user.get("referral_count", len(referred_users))
+    user["referrals"]       = referrals
+    user["referrals_made"]  = len(referred_users)
     return jsonify({"status": "success", "user": user})
 
 
 # ============================================================
-# 19c. LOTTERY HELPERS + USER ENDPOINTS
+# LOTTERY HELPERS + USER ENDPOINTS
 # ============================================================
 
 def get_lottery_config() -> dict:
-    """Return lottery config (ticket_price, prize, active) with 60s cache."""
     global _lottery_cfg_cache, _lottery_cfg_cache_time
     now = time.time()
     if _lottery_cfg_cache is not None and now - _lottery_cfg_cache_time < LOTTERY_CFG_CACHE_TTL:
         return _lottery_cfg_cache
     try:
-        cfg = config_col.find_one({"_id": "lottery_config"}) or {}
+        cfg    = config_col.find_one({"_id": "lottery_config"}) or {}
         merged = {
             "ticket_price": int(cfg.get("ticket_price", LOTTERY_DEFAULTS["ticket_price"])),
-            "prize": int(cfg.get("prize", LOTTERY_DEFAULTS["prize"])),
-            "active": bool(cfg.get("active", LOTTERY_DEFAULTS["active"])),
+            "prize":        int(cfg.get("prize",        LOTTERY_DEFAULTS["prize"])),
+            "active":       bool(cfg.get("active",      LOTTERY_DEFAULTS["active"])),
         }
     except Exception:
         merged = dict(LOTTERY_DEFAULTS)
-    _lottery_cfg_cache = merged
+    _lottery_cfg_cache      = merged
     _lottery_cfg_cache_time = now
     return merged
 
 
 def _bust_lottery_cache():
     global _lottery_cfg_cache, _lottery_cfg_cache_time
-    _lottery_cfg_cache = None
+    _lottery_cfg_cache      = None
     _lottery_cfg_cache_time = 0.0
 
 
 def _today_round_id() -> str:
-    """UTC-day-based round identifier. New round at 00:00 UTC."""
     return f"round_{date.today().isoformat()}"
 
 
 def _get_or_create_today_round() -> dict:
-    """
-    Atomically get or create today's lottery round, locking in the
-    ticket_price + prize that were active at round creation.
-    """
     rid = _today_round_id()
     cfg = get_lottery_config()
     round_doc = lottery_col.find_one_and_update(
         {"_id": rid},
-        {
-            "$setOnInsert": {
-                "ticket_price": cfg["ticket_price"],
-                "prize": cfg["prize"],
-                "participants": [],
-                "winner": None,
-                "drawn": False,
-                "created_at": datetime.utcnow().isoformat(),
-            }
-        },
+        {"$setOnInsert": {
+            "ticket_price": cfg["ticket_price"],
+            "prize":        cfg["prize"],
+            "participants": [],
+            "winner":       None,
+            "drawn":        False,
+            "created_at":   datetime.utcnow().isoformat(),
+        }},
         upsert=True,
         return_document=True,
     )
     return round_doc or lottery_col.find_one({"_id": rid})
 
 
+# ── SHARED DRAW FUNCTION ────────────────────────────────────────────────────
+# Yeh function /drawlottery command aur auto-draw loop dono use karte hain
+
+def _perform_auto_draw(rid: str, notify_chat_id: int | None = None) -> dict:
+    """
+    Core lottery draw logic — reusable by both manual /drawlottery and
+    the midnight auto-draw thread.
+
+    Returns:
+        dict with keys: success (bool), message (str), winner_id, prize, participants
+    """
+    rdoc = lottery_col.find_one({"_id": rid})
+    if not rdoc:
+        return {"success": False, "message": "No lottery round found for today (no tickets sold yet)."}
+    if rdoc.get("drawn"):
+        winner = rdoc.get("winner", "?")
+        return {"success": False, "message": f"Round already drawn. Winner: {winner}"}
+
+    participants = rdoc.get("participants", [])
+    if not participants:
+        return {"success": False, "message": "No participants in today's round. Draw skipped."}
+
+    prize     = int(rdoc.get("prize", LOTTERY_DEFAULTS["prize"]))
+    winner_id = secrets.choice(participants)
+
+    # Atomic mark-as-drawn — prevents double-draw race
+    locked = lottery_col.find_one_and_update(
+        {"_id": rid, "drawn": False},
+        {"$set": {"drawn": True, "winner": winner_id, "drawn_at": datetime.utcnow().isoformat()}},
+        return_document=True,
+    )
+    if not locked:
+        return {"success": False, "message": "Round was just drawn by another process."}
+
+    # Credit prize to winner
+    users_col.update_one({"user_id": winner_id}, {"$inc": {"coins": prize}})
+    logger.info("Lottery drawn: round=%s winner=%s prize=%s", rid, winner_id, prize)
+
+    # ── Notify participants ──────────────────────────────────────────────────
+    def _notify():
+        # DM winner
+        try:
+            bot.send_message(
+                winner_id,
+                f"\U0001f389 *CONGRATULATIONS!* \U0001f389\n\n"
+                f"You won today's lottery!\n\n"
+                f"\U0001f3c6 Prize: *{prize}* 🪙 has been added to your balance!\n"
+                f"\U0001f3b0 Round: `{rid}`\n\n"
+                f"Open the Mini App to check your new balance \U0001f680",
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            logger.warning("Notify winner %s failed: %s", winner_id, exc)
+
+        # DM losers
+        losers = [uid for uid in participants if uid != winner_id]
+        for uid in losers:
+            try:
+                bot.send_message(
+                    uid,
+                    f"\U0001f3b0 *Today's Lottery Result*\n\n"
+                    f"Winner: `{winner_id}` (won {prize} 🪙)\n"
+                    f"Total tickets: {len(participants)}\n\n"
+                    f"Better luck next time! \U0001f340\n"
+                    f"_New round opens at 00:00 UTC._",
+                    parse_mode="Markdown",
+                )
+                time.sleep(0.05)
+            except Exception:
+                pass
+
+        # Announce in LOTTERY_CHANNEL if configured
+        if LOTTERY_CHANNEL:
+            try:
+                bot.send_message(
+                    LOTTERY_CHANNEL,
+                    f"\U0001f3b0 *Daily Lottery Result — {rid}*\n\n"
+                    f"\U0001f3c6 Winner: `{winner_id}`\n"
+                    f"\U0001f4b0 Prize: *{prize}* 🪙\n"
+                    f"\U0001f465 Total tickets: {len(participants)}\n\n"
+                    f"Congratulations to the winner! \U0001f389\n"
+                    f"_New round starts at 00:00 UTC. Buy your ticket in the bot!_",
+                    parse_mode="Markdown",
+                )
+            except Exception as exc:
+                logger.warning("Lottery channel announce failed: %s", exc)
+
+        # Notify admin chat if requested (from /drawlottery command)
+        if notify_chat_id:
+            try:
+                bot.send_message(
+                    notify_chat_id,
+                    f"\u2705 Lottery notifications sent to {len(losers)} loser(s) + 1 winner.",
+                )
+            except Exception:
+                pass
+
+    threading.Thread(target=_notify, daemon=True, name=f"lottery-notify-{rid}").start()
+
+    return {
+        "success":      True,
+        "message":      f"Draw complete! Winner: {winner_id}, Prize: {prize} 🪙",
+        "winner_id":    winner_id,
+        "prize":        prize,
+        "participants": len(participants),
+    }
+
+
+@app.route("/admin/lottery", methods=["GET"])
+def admin_lottery_status():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    try:
+        cfg       = get_lottery_config()
+        round_doc = lottery_col.find_one({"_id": _today_round_id()}, {"_id": 0}) or {}
+        participants = round_doc.get("participants", [])
+        return jsonify({
+            "status": "success",
+            "config": cfg,
+            "today": {
+                "round_id":     _today_round_id(),
+                "ticket_price": round_doc.get("ticket_price", cfg["ticket_price"]),
+                "prize":        round_doc.get("prize", cfg["prize"]),
+                "tickets_sold": len(participants),
+                "pool_coins":   len(participants) * round_doc.get("ticket_price", cfg["ticket_price"]),
+                "drawn":        round_doc.get("drawn", False),
+                "winner":       round_doc.get("winner"),
+            },
+        })
+    except Exception as exc:
+        logger.error("admin_lottery_status error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error"}), 500
+
+
 @app.route("/get_lottery_status", methods=["GET"])
 def get_lottery_status():
-    """Frontend: current lottery info + whether the user already has a ticket."""
     try:
         user_id = int(request.args.get("user_id", 0))
     except (ValueError, TypeError):
         user_id = 0
 
-    cfg = get_lottery_config()
-    round_doc = _get_or_create_today_round()
+    cfg        = get_lottery_config()
+    round_doc  = _get_or_create_today_round()
     participants = round_doc.get("participants", [])
 
-    # Last completed round (for "last winner" display)
     last_drawn = lottery_col.find_one(
         {"drawn": True, "winner": {"$ne": None}},
         sort=[("drawn_at", -1)],
@@ -2567,25 +2276,24 @@ def get_lottery_status():
     ) or {}
 
     return jsonify({
-        "status": "success",
-        "active": cfg["active"],
+        "status":       "success",
+        "active":       cfg["active"],
         "ticket_price": round_doc.get("ticket_price", cfg["ticket_price"]),
-        "prize": round_doc.get("prize", cfg["prize"]),
+        "prize":        round_doc.get("prize", cfg["prize"]),
         "tickets_sold": len(participants),
-        "has_ticket": user_id in participants if user_id else False,
-        "drawn": round_doc.get("drawn", False),
-        "round_id": round_doc.get("_id"),
-        "last_winner": {
+        "has_ticket":   user_id in participants if user_id else False,
+        "drawn":        round_doc.get("drawn", False),
+        "round_id":     round_doc.get("_id"),
+        "last_winner":  {
             "user_id": last_drawn.get("winner"),
-            "prize": last_drawn.get("prize"),
-            "round_id": last_drawn.get("_id"),
+            "prize":   last_drawn.get("prize"),
+            "round_id":last_drawn.get("_id"),
         } if last_drawn else None,
     })
 
 
 @app.route("/buy_lottery_ticket", methods=["POST"])
 def buy_lottery_ticket():
-    """Frontend: deduct coins and add user to today's round atomically."""
     data = request.json or {}
     try:
         user_id = int(data.get("user_id", 0))
@@ -2603,12 +2311,11 @@ def buy_lottery_ticket():
         return jsonify({"status": "error", "message": "Today's round already drawn. Try tomorrow!"}), 400
 
     ticket_price = int(round_doc.get("ticket_price", cfg["ticket_price"]))
-    rid = round_doc["_id"]
+    rid          = round_doc["_id"]
 
     if user_id in round_doc.get("participants", []):
         return jsonify({"status": "error", "message": "You already have a ticket for today!"}), 400
 
-    # Atomic deduct: only proceed if balance >= ticket_price AND not blocked
     user = users_col.find_one_and_update(
         {"user_id": user_id, "coins": {"$gte": ticket_price}, "blocked": {"$ne": True}},
         {"$inc": {"coins": -ticket_price}},
@@ -2620,12 +2327,8 @@ def buy_lottery_ticket():
             return jsonify({"status": "error", "message": "User not found."}), 404
         if u.get("blocked"):
             return jsonify({"status": "error", "message": "Your account is blocked."}), 403
-        return jsonify({
-            "status": "error",
-            "message": f"Need {ticket_price} coins. You have {u.get('coins', 0)}.",
-        }), 400
+        return jsonify({"status": "error", "message": f"Need {ticket_price} coins. You have {u.get('coins', 0)}."}), 400
 
-    # Atomic add to participants — refund if user somehow already there (race)
     add_result = lottery_col.update_one(
         {"_id": rid, "participants": {"$ne": user_id}, "drawn": False},
         {"$addToSet": {"participants": user_id}},
@@ -2635,42 +2338,100 @@ def buy_lottery_ticket():
         return jsonify({"status": "error", "message": "Could not buy ticket. Please try again."}), 409
 
     new_balance = int(user.get("coins", 0))
-    refreshed = lottery_col.find_one({"_id": rid}, {"participants": 1, "_id": 0}) or {}
+    refreshed   = lottery_col.find_one({"_id": rid}, {"participants": 1, "_id": 0}) or {}
     return jsonify({
-        "status": "success",
-        "message": f"\U0001f3ab Ticket purchased! Good luck \U0001f340",
-        "new_balance": new_balance,
+        "status":       "success",
+        "message":      "\U0001f3ab Ticket purchased! Good luck \U0001f340",
+        "new_balance":  new_balance,
         "tickets_sold": len(refreshed.get("participants", [])),
     })
 
 
 # ============================================================
-# 20. BOT COMMANDS
+# AUTO LOTTERY DRAW LOOP — Midnight UTC mein automatic draw
+# ============================================================
+
+def auto_lottery_draw_loop() -> None:
+    """
+    Background thread: har raat 00:00 UTC pe automatically lottery draw karta hai.
+
+    Logic:
+    - Current UTC time check karo
+    - Agar 00:00–00:05 UTC window mein hain AND aaj ka round abhi drawn nahi hua
+    - Toh _perform_auto_draw() call karo
+    - Phir 60 seconds wait karo (minute-level precision)
+    """
+    logger.info("Auto-lottery draw loop started.")
+    last_drawn_date = None  # Track karo ki aaj ka draw hua ki nahi
+
+    while True:
+        try:
+            now       = datetime.utcnow()
+            today_str = now.date().isoformat()
+
+            # 00:00 UTC se 00:05 UTC ke beech mein draw karo (5 min window)
+            if now.hour == 0 and now.minute < 5 and last_drawn_date != today_str:
+                cfg = get_lottery_config()
+                if cfg.get("active"):
+                    rid    = _today_round_id()
+                    result = _perform_auto_draw(rid, notify_chat_id=None)
+                    if result["success"]:
+                        logger.info(
+                            "Auto-draw success: round=%s winner=%s prize=%s participants=%s",
+                            rid, result.get("winner_id"), result.get("prize"), result.get("participants"),
+                        )
+                        last_drawn_date = today_str
+                        # Admin ko notify karo
+                        try:
+                            bot.send_message(
+                                ADMIN_ID,
+                                f"\U0001f3b0 *Auto Lottery Drawn!*\n\n"
+                                f"Round: `{rid}`\n"
+                                f"\U0001f3c6 Winner: `{result['winner_id']}`\n"
+                                f"\U0001f4b0 Prize: `{result['prize']}` 🪙\n"
+                                f"\U0001f465 Total Tickets: `{result['participants']}`\n\n"
+                                f"_Participants notified automatically._",
+                                parse_mode="Markdown",
+                            )
+                        except Exception as notify_exc:
+                            logger.warning("Admin auto-draw notify failed: %s", notify_exc)
+                    else:
+                        logger.info("Auto-draw skipped: %s", result["message"])
+                        # Already drawn ya no participants — mark as done for today anyway
+                        if "already drawn" in result["message"].lower() or "no participants" in result["message"].lower():
+                            last_drawn_date = today_str
+                else:
+                    logger.debug("Auto-draw skipped: lottery is inactive.")
+                    last_drawn_date = today_str  # Avoid repeated skips
+
+            # Midnight se pehle last_drawn_date reset karo (new day ke liye)
+            if last_drawn_date and last_drawn_date != today_str:
+                last_drawn_date = None
+
+        except Exception as exc:
+            logger.error("Auto-lottery draw loop error: %s", exc)
+
+        time.sleep(60)  # Har 60 seconds mein check karo
+
+
+# ============================================================
+# BOT COMMANDS
 # ============================================================
 
 @bot.message_handler(commands=["start"])
 def start(message):
-    user_id = message.from_user.id
-    username = message.from_user.first_name or "User"
-    params = message.text.split()
+    user_id   = message.from_user.id
+    username  = message.from_user.first_name or "User"
+    params    = message.text.split()
     referrer_id = params[1] if len(params) > 1 else None
 
-    user = get_or_create_user(user_id, username, referrer_id)
+    user         = get_or_create_user(user_id, username, referrer_id)
     current_coins = user.get("coins", 0)
-    web_app_url = f"https://sahdakshsanoj-byte.github.io/Earning-bot/?user_id={user_id}"
+    web_app_url  = f"https://sahdakshsanoj-byte.github.io/Earning-bot/?user_id={user_id}"
 
     markup = types.InlineKeyboardMarkup()
-    markup.add(
-        types.InlineKeyboardButton(
-            "\U0001f4b0 Open Earning Hub", web_app=types.WebAppInfo(web_app_url)
-        )
-    )
-    markup.add(
-        types.InlineKeyboardButton(
-            "\U0001f465 Invite Friends",
-            callback_data="invite_friends",
-        )
-    )
+    markup.add(types.InlineKeyboardButton("\U0001f4b0 Open Earning Hub", web_app=types.WebAppInfo(web_app_url)))
+    markup.add(types.InlineKeyboardButton("\U0001f465 Invite Friends", callback_data="invite_friends"))
 
     bot.send_message(
         user_id,
@@ -2706,12 +2467,7 @@ def check_balance(message):
     user = users_col.find_one({"user_id": message.from_user.id})
     if user:
         coins = user.get("coins", 0)
-        bot.reply_to(
-            message,
-            f"\U0001f4b0 Your balance: *{coins} \U0001fa99*\n\n"
-            f"Keep earning daily to unlock withdrawal! \U0001f680",
-            parse_mode="Markdown",
-        )
+        bot.reply_to(message, f"\U0001f4b0 Your balance: *{coins} \U0001fa99*\n\nKeep earning daily to unlock withdrawal! \U0001f680", parse_mode="Markdown")
     else:
         bot.reply_to(message, "Please use /start to register first!")
 
@@ -2719,51 +2475,36 @@ def check_balance(message):
 @bot.message_handler(commands=["redeem"])
 def redeem_promo_command(message):
     user_id = message.from_user.id
-    parts = message.text.split()
-
+    parts   = message.text.split()
     if len(parts) < 2:
         return bot.reply_to(message, "Usage: /redeem <CODE>\nExample: /redeem WELCOME100")
-
     code = parts[1].upper()
-
     user = users_col.find_one({"user_id": user_id}, {"blocked": 1})
     if not user:
         return bot.reply_to(message, "Please use /start to register first.")
     if user.get("blocked"):
         return bot.reply_to(message, "\u26d4 Your account has been blocked.")
-
     if is_rate_limited(f"promo_{user_id}", 10):
         return bot.reply_to(message, "\u23f3 Please wait a moment before trying again.")
-
     try:
         promo = promos_col.find_one({"code": code})
-
         if not promo:
             return bot.reply_to(message, "\u274c Invalid promo code. Please check and try again.")
         if not promo.get("active", True):
             return bot.reply_to(message, "\u274c This promo code has expired or been deactivated.")
-
         used_by = promo.get("used_by", [])
         if user_id in used_by:
             return bot.reply_to(message, "\u274c You have already used this promo code.")
-
         max_uses = promo.get("max_uses", 0)
         if max_uses > 0 and len(used_by) >= max_uses:
             return bot.reply_to(message, "\u274c This promo code has reached its usage limit.")
-
         coins = promo.get("coins", 0)
         if coins <= 0:
             return bot.reply_to(message, "\u274c Invalid promo code value.")
-
         promos_col.update_one({"code": code}, {"$push": {"used_by": user_id}})
         users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins}})
-
         logger.info("Promo '%s' redeemed via bot by user %s for %s coins.", code, user_id, coins)
-        bot.reply_to(
-            message,
-            f"\U0001f389 *Promo Code Redeemed!*\n\n*{coins} coins* have been added to your balance! \U0001fa99",
-            parse_mode="Markdown",
-        )
+        bot.reply_to(message, f"\U0001f389 *Promo Code Redeemed!*\n\n*{coins} coins* have been added to your balance! \U0001fa99", parse_mode="Markdown")
     except Exception as exc:
         logger.error("redeem_promo_command error for %s: %s", user_id, exc)
         bot.reply_to(message, "\u26a0\ufe0f Server error. Please try again.")
@@ -2784,78 +2525,33 @@ def create_promo_command(message):
             "`/createpromo SECRET 100 0 silent` — no broadcast",
             parse_mode="Markdown",
         )
-
-    # Optional trailing "silent" / "quiet" / "nobroadcast" flag
     silent = parts[-1].lower() in {"silent", "quiet", "nobroadcast", "no"} if len(parts) >= 4 else False
     if silent:
         parts = parts[:-1]
-
     code = parts[1].upper()
     try:
-        coins = int(parts[2])
+        coins    = int(parts[2])
         max_uses = int(parts[3]) if len(parts) >= 4 else 0
     except ValueError:
         return bot.reply_to(message, "\u274c Invalid coins or max_uses value. Must be integers.")
-
     if coins <= 0:
         return bot.reply_to(message, "\u274c Coins must be greater than 0.")
     if max_uses < 0:
         return bot.reply_to(message, "\u274c max_uses must be 0 (unlimited) or a positive number.")
     if not re.match(r"^[A-Z0-9_]{2,30}$", code):
         return bot.reply_to(message, "\u274c Invalid code format. Use only letters, numbers, and underscores (2-30 chars).")
-
     try:
         existing = promos_col.find_one({"code": code})
         if existing:
-            return bot.reply_to(
-                message,
-                f"\u26a0\ufe0f Code `{code}` already exists!\n"
-                f"Coins: `{existing.get('coins', 0)}`\n"
-                f"Max Uses: `{existing.get('max_uses', 0) or 'Unlimited'}`\n"
-                f"Used: `{len(existing.get('used_by', []))}`\n\n"
-                f"Use /deletepromo {code} to remove it first.",
-                parse_mode="Markdown",
-            )
-
-        promo_doc = {
-            "code": code,
-            "coins": coins,
-            "max_uses": max_uses,
-            "used_by": [],
-            "active": True,
-            "created_at": datetime.utcnow().isoformat(),
-            "created_by": ADMIN_ID,
-        }
+            return bot.reply_to(message, f"\u26a0\ufe0f Code `{code}` already exists!\nCoins: `{existing.get('coins', 0)}`\nUse /deletepromo {code} to remove it first.", parse_mode="Markdown")
+        promo_doc = {"code": code, "coins": coins, "max_uses": max_uses, "used_by": [], "active": True, "created_at": datetime.utcnow().isoformat(), "created_by": ADMIN_ID}
         promos_col.insert_one(promo_doc)
         logger.info("Admin created promo '%s' for %s coins (max_uses=%s)", code, coins, max_uses)
-
         uses_str = f"{max_uses}" if max_uses > 0 else "Unlimited"
-        bot.reply_to(
-            message,
-            f"\u2705 *Promo Code Created!*\n\n"
-            f"Code: `{code}`\n"
-            f"Coins: `{coins}`\n"
-            f"Max Uses: `{uses_str}`\n\n"
-            f"Users can redeem with: /redeem {code}\n"
-            + ("\U0001f515 Silent mode — no user notification." if silent
-               else "\U0001f4e2 Broadcasting to all users in background..."),
-            parse_mode="Markdown",
-        )
-
+        bot.reply_to(message, f"\u2705 *Promo Code Created!*\n\nCode: `{code}`\nCoins: `{coins}`\nMax Uses: `{uses_str}`\n\nUsers can redeem with: /redeem {code}\n" + ("\U0001f515 Silent mode — no user notification." if silent else "\U0001f4e2 Broadcasting to all users in background..."), parse_mode="Markdown")
         if not silent:
-            notice = (
-                f"\U0001f389 *New Promo Code Released!*\n\n"
-                f"\U0001f3ab Code: `{code}`\n"
-                f"\U0001fa99 Reward: *{coins} coins*\n"
-                f"\U0001f465 Max Uses: *{uses_str}*\n\n"
-                f"Open the Mini App \u2192 Rewards tab \u2192 *Promo Code* section\n"
-                f"and enter `{code}` to claim. Hurry, first-come first-served!"
-            )
-            _spawn_broadcast(
-                notice,
-                admin_chat_id=int(message.chat.id),
-                summary_label=f"Promo: `{code}` ({coins} coins)",
-            )
+            notice = f"\U0001f389 *New Promo Code Released!*\n\n\U0001f3ab Code: `{code}`\n\U0001fa99 Reward: *{coins} coins*\n\U0001f465 Max Uses: *{uses_str}*\n\nOpen the Mini App \u2192 Rewards tab \u2192 *Promo Code* section\nand enter `{code}` to claim. Hurry, first-come first-served!"
+            _spawn_broadcast(notice, admin_chat_id=int(message.chat.id), summary_label=f"Promo: `{code}` ({coins} coins)")
     except Exception as exc:
         logger.error("create_promo_command error: %s", exc)
         bot.reply_to(message, "\u26a0\ufe0f Server error. Please try again.")
@@ -2901,69 +2597,33 @@ def list_promos_command(message):
 
 @bot.message_handler(commands=["addpromtask"])
 def add_promo_task_command(message):
-    """Admin: /addpromtask <task_id> <reward> <title...>
-
-    Example: /addpromtask promo_yt1 5 Watch our YouTube video
-    """
     if int(message.from_user.id) != ADMIN_ID:
         return
     parts = message.text.split(None, 3)
     if len(parts) < 4:
-        return bot.reply_to(
-            message,
-            "Usage: /addpromtask <task_id> <reward_coins> <title> [| silent]\n"
-            "Example: /addpromtask promo_yt1 5 Watch our YouTube video\n"
-            "Silent: /addpromtask promo_yt1 5 Watch our YouTube video | silent",
-        )
-    task_id = parts[1].strip()
+        return bot.reply_to(message, "Usage: /addpromtask <task_id> <reward_coins> <title> [| silent]\nExample: /addpromtask promo_yt1 5 Watch our YouTube video")
+    task_id   = parts[1].strip()
     try:
         reward = int(parts[2])
     except ValueError:
         return bot.reply_to(message, "Invalid reward amount. Must be an integer.")
     title_raw = parts[3].strip()
-
-    # Pipe-separated trailing "silent" flag (since title may contain spaces)
-    silent = False
+    silent    = False
     if "|" in title_raw:
         title_part, _, flag = title_raw.rpartition("|")
         if flag.strip().lower() in {"silent", "quiet", "nobroadcast", "no"}:
-            silent = True
+            silent    = True
             title_raw = title_part.strip()
     title = title_raw
-
     try:
         existing = promo_tasks_col.find_one({"task_id": task_id})
         if existing:
             return bot.reply_to(message, f"Task '{task_id}' already exists. Use /delpromtask first.")
-        promo_tasks_col.insert_one({
-            "task_id": task_id,
-            "title": title,
-            "description": "",
-            "link": "",
-            "reward": reward,
-            "active": True,
-            "created_at": datetime.utcnow().isoformat(),
-        })
-        bot.reply_to(
-            message,
-            f"\u2705 Promo task '{task_id}' added with {reward} coins reward.\n"
-            + ("\U0001f515 Silent mode — no user notification." if silent
-               else "\U0001f4e2 Broadcasting to all users in background..."),
-        )
-
+        promo_tasks_col.insert_one({"task_id": task_id, "title": title, "description": "", "link": "", "reward": reward, "active": True, "created_at": datetime.utcnow().isoformat()})
+        bot.reply_to(message, f"\u2705 Promo task '{task_id}' added with {reward} coins reward.\n" + ("\U0001f515 Silent mode." if silent else "\U0001f4e2 Broadcasting to all users in background..."))
         if not silent:
-            notice = (
-                f"\U0001f4e2 *New Promotion Task Added!*\n\n"
-                f"\U0001f4dd *{title}*\n"
-                f"\U0001fa99 Reward: *{reward} coins* (one-time)\n\n"
-                f"Open the Mini App \u2192 *Rewards* tab \u2192 *Promotion Tasks* section\n"
-                f"and tap *Mark as Done & Claim* to earn!"
-            )
-            _spawn_broadcast(
-                notice,
-                admin_chat_id=int(message.chat.id),
-                summary_label=f"Promo Task: `{task_id}` ({reward} coins)",
-            )
+            notice = f"\U0001f4e2 *New Promotion Task Added!*\n\n\U0001f4dd *{title}*\n\U0001fa99 Reward: *{reward} coins* (one-time)\n\nOpen the Mini App \u2192 *Rewards* tab \u2192 *Promotion Tasks* section\nand tap *Mark as Done & Claim* to earn!"
+            _spawn_broadcast(notice, admin_chat_id=int(message.chat.id), summary_label=f"Promo Task: `{task_id}` ({reward} coins)")
     except Exception as exc:
         logger.error("add_promo_task_command error: %s", exc)
         bot.reply_to(message, "Server error. Please try again.")
@@ -2971,7 +2631,6 @@ def add_promo_task_command(message):
 
 @bot.message_handler(commands=["delpromtask"])
 def del_promo_task_command(message):
-    """Admin: /delpromtask <task_id>"""
     if int(message.from_user.id) != ADMIN_ID:
         return
     parts = message.text.split()
@@ -2979,10 +2638,7 @@ def del_promo_task_command(message):
         return bot.reply_to(message, "Usage: /delpromtask <task_id>")
     task_id = parts[1].strip()
     try:
-        result = promo_tasks_col.update_one(
-            {"task_id": task_id},
-            {"$set": {"active": False}},
-        )
+        result = promo_tasks_col.update_one({"task_id": task_id}, {"$set": {"active": False}})
         if result.matched_count:
             bot.reply_to(message, f"✅ Promo task '{task_id}' deactivated.")
         else:
@@ -2994,7 +2650,6 @@ def del_promo_task_command(message):
 
 @bot.message_handler(commands=["listpromtasks"])
 def list_promo_tasks_command(message):
-    """Admin: List all active promotion tasks."""
     if int(message.from_user.id) != ADMIN_ID:
         return
     try:
@@ -3015,60 +2670,54 @@ def admin_panel_command(message):
     if int(message.from_user.id) != ADMIN_ID:
         return
     text = (
-        "🛠 *Admin Panel — All Commands*\n"
-        "\n"
+        "🛠 *Admin Panel — All Commands*\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "📊 *Stats & Info*\n"
         "• /stats — Bot statistics\n"
         "• /balance `<user_id>` — User balance\n"
-        "• /health — Server CPU/RAM/uptime status\n"
-        "\n"
+        "• /health — Server CPU/RAM/uptime status\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "💰 *Coins*\n"
         "• /addcoins `<user_id> <amount>` — Add coins\n"
-        "• /penalty `<user_id> <amount>` — Deduct coins\n"
-        "\n"
+        "• /penalty `<user_id> <amount>` — Deduct coins\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "💸 *Withdrawals*\n"
         "• /approve `<user_id>` — Approve withdrawal\n"
-        "• /reject `<user_id> <reason>` — Reject withdrawal\n"
-        "\n"
+        "• /reject `<user_id>` — Reject withdrawal\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "🎫 *Promo Codes*\n"
         "• /createpromo `<code> <coins> <uses>` — Create promo\n"
         "• /deletepromo `<code>` — Delete promo\n"
-        "• /listpromos — List all promos\n"
-        "\n"
+        "• /listpromos — List all promos\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "📢 *Promotion Tasks*\n"
         "• /addpromtask `<id> <coins> <title>` — Add task\n"
         "• /delpromtask `<id>` — Delete task\n"
-        "• /listpromtasks — List all tasks\n"
-        "\n"
+        "• /listpromtasks — List all tasks\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "✅ *Task Codes*\n"
         "• /settask `<task_id> <code>` — Update task code\n"
-        "  IDs: yt1 yt2 yt3 web1 web2 web3 slot3 slot4\n"
-        "\n"
+        "  IDs: yt1 yt2 yt3 web1 web2 web3 slot3 slot4\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🎰 *Lottery*\n"
+        "• /setlottery `<price> <prize> [active|inactive]` — Configure\n"
+        "• /lotterystats — Today's stats\n"
+        "• /drawlottery — Manual draw (auto at 00:00 UTC)\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "🚫 *User Management*\n"
         "• /block `<user_id>` — Block user\n"
         "• /unblock `<user_id>` — Unblock user\n"
         "• /listbanned — List all banned users\n"
-        "• /searchuser `<user_id or @username>` — Find user info\n"
-        "\n"
+        "• /searchuser `<user_id or @username>` — Find user info\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "📣 *Broadcast*\n"
         "• /broadcast `<message>` — Send to all users\n"
-        "• /msg `<user_id> <message>` — Message a user\n"
-        "\n"
+        "• /msg `<user_id> <message>` — Message a user\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "🔤 *Word Filter (Group)*\n"
         "• /addcodefilter `<word>` — Block a word\n"
         "• /delcodefilter `<word>` — Unblock a word\n"
         "• /listcodefilters — List blocked words\n"
-        "• /resetcodeviolations — Reset user violations\n"
-        "• /addcodepattern `<regex>` — Add regex pattern\n"
     )
     bot.reply_to(message, text, parse_mode="Markdown")
 
@@ -3077,22 +2726,14 @@ def admin_panel_command(message):
 def get_stats(message):
     if int(message.from_user.id) != ADMIN_ID:
         return
-    total_u = users_col.count_documents({})
+    total_u   = users_col.count_documents({})
     pending_w = withdrawals_col.count_documents({"status": "Pending \u23f3"})
-    today_j = users_col.count_documents({"joined": str(date.today())})
-    bot.reply_to(
-        message,
-        f"\U0001f4ca *Bot Stats*\n\n"
-        f"\U0001f465 Total Users: `{total_u}`\n"
-        f"\U0001f195 Today Joined: `{today_j}`\n"
-        f"\U0001f4b8 Pending Withdrawals: `{pending_w}`",
-        parse_mode="Markdown",
-    )
+    today_j   = users_col.count_documents({"joined": str(date.today())})
+    bot.reply_to(message, f"\U0001f4ca *Bot Stats*\n\n\U0001f465 Total Users: `{total_u}`\n\U0001f195 Today Joined: `{today_j}`\n\U0001f4b8 Pending Withdrawals: `{pending_w}`", parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["health"])
 def server_health(message):
-    """Admin: check live server CPU / memory / disk / uptime."""
     if int(message.from_user.id) != ADMIN_ID:
         return
     try:
@@ -3102,29 +2743,20 @@ def server_health(message):
         uptime_sec = int(time.time() - _SERVER_START_TIME)
         h, rem     = divmod(uptime_sec, 3600)
         m, s       = divmod(rem, 60)
-
-        def bar(pct: float, length: int = 10) -> str:
+        def bar(pct, length=10):
             filled = round(pct / 100 * length)
             return "█" * filled + "░" * (length - filled)
-
-        def status_emoji(pct: float) -> str:
-            if pct < 60:  return "🟢"
-            if pct < 85:  return "🟡"
+        def status_emoji(pct):
+            if pct < 60: return "🟢"
+            if pct < 85: return "🟡"
             return "🔴"
-
         text = (
             "🖥️ *Server Health*\n\n"
             f"⏱️ *Uptime:* `{h}h {m}m {s}s`\n\n"
-            f"{status_emoji(cpu_pct)} *CPU:* `{cpu_pct:.1f}%`\n"
-            f"`{bar(cpu_pct)}`\n\n"
-            f"{status_emoji(mem.percent)} *Memory:* `{mem.percent:.1f}%` "
-            f"(`{mem.used//1024//1024} MB / {mem.total//1024//1024} MB`)\n"
-            f"`{bar(mem.percent)}`\n\n"
-            f"{status_emoji(disk.percent)} *Disk:* `{disk.percent:.1f}%` "
-            f"(`{disk.used//1024//1024//1024:.1f} GB / {disk.total//1024//1024//1024:.1f} GB`)\n"
-            f"`{bar(disk.percent)}`\n\n"
-            f"🟢 *Flask:* Running\n"
-            f"🟢 *Bot:* Online"
+            f"{status_emoji(cpu_pct)} *CPU:* `{cpu_pct:.1f}%`\n`{bar(cpu_pct)}`\n\n"
+            f"{status_emoji(mem.percent)} *Memory:* `{mem.percent:.1f}%` (`{mem.used//1024//1024} MB / {mem.total//1024//1024} MB`)\n`{bar(mem.percent)}`\n\n"
+            f"{status_emoji(disk.percent)} *Disk:* `{disk.percent:.1f}%` (`{disk.used//1024//1024//1024:.1f} GB / {disk.total//1024//1024//1024:.1f} GB`)\n`{bar(disk.percent)}`\n\n"
+            "🟢 *Flask:* Running\n🟢 *Bot:* Online"
         )
         bot.reply_to(message, text, parse_mode="Markdown")
     except Exception as exc:
@@ -3142,17 +2774,10 @@ def approve_withdrawal(message):
         target_id = int(parts[1])
     except ValueError:
         return bot.reply_to(message, "Invalid user ID.")
-    result = withdrawals_col.update_one(
-        {"user_id": target_id, "status": "Pending \u23f3"},
-        {"$set": {"status": "Approved \u2705"}},
-    )
+    result = withdrawals_col.update_one({"user_id": target_id, "status": "Pending \u23f3"}, {"$set": {"status": "Approved \u2705"}})
     if result.modified_count:
         try:
-            bot.send_message(
-                target_id,
-                "\U0001f389 *Your withdrawal has been approved!* Payment is being processed. \u2705",
-                parse_mode="Markdown",
-            )
+            bot.send_message(target_id, "\U0001f389 *Your withdrawal has been approved!* Payment is being processed. \u2705", parse_mode="Markdown")
         except Exception as notify_exc:
             logger.warning("Notify failed for approved user %s: %s", target_id, notify_exc)
         bot.reply_to(message, f"\u2705 User {target_id} withdrawal approved!")
@@ -3171,8 +2796,6 @@ def reject_withdrawal(message):
         target_id = int(parts[1])
     except ValueError:
         return bot.reply_to(message, "Invalid user ID.")
-    # Atomic: claim the pending row first, then refund. Prevents double-refund
-    # if two admins press /reject simultaneously.
     withdraw = withdrawals_col.find_one_and_update(
         {"user_id": target_id, "status": "Pending \u23f3"},
         {"$set": {"status": "Rejected \u274c"}},
@@ -3180,11 +2803,7 @@ def reject_withdrawal(message):
     if withdraw:
         users_col.update_one({"user_id": target_id}, {"$inc": {"coins": withdraw["amount"]}})
         try:
-            bot.send_message(
-                target_id,
-                f"\u274c Your withdrawal was rejected. {withdraw['amount']} coins have been refunded.",
-                parse_mode="Markdown",
-            )
+            bot.send_message(target_id, f"\u274c Your withdrawal was rejected. {withdraw['amount']} coins have been refunded.", parse_mode="Markdown")
         except Exception as notify_exc:
             logger.warning("Notify failed for rejected user %s: %s", target_id, notify_exc)
         bot.reply_to(message, f"\u274c User {target_id} rejected. Coins refunded.")
@@ -3201,7 +2820,7 @@ def add_coins(message):
         return bot.reply_to(message, "Usage: /addcoins <user_id> <amount>")
     try:
         target_id = int(parts[1])
-        amount = int(parts[2])
+        amount    = int(parts[2])
     except ValueError:
         return bot.reply_to(message, "Invalid user ID or amount.")
     users_col.update_one({"user_id": target_id}, {"$inc": {"coins": amount}})
@@ -3220,7 +2839,7 @@ def broadcast(message):
     if not msg_text or msg_text == "/broadcast":
         return bot.reply_to(message, "Usage: /broadcast [Message]")
     all_users = list(users_col.find({}, {"user_id": 1}))
-    sent, failed = 0, 0
+    sent = failed = 0
     for u in all_users:
         try:
             bot.send_message(u["user_id"], msg_text, parse_mode="Markdown")
@@ -3283,10 +2902,7 @@ def unblock_user(message):
         target_id = int(parts[1])
     except ValueError:
         return bot.reply_to(message, "Invalid user ID.")
-    users_col.update_one(
-        {"user_id": target_id},
-        {"$set": {"blocked": False, "fp_flagged": False, "ip_flagged": False}},
-    )
+    users_col.update_one({"user_id": target_id}, {"$set": {"blocked": False, "fp_flagged": False, "ip_flagged": False}})
     try:
         bot.send_message(target_id, "\u2705 Your account has been unblocked!", parse_mode="Markdown")
     except Exception as notify_exc:
@@ -3300,26 +2916,15 @@ def cmd_list_banned(message):
         return
     try:
         total  = users_col.count_documents({"blocked": True})
-        banned = list(
-            users_col.find(
-                {"blocked": True},
-                {"user_id": 1, "username": 1, "coins": 1,
-                 "block_reason": 1, "blocked_at": 1, "_id": 0},
-            ).limit(20)
-        )
+        banned = list(users_col.find({"blocked": True}, {"user_id": 1, "username": 1, "coins": 1, "block_reason": 1, "blocked_at": 1, "_id": 0}).limit(20))
         if not banned:
             return bot.reply_to(message, "✅ No banned users found.")
-
         def _safe_date(val):
-            if val is None:
-                return "Unknown"
-            if hasattr(val, "strftime"):
-                return val.strftime("%Y-%m-%d")
+            if val is None: return "Unknown"
+            if hasattr(val, "strftime"): return val.strftime("%Y-%m-%d")
             return str(val)[:10]
-
         def _esc(text):
             return str(text).replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
-
         lines = [f"🚫 *Banned Users* (Total: {total}, showing up to 20)\n"]
         for u in banned:
             uid    = u.get("user_id", "?")
@@ -3327,14 +2932,8 @@ def cmd_list_banned(message):
             coins  = u.get("coins", 0)
             reason = _esc(u.get("block_reason") or "No reason")
             blk_str = _safe_date(u.get("blocked_at"))
-            lines.append(
-                f"• `{uid}` {uname}\n"
-                f"  💰 {coins} coins | 📅 {blk_str}\n"
-                f"  ❗ {reason}"
-            )
-
+            lines.append(f"• `{uid}` {uname}\n  💰 {coins} coins | 📅 {blk_str}\n  ❗ {reason}")
         text = "\n".join(lines)
-        # Telegram message limit is 4096 chars — split if needed
         if len(text) <= 4096:
             bot.reply_to(message, text, parse_mode="Markdown")
         else:
@@ -3351,89 +2950,48 @@ def cmd_search_user(message):
         return
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
-        return bot.reply_to(
-            message,
-            "Usage:\n"
-            "• `/searchuser 123456789` — search by Telegram ID\n"
-            "• `/searchuser Daksh` — search by name (partial OK)",
-            parse_mode="Markdown",
-        )
+        return bot.reply_to(message, "Usage:\n• `/searchuser 123456789` — search by Telegram ID\n• `/searchuser Daksh` — search by name", parse_mode="Markdown")
     query_raw = parts[1].strip().lstrip("@")
     try:
         user = None
-        # 1. Try exact numeric user_id first
         if query_raw.lstrip("-").isdigit():
             user = users_col.find_one({"user_id": int(query_raw)})
-
-        # 2. Partial name search on `username` field (stores first_name)
         if not user:
-            safe_q = re.escape(query_raw)
-            users_found = list(
-                users_col.find(
-                    {"username": {"$regex": safe_q, "$options": "i"}},
-                    {"user_id": 1, "username": 1, "coins": 1, "blocked": 1,
-                     "block_reason": 1, "joined": 1, "referral_count": 1,
-                     "total_earned": 1, "total_withdrawn": 1, "_id": 0},
-                ).limit(5)
-            )
+            safe_q     = re.escape(query_raw)
+            users_found = list(users_col.find({"username": {"$regex": safe_q, "$options": "i"}}, {"user_id": 1, "username": 1, "coins": 1, "blocked": 1, "block_reason": 1, "joined": 1, "referral_count": 1, "_id": 0}).limit(5))
             if len(users_found) == 1:
                 user = users_found[0]
             elif len(users_found) > 1:
-                # Multiple matches — show a list
                 lines = [f"🔍 *{len(users_found)} users found for* `{query_raw}`:\n"]
                 for u in users_found:
-                    uid2   = u.get("user_id", "?")
-                    uname2 = u.get("username") or "—"
-                    coins2 = u.get("coins", 0)
                     status = "🚫" if u.get("blocked") else "✅"
-                    lines.append(f"{status} `{uid2}` — {uname2} | 💰{coins2}")
+                    lines.append(f"{status} `{u.get('user_id', '?')}` — {u.get('username') or '—'} | 💰{u.get('coins', 0)}")
                 lines.append("\n_Use /searchuser <ID> to get full details._")
                 return bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
-
         if not user:
-            return bot.reply_to(
-                message,
-                f"❌ No user found for `{query_raw}`\n"
-                f"_Tip: Search by the name shown in bot (e.g. Daksh, Rahul)_",
-                parse_mode="Markdown",
-            )
-
+            return bot.reply_to(message, f"❌ No user found for `{query_raw}`", parse_mode="Markdown")
         def _safe_date(val):
-            if val is None:
-                return "Unknown"
-            if hasattr(val, "strftime"):
-                return val.strftime("%Y-%m-%d")
+            if val is None: return "Unknown"
+            if hasattr(val, "strftime"): return val.strftime("%Y-%m-%d")
             return str(val)[:10]
-
-        uid      = user.get("user_id", "?")
-        uname    = user.get("username") or "—"
-        coins    = user.get("coins", 0)
-        blocked  = "🚫 Banned" if user.get("blocked") else "✅ Active"
-        reason   = user.get("block_reason") or "—"
+        uid     = user.get("user_id", "?")
+        uname   = user.get("username") or "—"
+        coins   = user.get("coins", 0)
+        blocked = "🚫 Banned" if user.get("blocked") else "✅ Active"
+        reason  = user.get("block_reason") or "—"
         joined_s = _safe_date(user.get("joined"))
-        refs     = user.get("referral_count", 0)
-        earned   = user.get("total_earned", 0)
-        wds      = user.get("total_withdrawn", 0)
-        text = (
-            f"👤 *User Info*\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"🆔 ID: `{uid}`\n"
-            f"📛 Name: {uname}\n"
-            f"📅 Joined: {joined_s}\n"
-            f"💰 Coins: {coins}\n"
-            f"👥 Referrals: {refs}\n"
-            f"💸 Total Earned: {earned}\n"
-            f"🏧 Total Withdrawn: {wds}\n"
-            f"🔒 Status: {blocked}\n"
-            f"❗ Ban Reason: {reason}"
-        )
+        refs    = user.get("referral_count", 0)
+        text    = (f"👤 *User Info*\n━━━━━━━━━━━━━━\n🆔 ID: `{uid}`\n📛 Name: {uname}\n📅 Joined: {joined_s}\n💰 Coins: {coins}\n👥 Referrals: {refs}\n🔒 Status: {blocked}\n❗ Ban Reason: {reason}")
         bot.reply_to(message, text, parse_mode="Markdown")
     except Exception as exc:
         logger.error("searchuser error: %s", exc)
         bot.reply_to(message, f"❌ Error: {exc}")
 
 
-# Friendly display names for task IDs (used in user-facing notifications)
+# ============================================================
+# TASK DISPLAY NAMES + BROADCAST HELPERS
+# ============================================================
+
 TASK_DISPLAY_NAMES = {
     "yt1":   "📺 YouTube Task 1",
     "yt2":   "📺 YouTube Task 2",
@@ -3447,131 +3005,71 @@ TASK_DISPLAY_NAMES = {
 
 
 def _broadcast_to_all_users(notice: str, admin_chat_id: int, summary_label: str) -> None:
-    """
-    Generic background broadcast: send a Markdown message to every
-    non-blocked user, then DM the admin a sent/failed summary.
-
-    Runs in its own thread (caller wraps with threading.Thread) so the
-    admin command returns instantly.
-    """
-    sent, failed = 0, 0
+    sent = failed = 0
     try:
-        cursor = users_col.find(
-            {"$or": [{"blocked": {"$exists": False}}, {"blocked": False}]},
-            {"user_id": 1, "_id": 0},
-        )
+        cursor = users_col.find({"$or": [{"blocked": {"$exists": False}}, {"blocked": False}]}, {"user_id": 1, "_id": 0})
         for u in cursor:
             uid = u.get("user_id")
             if not uid:
                 continue
             try:
-                bot.send_message(int(uid), notice, parse_mode="Markdown",
-                                 disable_web_page_preview=True)
+                bot.send_message(int(uid), notice, parse_mode="Markdown", disable_web_page_preview=True)
                 sent += 1
-                # Telegram global limit ~30 msgs/sec; 0.05s = 20/sec, safe.
                 time.sleep(0.05)
             except Exception:
                 failed += 1
     except Exception as exc:
         logger.error("Broadcast cursor error (%s): %s", summary_label, exc)
-
     logger.info("Broadcast '%s' done: sent=%d, failed=%d", summary_label, sent, failed)
-
     try:
-        bot.send_message(
-            admin_chat_id,
-            f"\U0001f4e2 *Broadcast Complete*\n\n"
-            f"{summary_label}\n"
-            f"\u2705 Sent: *{sent}*\n"
-            f"\u274c Failed: *{failed}*",
-            parse_mode="Markdown",
-        )
+        bot.send_message(admin_chat_id, f"\U0001f4e2 *Broadcast Complete*\n\n{summary_label}\n\u2705 Sent: *{sent}*\n\u274c Failed: *{failed}*", parse_mode="Markdown")
     except Exception as exc:
         logger.warning("Admin broadcast summary failed: %s", exc)
 
 
 def _spawn_broadcast(notice: str, admin_chat_id: int, summary_label: str) -> None:
-    """Fire-and-forget convenience wrapper around _broadcast_to_all_users."""
-    threading.Thread(
-        target=_broadcast_to_all_users,
-        args=(notice, admin_chat_id, summary_label),
-        daemon=True,
-        name=f"broadcast-{summary_label[:30]}",
-    ).start()
+    threading.Thread(target=_broadcast_to_all_users, args=(notice, admin_chat_id, summary_label), daemon=True, name=f"broadcast-{summary_label[:30]}").start()
 
 
 def _broadcast_task_update(task_id: str, new_code: str, admin_chat_id: int) -> None:
-    """Build the user-facing message for a /settask refresh and broadcast."""
-    display = TASK_DISPLAY_NAMES.get(task_id, task_id.upper())
-    is_one_time = task_id in ONE_TIME_TASK_IDS  # slot3 / slot4
-
+    display    = TASK_DISPLAY_NAMES.get(task_id, task_id.upper())
+    is_one_time = task_id in ONE_TIME_TASK_IDS
     if is_one_time:
-        notice = (
-            f"\U0001f389 *New Task Available!*\n\n"
-            f"{display} has been refreshed with a new code.\n"
-            f"Open the Mini App and complete it to earn coins! \U0001fa99"
-        )
+        notice = f"\U0001f389 *New Task Available!*\n\n{display} has been refreshed with a new code.\nOpen the Mini App and complete it to earn coins! \U0001fa99"
     else:
-        notice = (
-            f"\U0001f504 *Task Code Updated!*\n\n"
-            f"{display} has a fresh code today.\n"
-            f"Open the Mini App, watch/visit the link, and enter the new code to earn! \U0001fa99"
-        )
-
-    _broadcast_to_all_users(
-        notice, admin_chat_id, summary_label=f"Task: `{task_id}` → `{new_code}`"
-    )
+        notice = f"\U0001f504 *Task Code Updated!*\n\n{display} has a fresh code today.\nOpen the Mini App, watch/visit the link, and enter the new code to earn! \U0001fa99"
+    _broadcast_to_all_users(notice, admin_chat_id, summary_label=f"Task: `{task_id}` → `{new_code}`")
 
 
 @bot.message_handler(commands=["settask"])
 def set_task_code(message):
     if int(message.from_user.id) != ADMIN_ID:
         return
-    parts = message.text.split()
+    parts    = message.text.split()
     if len(parts) < 3:
         return bot.reply_to(message, "Usage: /settask <task_id> <new_code> [silent]")
-    task_id = parts[1].lower()
+    task_id  = parts[1].lower()
     new_code = parts[2].upper()
-    # Optional 4th arg "silent" / "quiet" / "nobroadcast" → skip user notification
-    silent = len(parts) >= 4 and parts[3].lower() in {"silent", "quiet", "nobroadcast", "no"}
+    silent   = len(parts) >= 4 and parts[3].lower() in {"silent", "quiet", "nobroadcast", "no"}
 
     if task_id not in TASK_CODES:
         return bot.reply_to(message, f"Invalid task ID. Valid: {', '.join(TASK_CODES.keys())}")
 
     TASK_CODES[task_id] = new_code
     global _task_codes_cache, _task_codes_cache_time
-    _task_codes_cache = None
+    _task_codes_cache      = None
     _task_codes_cache_time = 0.0
 
     if silent:
-        bot.reply_to(
-            message,
-            f"\u2705 Task `{task_id}` code updated to `{new_code}`!\n"
-            f"\U0001f515 Silent mode — no user notification sent.",
-            parse_mode="Markdown",
-        )
+        bot.reply_to(message, f"\u2705 Task `{task_id}` code updated to `{new_code}`!\n\U0001f515 Silent mode — no user notification sent.", parse_mode="Markdown")
         return
 
-    bot.reply_to(
-        message,
-        f"\u2705 Task `{task_id}` code updated to `{new_code}`!\n"
-        f"\U0001f4e2 Broadcasting to all users in background...",
-        parse_mode="Markdown",
-    )
-
-    # Fire-and-forget background broadcast so this handler returns instantly
-    threading.Thread(
-        target=_broadcast_task_update,
-        args=(task_id, new_code, int(message.chat.id)),
-        daemon=True,
-        name=f"task-broadcast-{task_id}",
-    ).start()
+    bot.reply_to(message, f"\u2705 Task `{task_id}` code updated to `{new_code}`!\n\U0001f4e2 Broadcasting to all users in background...", parse_mode="Markdown")
+    threading.Thread(target=_broadcast_task_update, args=(task_id, new_code, int(message.chat.id)), daemon=True, name=f"task-broadcast-{task_id}").start()
 
 
 @bot.message_handler(commands=["setlottery"])
 def set_lottery_command(message):
-    """Admin: configure lottery ticket price + prize.
-    Usage: /setlottery <ticket_price> <prize> [active|inactive]"""
     if int(message.from_user.id) != ADMIN_ID:
         return
     parts = message.text.split()
@@ -3594,12 +3092,7 @@ def set_lottery_command(message):
     active_flag = True
     if len(parts) >= 4 and parts[3].lower() in {"inactive", "off", "disable", "stop"}:
         active_flag = False
-
-    config_col.update_one(
-        {"_id": "lottery_config"},
-        {"$set": {"ticket_price": new_price, "prize": new_prize, "active": active_flag}},
-        upsert=True,
-    )
+    config_col.update_one({"_id": "lottery_config"}, {"$set": {"ticket_price": new_price, "prize": new_prize, "active": active_flag}}, upsert=True)
     _bust_lottery_cache()
     bot.reply_to(
         message,
@@ -3614,27 +3107,20 @@ def set_lottery_command(message):
 
 @bot.message_handler(commands=["lotterystats"])
 def lottery_stats_command(message):
-    """Admin: see today's lottery round stats."""
     if int(message.from_user.id) != ADMIN_ID:
         return
-    cfg = get_lottery_config()
-    rid = _today_round_id()
-    rdoc = lottery_col.find_one({"_id": rid}) or {}
+    cfg          = get_lottery_config()
+    rid          = _today_round_id()
+    rdoc         = lottery_col.find_one({"_id": rid}) or {}
     participants = rdoc.get("participants", [])
     ticket_price = rdoc.get("ticket_price", cfg["ticket_price"])
-    prize = rdoc.get("prize", cfg["prize"])
-    pool = len(participants) * ticket_price
-    profit = pool - prize if participants else 0
-    last = lottery_col.find_one(
-        {"drawn": True, "winner": {"$ne": None}},
-        sort=[("drawn_at", -1)],
-    ) or {}
-    last_line = ""
+    prize        = rdoc.get("prize", cfg["prize"])
+    pool         = len(participants) * ticket_price
+    profit       = pool - prize if participants else 0
+    last         = lottery_col.find_one({"drawn": True, "winner": {"$ne": None}}, sort=[("drawn_at", -1)]) or {}
+    last_line    = ""
     if last:
-        last_line = (
-            f"\n\n*Last Round:* `{last.get('_id', '?')}`\n"
-            f"\U0001f3c6 Winner: `{last.get('winner', '?')}` won `{last.get('prize', 0)}` 🪙"
-        )
+        last_line = f"\n\n*Last Round:* `{last.get('_id', '?')}`\n\U0001f3c6 Winner: `{last.get('winner', '?')}` won `{last.get('prize', 0)}` 🪙"
     bot.reply_to(
         message,
         f"\U0001f3b0 *Lottery — Today*\n\n"
@@ -3653,91 +3139,27 @@ def lottery_stats_command(message):
 
 @bot.message_handler(commands=["drawlottery"])
 def draw_lottery_command(message):
-    """Admin: pick a random winner from today's round, credit prize, notify everyone."""
+    """Admin: manually pick a winner. Uses shared _perform_auto_draw()."""
     if int(message.from_user.id) != ADMIN_ID:
         return
-    rid = _today_round_id()
-    rdoc = lottery_col.find_one({"_id": rid})
-    if not rdoc:
-        return bot.reply_to(message, "No lottery round exists for today yet (no tickets sold).")
-    if rdoc.get("drawn"):
-        return bot.reply_to(
-            message,
-            f"Today's round was already drawn.\nWinner: `{rdoc.get('winner', '?')}`",
-            parse_mode="Markdown",
-        )
-    participants = rdoc.get("participants", [])
-    if not participants:
-        return bot.reply_to(message, "No participants in today's round.")
 
-    prize = int(rdoc.get("prize", LOTTERY_DEFAULTS["prize"]))
-    winner_id = secrets.choice(participants)
+    rid    = _today_round_id()
+    result = _perform_auto_draw(rid, notify_chat_id=int(message.chat.id))
 
-    # Atomic mark-as-drawn (prevents double-draw race)
-    locked = lottery_col.find_one_and_update(
-        {"_id": rid, "drawn": False},
-        {"$set": {"drawn": True, "winner": winner_id, "drawn_at": datetime.utcnow().isoformat()}},
-        return_document=True,
-    )
-    if not locked:
-        return bot.reply_to(message, "Round was just drawn by another process.")
-
-    # Credit prize to winner
-    users_col.update_one({"user_id": winner_id}, {"$inc": {"coins": prize}})
+    if not result["success"]:
+        bot.reply_to(message, f"⚠️ {result['message']}")
+        return
 
     bot.reply_to(
         message,
         f"\U0001f389 *Lottery Drawn!*\n\n"
         f"Round: `{rid}`\n"
-        f"\U0001f3c6 Winner: `{winner_id}`\n"
-        f"\U0001f4b0 Prize: `{prize}` 🪙\n"
-        f"\U0001f465 Total Tickets: `{len(participants)}`\n\n"
+        f"\U0001f3c6 Winner: `{result['winner_id']}`\n"
+        f"\U0001f4b0 Prize: `{result['prize']}` 🪙\n"
+        f"\U0001f465 Total Tickets: `{result['participants']}`\n\n"
         f"_Notifying all participants in background..._",
         parse_mode="Markdown",
     )
-
-    def _notify_participants():
-        # DM the winner
-        try:
-            bot.send_message(
-                winner_id,
-                f"\U0001f389 *CONGRATULATIONS!* \U0001f389\n\n"
-                f"You won today's lottery!\n\n"
-                f"\U0001f3c6 Prize: *{prize}* 🪙 has been added to your balance!\n"
-                f"\U0001f3b0 Round: `{rid}`\n\n"
-                f"Open the Mini App to check your new balance \U0001f680",
-                parse_mode="Markdown",
-            )
-        except Exception as exc:
-            logger.warning("Notify winner %s failed: %s", winner_id, exc)
-
-        # DM losers
-        losers = [uid for uid in participants if uid != winner_id]
-        sent = 0
-        for uid in losers:
-            try:
-                bot.send_message(
-                    uid,
-                    f"\U0001f3b0 *Today's Lottery Result*\n\n"
-                    f"Winner: `{winner_id}` (won {prize} 🪙)\n"
-                    f"Total tickets: {len(participants)}\n\n"
-                    f"Better luck next time! \U0001f340\n"
-                    f"_New round opens at 00:00 UTC._",
-                    parse_mode="Markdown",
-                )
-                sent += 1
-                time.sleep(0.05)  # gentle rate limit
-            except Exception:
-                pass
-        try:
-            bot.send_message(
-                int(message.chat.id),
-                f"\u2705 Lottery notifications sent: {sent}/{len(losers)} losers + 1 winner.",
-            )
-        except Exception:
-            pass
-
-    threading.Thread(target=_notify_participants, daemon=True, name=f"lottery-notify-{rid}").start()
 
 
 @bot.message_handler(commands=["penalty"])
@@ -3749,27 +3171,20 @@ def penalize_user(message):
         return bot.reply_to(message, "Usage: /penalty <user_id> [amount]\nDefault: 200 coins")
     try:
         target_id = int(parts[1])
-        amount = int(parts[2]) if len(parts) >= 3 else 200
+        amount    = int(parts[2]) if len(parts) >= 3 else 200
         if amount <= 0:
             return bot.reply_to(message, "Amount must be greater than 0.")
     except ValueError:
         return bot.reply_to(message, "Invalid user ID or amount.")
-
     user = users_col.find_one({"user_id": target_id})
     if not user:
         return bot.reply_to(message, f"User {target_id} not found.")
-
     current = user.get("coins", 0)
-    new_bal = max(0, current - amount)
+    new_bal  = max(0, current - amount)
     deducted = current - new_bal
     users_col.update_one({"user_id": target_id}, {"$set": {"coins": new_bal}})
     try:
-        bot.send_message(
-            target_id,
-            f"\u26a0\ufe0f *Penalty Applied!*\n\n"
-            f"`{deducted}` coins deducted.\nNew Balance: `{new_bal}` \U0001fa99\n\nReason: Rule violation.",
-            parse_mode="Markdown",
-        )
+        bot.send_message(target_id, f"\u26a0\ufe0f *Penalty Applied!*\n\n`{deducted}` coins deducted.\nNew Balance: `{new_bal}` \U0001fa99\n\nReason: Rule violation.", parse_mode="Markdown")
     except Exception as notify_exc:
         logger.warning("Notify failed for penalty %s: %s", target_id, notify_exc)
     bot.reply_to(message, f"\u26a0\ufe0f Penalty applied: {deducted} coins deducted from user {target_id}. New balance: {new_bal}.")
@@ -3787,19 +3202,7 @@ def add_code_filter_command(message):
         return bot.reply_to(message, "Invalid code. Maximum length is 80 characters.")
     pattern = rf"\b{re.escape(code)}\b"
     try:
-        code_filter_rules_col.update_one(
-            {"pattern": pattern},
-            {
-                "$set": {
-                    "pattern": pattern,
-                    "label": code,
-                    "active": True,
-                    "created_at": datetime.utcnow().isoformat(),
-                    "created_by": ADMIN_ID,
-                }
-            },
-            upsert=True,
-        )
+        code_filter_rules_col.update_one({"pattern": pattern}, {"$set": {"pattern": pattern, "label": code, "active": True, "created_at": datetime.utcnow().isoformat(), "created_by": ADMIN_ID}}, upsert=True)
         bot.reply_to(message, f"Code filter added: {code}")
     except Exception as exc:
         logger.error("add_code_filter_command error: %s", exc)
@@ -3818,19 +3221,7 @@ def add_code_pattern_command(message):
         return bot.reply_to(message, "Invalid pattern. Maximum length is 200 characters.")
     try:
         re.compile(pattern)
-        code_filter_rules_col.update_one(
-            {"pattern": pattern},
-            {
-                "$set": {
-                    "pattern": pattern,
-                    "label": pattern,
-                    "active": True,
-                    "created_at": datetime.utcnow().isoformat(),
-                    "created_by": ADMIN_ID,
-                }
-            },
-            upsert=True,
-        )
+        code_filter_rules_col.update_one({"pattern": pattern}, {"$set": {"pattern": pattern, "label": pattern, "active": True, "created_at": datetime.utcnow().isoformat(), "created_by": ADMIN_ID}}, upsert=True)
         bot.reply_to(message, f"Code pattern added: {pattern}")
     except re.error as exc:
         bot.reply_to(message, f"Invalid regex pattern: {exc}")
@@ -3845,11 +3236,7 @@ def list_code_filters_command(message):
         return
     try:
         rules = list(code_filter_rules_col.find({"active": True}, {"_id": 0, "label": 1, "pattern": 1}).limit(50))
-        lines = [
-            "Active group code filters:",
-            "Default: uppercase 3-letter codes",
-            "Default: 3-number codes",
-        ]
+        lines = ["Active group code filters:", "Default: uppercase 3-letter codes", "Default: 3-number codes"]
         for idx, rule in enumerate(rules, start=1):
             lines.append(f"{idx}. {rule.get('label') or rule.get('pattern')}")
         bot.reply_to(message, "\n".join(lines))
@@ -3865,7 +3252,7 @@ def delete_code_filter_command(message):
     parts = message.text.split(None, 1)
     if len(parts) < 2:
         return bot.reply_to(message, "Usage: /delcodefilter CODE")
-    code = parts[1].strip()
+    code          = parts[1].strip()
     exact_pattern = rf"\b{re.escape(code)}\b"
     try:
         result = code_filter_rules_col.update_many(
@@ -3901,33 +3288,25 @@ def reset_code_violations_command(message):
     content_types=["text"],
 )
 def group_code_filter_handler(message):
-    text = message.text or ""
+    text            = message.text or ""
     matched_pattern = message_matches_group_code_filter(text)
     if not matched_pattern:
         return
-
-    chat_id = message.chat.id
-    user_id = message.from_user.id
+    chat_id    = message.chat.id
+    user_id    = message.from_user.id
     can_delete, can_ban = bot_has_group_moderation_rights(chat_id)
-
     if not can_delete:
         logger.warning("Group code filter matched in %s but bot cannot delete messages.", chat_id)
         return
-
     try:
         bot.delete_message(chat_id, message.message_id)
-        logger.info(
-            "Deleted group code message | chat_id: %s | user_id: %s | pattern: %s",
-            chat_id, user_id, matched_pattern,
-        )
+        logger.info("Deleted group code message | chat_id: %s | user_id: %s | pattern: %s", chat_id, user_id, matched_pattern)
     except Exception as exc:
         logger.warning("Failed to delete group code message in %s from %s: %s", chat_id, user_id, exc)
         return
-
     violations = record_group_code_violation(chat_id, user_id)
     if violations <= GROUP_CODE_MAX_VIOLATIONS:
         return
-
     try:
         member = bot.get_chat_member(chat_id, user_id)
         if member.status in ("administrator", "creator"):
@@ -3935,11 +3314,9 @@ def group_code_filter_handler(message):
             return
     except Exception as exc:
         logger.warning("Unable to verify user role before ban for %s in %s: %s", user_id, chat_id, exc)
-
     if not can_ban:
         logger.warning("User %s exceeded code violations in %s but bot cannot ban users.", user_id, chat_id)
         return
-
     try:
         bot.ban_chat_member(chat_id, user_id)
         logger.info("Banned user %s from group %s after %s code violations.", user_id, chat_id, violations)
@@ -3948,7 +3325,7 @@ def group_code_filter_handler(message):
 
 
 # ============================================================
-# 21. BOT POLLING THREAD
+# BOT POLLING THREAD
 # ============================================================
 
 def run_bot() -> None:
@@ -3959,16 +3336,13 @@ def run_bot() -> None:
             logger.warning("Another bot polling instance is already active. Retrying in 30s...")
             time.sleep(30)
             continue
-
         stop_event = threading.Event()
         Thread(target=refresh_bot_polling_lock, args=(instance_id, stop_event), daemon=True).start()
-
         try:
             try:
                 bot.remove_webhook()
             except Exception as webhook_exc:
                 logger.warning("Could not remove webhook before polling: %s", webhook_exc)
-
             bot.polling(none_stop=True, interval=1, timeout=20)
         except Exception as exc:
             error_text = str(exc)
@@ -3984,25 +3358,12 @@ def run_bot() -> None:
 
 
 def acquire_bot_polling_lock(instance_id: str, lease_seconds: int = 90) -> bool:
-    now = datetime.utcnow()
+    now        = datetime.utcnow()
     expires_at = now + timedelta(seconds=lease_seconds)
     try:
         lock = config_col.find_one_and_update(
-            {
-                "_id": "bot_polling_lock",
-                "$or": [
-                    {"expires_at": {"$lte": now}},
-                    {"instance_id": instance_id},
-                    {"expires_at": {"$exists": False}},
-                ],
-            },
-            {
-                "$set": {
-                    "instance_id": instance_id,
-                    "expires_at": expires_at,
-                    "updated_at": now.isoformat(),
-                }
-            },
+            {"_id": "bot_polling_lock", "$or": [{"expires_at": {"$lte": now}}, {"instance_id": instance_id}, {"expires_at": {"$exists": False}}]},
+            {"$set": {"instance_id": instance_id, "expires_at": expires_at, "updated_at": now.isoformat()}},
             upsert=True,
             return_document=pymongo.ReturnDocument.AFTER,
         )
@@ -4020,12 +3381,7 @@ def refresh_bot_polling_lock(instance_id: str, stop_event: threading.Event, leas
         try:
             config_col.update_one(
                 {"_id": "bot_polling_lock", "instance_id": instance_id},
-                {
-                    "$set": {
-                        "expires_at": now + timedelta(seconds=lease_seconds),
-                        "updated_at": now.isoformat(),
-                    }
-                },
+                {"$set": {"expires_at": now + timedelta(seconds=lease_seconds), "updated_at": now.isoformat()}},
             )
         except Exception as exc:
             logger.warning("Bot polling lock refresh failed: %s", exc)
@@ -4039,7 +3395,7 @@ def release_bot_polling_lock(instance_id: str) -> None:
 
 
 # ============================================================
-# 22. UPTIME PING
+# UPTIME PING
 # ============================================================
 
 def uptime_ping() -> None:
@@ -4055,14 +3411,16 @@ def uptime_ping() -> None:
 
 
 # ============================================================
-# 23. ENTRY POINT
+# ENTRY POINT
 # ============================================================
 
 if __name__ == "__main__":
-    Thread(target=run_bot, daemon=True).start()
-    Thread(target=uptime_ping, daemon=True).start()
+    Thread(target=run_bot,                  daemon=True).start()
+    Thread(target=uptime_ping,              daemon=True).start()
     Thread(target=refresh_leaderboard_loop, daemon=True).start()
-    Thread(target=_cleanup_rate_cache, daemon=True).start()
+    Thread(target=_cleanup_rate_cache,      daemon=True).start()
+    Thread(target=auto_lottery_draw_loop,   daemon=True).start()  # ← Auto draw at 00:00 UTC
+
     port = int(os.getenv("PORT", 5000))
     logger.info("Starting Flask on port %s...", port)
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port)
