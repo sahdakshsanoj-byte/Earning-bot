@@ -26,6 +26,15 @@ const CONFIG = {
     // ──────────────────────────────────────────────────────────
     LOTTERY_ACTIVE: false,
 
+    // ──────────────────────────────────────────────────────────
+    // REFERRAL LOCK
+    //
+    //   true  → Referral tab active, withdrawal mein 5 referrals required
+    //   false → Referral tab 🔒 locked dikhega (coming soon)
+    //           Withdrawal mein referral condition "Not Required ✅" ho jaayegi
+    // ──────────────────────────────────────────────────────────
+    REFERRAL_ACTIVE: true,
+
     // Monetag Telegram Mini App Rewarded Interstitial Zone ID
     MONETAG_ZONE_ID: "10822310",
 
@@ -120,7 +129,7 @@ const CONFIG = {
             desc:   "Visit the site & enter code to earn",
             link:   "https://your-sponsor-link.com",
             reward: 4,
-            type:   "verify"   // Code verification task — use /settask slot4 CODE to set code
+            type:   "verify"
         }
 
     }
