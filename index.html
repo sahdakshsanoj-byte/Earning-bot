@@ -267,7 +267,7 @@
             </div>
         </div>
 
-        <!-- Watch Ad (SDK-based, reward only after completion) -->
+        <!-- Watch Ad -->
         <div class="card" style="text-align:center;">
             <p style="font-size:11px; color:#64748b; margin-bottom:6px;">Advertisement</p>
             <div class="ad-counter-badge">📺 Ads Today: <span id="ad-counter">0</span>/<span id="ad-max">10</span></div>
@@ -280,7 +280,7 @@
             <p style="font-size:10px; color:#475569; margin-top:6px;">Reward credited only after full ad completion</p>
         </div>
 
-        <!-- Promotion Tasks Section (Manual, Admin-controlled) -->
+        <!-- Promotion Tasks Section -->
         <div class="card" style="background:linear-gradient(135deg,#0d1f12,#102818); border:1px solid #22c55e;">
             <h4 style="color:#22c55e; margin-bottom:4px;">📢 Promotion Tasks</h4>
             <p style="font-size:11px; color:#64748b; margin-bottom:12px;">Complete tasks to earn coins • Each task is one-time only</p>
@@ -289,7 +289,7 @@
             </div>
         </div>
 
-        <!-- Partnership & Sponsors (Dynamic from config.js) -->
+        <!-- Partnership & Sponsors -->
         <div class="card" style="background:linear-gradient(135deg,#0f2027,#203a43,#2c5364); border:1px solid #38bdf8;">
             <h4 style="color:#38bdf8; margin-bottom:4px;">🤝 Partnership & Sponsors</h4>
             <p style="font-size:11px; color:#64748b; margin-bottom:12px;">Join sponsors & earn coins • Manage from config.js</p>
@@ -298,7 +298,6 @@
             </div>
         </div>
 
-        <!-- Gap before Withdrawal -->
         <div class="section-gap"></div>
 
         <!-- Withdraw -->
@@ -315,12 +314,13 @@
                 </div>
             </div>
 
-            <div style="background:#0f172a; border-radius:10px; padding:12px; margin-bottom:14px; border:1px solid #334155;">
+            <!-- ── Referral Requirement Box — IDs added for JS lock control ── -->
+            <div id="ref-requirement-box" style="background:#0f172a; border-radius:10px; padding:12px; margin-bottom:14px; border:1px solid #334155;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <span style="font-size:13px; color:#94a3b8;">👥 Referrals Required</span>
                     <span style="font-size:13px; font-weight:700;" id="ref-progress-text">0 / 5</span>
                 </div>
-                <div style="background:#1e293b; border-radius:20px; height:8px; overflow:hidden;">
+                <div id="ref-bar-wrap" style="background:#1e293b; border-radius:20px; height:8px; overflow:hidden;">
                     <div id="ref-progress-bar" style="height:100%; background:linear-gradient(90deg,#2ecc71,#27ae60); border-radius:20px; width:0%; transition:width 0.5s;"></div>
                 </div>
             </div>
@@ -381,8 +381,7 @@
             </button>
         </div>
 
-        <!-- YouTube Tasks (max 3 per day, 5 coins each) -->
-        <!-- Wrapped in #yt-tasks-section so it can be locked via config.js -->
+        <!-- YouTube Tasks -->
         <div id="yt-tasks-section" style="position:relative;">
         <div style="padding:8px 14px 4px 14px;">
             <p style="font-size:12px; font-weight:700; color:#ff0000; text-transform:uppercase; letter-spacing:1px;">📺 YouTube Tasks</p>
@@ -426,7 +425,7 @@
         </div>
         </div><!-- /#yt-tasks-section -->
 
-        <!-- Website Tasks (max 3 per day, 3 coins each) -->
+        <!-- Website Tasks -->
         <div style="padding:8px 14px 4px 14px;">
             <p style="font-size:12px; font-weight:700; color:#3498db; text-transform:uppercase; letter-spacing:1px;">🌐 Website Tasks</p>
             <p style="font-size:11px; color:#64748b; padding: 0 0 4px 0;">+3 coins each • Max 3 per day</p>
@@ -468,7 +467,7 @@
             </div>
         </div>
 
-        <!-- Telegram Channels — One-time reward per channel, 5 coins each -->
+        <!-- Telegram Channels -->
         <div style="padding:8px 14px 4px 14px;">
             <p style="font-size:12px; font-weight:700; color:#0088cc; text-transform:uppercase; letter-spacing:1px;">📢 Telegram Channels</p>
             <p style="font-size:11px; color:#64748b; padding: 0 0 4px 0;">Join all 3 channels • +5 coins each (one-time per channel)</p>
@@ -515,7 +514,8 @@
     </div>
 
     <!-- ===================== REFER TAB ===================== -->
-    <div id="refer" class="tab-content" style="display:none;">
+    <!-- position:relative + overflow:hidden — referral lock overlay ke liye zaroori -->
+    <div id="refer" class="tab-content" style="display:none; position:relative; overflow:hidden;">
         <div class="card balance-card" style="text-align:center;">
             <h4>Refer & Earn 🚀</h4>
             <p style="font-size:13px; color:#94a3b8; margin-top:4px;">Earn <b style="color:#f1c40f;">30 Coins</b> for every friend you invite!</p>
@@ -568,7 +568,8 @@
                 <div style="background:rgba(46,204,113,0.08); border-left:3px solid #2ecc71; border-radius:0 8px 8px 0; padding:10px 14px; margin-bottom:10px;">
                     <p style="font-size:13px; font-weight:700; color:#2ecc71; margin:0 0 8px 0;">📤 Withdrawal Rules</p>
                     <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Minimum Withdrawal: <b style="color:#f1c40f;">5000 🪙</b></p>
-                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Referral Requirement: <b style="color:#f1c40f;">5 Users</b></p>
+                    <!-- id="help-ref-rule" — JS se update hoga jab REFERRAL_ACTIVE = false -->
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;" id="help-ref-rule">• Referral Requirement: <b style="color:#f1c40f;">5 Users</b></p>
                     <p style="font-size:13px; color:#e2e8f0; margin:0;">• Cooldown: <b style="color:#f1c40f;">1 Request per 24 Hours</b></p>
                 </div>
 
@@ -671,39 +672,39 @@
     // PROMOTION TASKS — Frontend Logic
     // ============================================================
 
-    // Called on app load — fetches and renders promotion tasks
     async function loadPromoTasks() {
         const container = document.getElementById('promo-tasks-list');
         if (!container) return;
-
+        const userId = window.USER_ID;
+        if (!userId) {
+            container.innerHTML = '<p style="color:#475569; text-align:center; font-size:13px;">Open via Telegram bot.</p>';
+            return;
+        }
         try {
-            const resp = await fetch(CONFIG.API_BASE_URL + '/get_promo_tasks');
+            const resp = await fetch(CONFIG.API_BASE_URL + '/get_promo_tasks?user_id=' + userId);
             const data = await resp.json();
+            const tasks = data.tasks || [];
+            const completions = window._promoTaskCompletions || [];
 
-            if (data.status !== 'success' || !data.tasks || data.tasks.length === 0) {
-                container.innerHTML = '<p style="color:#475569; text-align:center; font-size:13px;">No promotion tasks available right now.</p>';
+            if (!tasks.length) {
+                container.innerHTML = '<p style="color:#475569; text-align:center; font-size:13px;">No promotion tasks yet.</p>';
                 return;
             }
 
-            const completedTasks = window._promoTaskCompletions || [];
             container.innerHTML = '';
-
-            data.tasks.forEach(task => {
-                const isCompleted = completedTasks.includes(task.task_id);
+            tasks.forEach(task => {
+                const isCompleted = completions.includes(task.task_id);
                 const card = document.createElement('div');
                 card.className = 'promo-task-card' + (isCompleted ? ' completed' : '');
                 card.innerHTML = `
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
-                        <div style="flex:1;">
-                            <p style="font-size:13px; font-weight:700; color:#22c55e; margin:0 0 2px 0;">${escapeHtml(task.title)}</p>
-                            ${task.description ? `<p style="font-size:11px; color:#64748b; margin:0;">${escapeHtml(task.description)}</p>` : ''}
-                        </div>
-                        <span style="font-size:12px; color:#f1c40f; font-weight:700; margin-left:8px;">+${task.reward || 5} 🪙</span>
+                        <p style="font-size:13px; font-weight:700; color:#22c55e; margin:0;">${escapeHtml(task.title)}</p>
+                        <span style="font-size:12px; color:#f1c40f; font-weight:700; white-space:nowrap; margin-left:8px;">+${task.reward || 5} 🪙</span>
                     </div>
-                    ${task.link ? `<a href="${escapeHtml(task.link)}" target="_blank" style="display:block; font-size:11px; color:#38bdf8; margin-bottom:6px; word-break:break-all;">🔗 ${escapeHtml(task.link)}</a>` : ''}
+                    ${task.description ? `<p style="font-size:11px; color:#64748b; margin:0 0 8px 0;">${escapeHtml(task.description)}</p>` : ''}
                     <button
                         class="promo-btn"
-                        onclick="claimPromoTask('${escapeHtml(task.task_id)}')"
+                        onclick="claimPromoTask('${task.task_id}')"
                         ${isCompleted ? 'disabled' : ''}
                     >
                         ${isCompleted ? '✅ Completed' : '✅ Mark as Done & Claim'}
@@ -716,7 +717,6 @@
         }
     }
 
-    // Claim a promotion task reward
     async function claimPromoTask(taskId) {
         const userId = window.USER_ID;
         if (!userId) return showToast('Please open via Telegram bot.');
@@ -752,7 +752,6 @@
             .replace(/"/g, '&quot;');
     }
 
-    // Open admin Telegram contact
     function openAdminTelegram() {
         const username = (CONFIG.ADMIN_TELEGRAM || '').replace('@', '').trim();
         if (!username) return showToast('Admin Telegram not configured.');
@@ -764,37 +763,23 @@
         }
     }
 
-    // loadPromoTasks and renderSponsorSlots are called from fetchLiveData in script.js
-    // Also call once on DOM ready as fallback
     // ============================================================
     // YOUTUBE TASKS LOCK — controlled via CONFIG.YT_TASKS_ACTIVE
     // ============================================================
     function applyYtLockState() {
         const section = document.getElementById('yt-tasks-section');
-        if (!section) {
-            console.warn('[YT-Lock] #yt-tasks-section not found in DOM');
-            return;
-        }
-        if (typeof CONFIG === 'undefined') {
-            console.warn('[YT-Lock] CONFIG not loaded yet, will retry');
-            return;
-        }
+        if (!section) return;
+        if (typeof CONFIG === 'undefined') return;
 
-        // Default to active (true) if flag missing — backward compatible.
         const isActive = CONFIG.YT_TASKS_ACTIVE !== false;
-        console.log('[YT-Lock] CONFIG.YT_TASKS_ACTIVE =', CONFIG.YT_TASKS_ACTIVE,
-                    '→ isActive:', isActive, '→', isActive ? 'UNLOCKED' : 'LOCKED 🔒');
 
-        // Always force section to be a positioning context
         if (getComputedStyle(section).position === 'static') {
             section.style.position = 'relative';
         }
 
-        // Remove any existing overlay first
         const existing = section.querySelector('.lock-overlay');
         if (existing) existing.remove();
 
-        // Re-enable previously-disabled controls
         section.querySelectorAll('button, input').forEach(el => {
             if (el.dataset.ytLockedDisabled === '1') {
                 el.disabled = false;
@@ -806,7 +791,6 @@
         section.style.userSelect = '';
 
         if (!isActive) {
-            // Lock: dim, disable, show 🔒 overlay
             section.style.pointerEvents = 'none';
             section.style.filter = 'blur(2px) grayscale(0.4)';
             section.style.userSelect = 'none';
@@ -819,7 +803,6 @@
 
             const overlay = document.createElement('div');
             overlay.className = 'lock-overlay';
-            // Force inline so even if CSS file is stale-cached the overlay shows
             overlay.style.cssText =
                 'position:absolute;inset:0;display:flex;flex-direction:column;' +
                 'align-items:center;justify-content:center;' +
@@ -829,26 +812,20 @@
                 '<span style="font-size:42px;animation:lock-pulse 1.8s ease-in-out infinite;">🔒</span>' +
                 '<span style="font-size:13px;color:#f1c40f;margin-top:8px;font-weight:700;letter-spacing:0.5px;">YouTube tasks coming soon</span>';
             section.appendChild(overlay);
-            console.log('[YT-Lock] Lock overlay applied ✓');
         }
     }
 
-    // Retry until CONFIG is available (handles any script-load race)
     function applyYtLockStateWhenReady(attempts) {
         attempts = attempts || 0;
         if (typeof CONFIG !== 'undefined' && document.getElementById('yt-tasks-section')) {
             applyYtLockState();
             return;
         }
-        if (attempts > 30) {
-            console.error('[YT-Lock] Gave up waiting for CONFIG / DOM after 3s');
-            return;
-        }
+        if (attempts > 30) return;
         setTimeout(function() { applyYtLockStateWhenReady(attempts + 1); }, 100);
     }
 
     document.addEventListener('DOMContentLoaded', function() {
-        // Set admin Telegram display once config.js is loaded
         setTimeout(function() {
             const el = document.getElementById('admin-tg-username');
             if (el && typeof CONFIG !== 'undefined' && CONFIG.ADMIN_TELEGRAM) {
@@ -860,11 +837,7 @@
         loadPromoTasks();
     });
 
-    // Re-apply whenever user opens the Tasks tab (in case of any DOM rerender)
     (function hookTabSwitchForLock() {
-        const origSwitch = window.switchTab;
-        // switchTab is defined in script.js, which loads after this inline block.
-        // Hook lazily on first call.
         const tryHook = setInterval(function() {
             if (typeof window.switchTab === 'function' && !window._ytLockHooked) {
                 const original = window.switchTab;
@@ -884,8 +857,8 @@
     </script>
 
     <!-- Cache-bust query param: bump v=N every time you deploy a change -->
-    <script src="config.js?v=3"></script>
-    <script src="script.js?v=5"></script>
+    <script src="config.js?v=4"></script>
+    <script src="script.js?v=6"></script>
 
 </body>
 </html>
