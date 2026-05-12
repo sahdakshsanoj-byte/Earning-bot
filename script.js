@@ -251,20 +251,58 @@ async function claimDaily() {
     const btn = document.getElementById('daily-btn');
     if (btn) { btn.disabled = true; btn.innerText = '📺 Watch Ad...'; }
 
-    try {
-        await requireAdWatch();
-    } catch (e) {
-        showToast('📺 Watch the full ad to claim your daily bonus!', 'error');
-        if (btn) { btn.disabled = false; btn.innerText = 'Claim Now'; }
-        _pendingRequests.delete('claimDaily');
-        return;
+    // ── Step 1: Get a backend token (proof-of-ad-intent) ──────────────────
+    // Token is issued only if user hasn't already claimed today.
+    // It expires in 10 minutes — so user must watch ad and claim promptly.
+    let claimToken = null;
+    if (CONFIG.CLAIM_AD_ENABLED) {
+        try {
+            const tokenRes  = await fetchWithRetry(
+                `${CONFIG.API_BASE_URL}/daily_claim_token/${userId}`,
+                { method: 'POST' }
+            );
+            const tokenData = await tokenRes.json();
+            if (tokenData.status !== 'success' || !tokenData.token) {
+                // Backend said "already claimed today" or another issue
+                showToast(tokenData.message || 'Could not start ad. Try again.', 'error');
+                const remSecs = tokenData.data?.remaining_seconds;
+                if (remSecs && remSecs > 0) startDailyCountdown(remSecs);
+                else if (btn) { btn.disabled = false; btn.innerText = 'Claim Now'; }
+                _pendingRequests.delete('claimDaily');
+                return;
+            }
+            claimToken = tokenData.token;
+        } catch (e) {
+            showToast('⚠️ Server error. Please retry.', 'error');
+            if (btn) { btn.disabled = false; btn.innerText = 'Claim Now'; }
+            _pendingRequests.delete('claimDaily');
+            return;
+        }
+
+        // ── Step 2: Show rewarded ad — user must watch fully ─────────────
+        try {
+            await requireAdWatch();
+        } catch (e) {
+            showToast('📺 Watch the full ad to claim your daily bonus!', 'error');
+            if (btn) { btn.disabled = false; btn.innerText = 'Claim Now'; }
+            _pendingRequests.delete('claimDaily');
+            return;
+        }
     }
 
+    // ── Step 3: Claim coins — pass token so backend can verify ad was watched
     if (btn) btn.innerText = 'Claiming...';
     try {
+        const body = claimToken
+            ? JSON.stringify({ token: claimToken })
+            : undefined;
         const res  = await fetchWithRetry(
             `${CONFIG.API_BASE_URL}/claim_daily/${userId}`,
-            { method: 'POST' }
+            {
+                method:  'POST',
+                headers: claimToken ? { 'Content-Type': 'application/json' } : {},
+                body,
+            }
         );
         const data = await res.json();
 
