@@ -815,6 +815,94 @@ def get_leaderboard_api():
     return jsonify({"status": "success", "leaderboard": get_leaderboard_cached()})
 
 
+# ── DAILY CLAIM AD TOKEN ──────────────────────────────────────────────────
+# Frontend calls this FIRST (before showing the ad).
+# Returns a short-lived token. claim_daily_api consumes it.
+# Token TTL = 10 minutes. Only one active token per user at a time.
+
+DAILY_CLAIM_TOKEN_TTL = 600  # 10 minutes
+
+
+@app.route("/daily_claim_token/<int:user_id>", methods=["POST"])
+def daily_claim_token_api(user_id: int):
+    if user_id <= 0:
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+
+    if is_rate_limited(f"dct_{user_id}", 15):
+        return jsonify({"status": "error", "message": "Please wait a moment before trying again."}), 429
+
+    try:
+        user = users_col.find_one({"user_id": user_id}, {"blocked": 1, "last_claim_ts": 1})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
+
+        # If already claimed today, don't issue a token — return remaining time
+        now   = datetime.utcnow()
+        today = str(date.today())
+        last_ts = user.get("last_claim_ts", "")
+        if last_ts:
+            try:
+                last_dt = datetime.fromisoformat(last_ts)
+                if last_dt.date().isoformat() == today:
+                    next_claim_dt = last_dt + timedelta(hours=24)
+                    remaining     = next_claim_dt - now
+                    total_secs    = max(0, int(remaining.total_seconds()))
+                    h = total_secs // 3600
+                    m = (total_secs % 3600) // 60
+                    s = total_secs % 60
+                    return jsonify({
+                        "status":  "error",
+                        "message": f"Already claimed today! Come back in {h}h {m}m {s}s.",
+                        "data":    {
+                            "remaining_seconds": total_secs,
+                            "next_claim_utc":    next_claim_dt.isoformat(),
+                        },
+                    }), 400
+            except ValueError:
+                pass
+
+        # Reuse any existing unexpired token for this user
+        existing_key = f"dct_active_{user_id}"
+        existing     = ad_reward_tokens_col.find_one({"user_id": user_id, "source": "daily_claim"})
+        if existing and existing.get("expires_at") and existing["expires_at"] > now:
+            # Rehash and return same raw token if we stored it (we store hash only)
+            # Can't recover raw token — issue a fresh one and replace old
+            ad_reward_tokens_col.delete_one({"user_id": user_id, "source": "daily_claim"})
+
+        raw_token  = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        expires_at = now + timedelta(seconds=DAILY_CLAIM_TOKEN_TTL)
+
+        # Remove any stale tokens for this user first
+        ad_reward_tokens_col.delete_many({"user_id": user_id, "source": "daily_claim"})
+
+        ad_reward_tokens_col.insert_one({
+            "_id":        token_hash,
+            "user_id":    user_id,
+            "source":     "daily_claim",
+            "created_at": now,
+            "expires_at": expires_at,
+        })
+
+        logger.debug("Daily claim token issued for user %s", user_id)
+        return jsonify({
+            "status":     "success",
+            "token":      raw_token,
+            "expires_in": DAILY_CLAIM_TOKEN_TTL,
+        }), 200
+
+    except Exception as exc:
+        logger.error("daily_claim_token error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
+
+
+# ── CLAIM DAILY BONUS ─────────────────────────────────────────────────────
+# If CLAIM_AD_ENABLED is on (frontend), a valid token must be sent.
+# If token field is absent (legacy / CLAIM_AD_ENABLED=false), we skip
+# token check so the feature degrades gracefully.
+
 @app.route("/claim_daily/<int:user_id>", methods=["POST"])
 def claim_daily_api(user_id: int):
     if is_rate_limited(f"claim_{user_id}", 60):
@@ -825,6 +913,31 @@ def claim_daily_api(user_id: int):
             return jsonify({"status": "error", "message": "User not found."}), 404
         if user.get("blocked"):
             return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
+
+        # ── Token verification (ad gate) ──────────────────────────────────
+        # Frontend sends {"token": "..."} only when CLAIM_AD_ENABLED is true.
+        # If the token field is present, we MUST verify it.
+        # If it's absent entirely, we allow claim (CLAIM_AD_ENABLED = false path).
+        data = request.get_json(silent=True) or {}
+        claim_token_raw = data.get("token", "").strip()
+
+        if claim_token_raw:
+            token_hash = hashlib.sha256(claim_token_raw.encode()).hexdigest()
+            token_doc  = ad_reward_tokens_col.find_one_and_delete({
+                "_id":    token_hash,
+                "user_id": user_id,
+                "source":  "daily_claim",
+            })
+            if not token_doc:
+                return jsonify({
+                    "status":  "error",
+                    "message": "Invalid or already used token. Please watch the ad again.",
+                }), 403
+            if token_doc.get("expires_at") and token_doc["expires_at"] < datetime.utcnow():
+                return jsonify({
+                    "status":  "error",
+                    "message": "Ad session expired. Please try again.",
+                }), 403
 
         now   = datetime.utcnow()
         today = str(date.today())
