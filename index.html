@@ -329,9 +329,61 @@
                 style="margin-bottom:10px;"
                 oninput="this.value = this.value.replace(/[^0-9]/g, '')">
 
-            <input type="text" id="upi-id" placeholder="Enter UPI ID (name@upi)" style="margin-bottom:10px;">
+            <!-- ── Withdrawal Method Selector ── -->
+            <div style="display:flex; gap:8px; margin-bottom:14px;">
+                <button id="method-btn-upi" onclick="selectWithdrawMethod('upi')"
+                    style="flex:1; padding:9px 4px; border-radius:10px; border:2px solid #2ecc71;
+                           background:#0d2318; color:#2ecc71; font-size:12px; font-weight:700;
+                           cursor:pointer; transition:all 0.2s;">
+                    🏦 UPI
+                </button>
+                <button id="method-btn-usdt" onclick="selectWithdrawMethod('usdt')"
+                    style="flex:1; padding:9px 4px; border-radius:10px; border:2px solid #334155;
+                           background:#0f2027; color:#94a3b8; font-size:12px; font-weight:700;
+                           cursor:pointer; transition:all 0.2s;">
+                    💎 USDT
+                </button>
+                <button id="method-btn-google" onclick="selectWithdrawMethod('google')"
+                    style="flex:1; padding:9px 4px; border-radius:10px; border:2px solid #334155;
+                           background:#0f2027; color:#94a3b8; font-size:12px; font-weight:700;
+                           cursor:pointer; transition:all 0.2s;">
+                    🎁 Google
+                </button>
+            </div>
 
-            <p style="font-size:11px; color:#64748b; margin-bottom:10px; margin-top:-6px;">
+            <!-- UPI Input -->
+            <div id="method-input-upi">
+                <input type="text" id="upi-id" placeholder="Enter UPI ID (name@upi)"
+                    style="margin-bottom:4px;">
+                <p style="font-size:11px; color:#64748b; margin-bottom:12px;">
+                    Example: yourname@paytm, name@okicici
+                </p>
+            </div>
+
+            <!-- USDT TRC20 Input -->
+            <div id="method-input-usdt" style="display:none;">
+                <input type="text" id="usdt-address" placeholder="Enter USDT TRC20 wallet address"
+                    style="margin-bottom:4px;" maxlength="34">
+                <p style="font-size:11px; color:#64748b; margin-bottom:12px;">
+                    ⚠️ TRC20 network only. Address starts with T, 34 characters.
+                </p>
+            </div>
+
+            <!-- Google Play Input -->
+            <div id="method-input-google" style="display:none;">
+                <div style="background:#1e293b; border-radius:12px; padding:14px; margin-bottom:12px;
+                            border:1px solid #2ecc7133; text-align:center;">
+                    <div style="font-size:22px; margin-bottom:6px;">🎁</div>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0; font-weight:600;">
+                        Google Play Gift Card
+                    </p>
+                    <p style="font-size:11px; color:#94a3b8; margin:0;">
+                        Code will be sent to you via Telegram after admin approval.
+                    </p>
+                </div>
+            </div>
+
+            <p style="font-size:11px; color:#64748b; margin-bottom:10px;">
                 ⏳ 1 withdrawal request allowed per day.
             </p>
 
