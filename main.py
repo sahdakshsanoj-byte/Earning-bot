@@ -1050,11 +1050,28 @@ def withdraw_api():
     if not data:
         return jsonify({"status": "error", "message": "No data received."}), 400
 
-    user_id_raw       = data.get("user_id")
-    upi_id            = sanitize_text(data.get("upi_id", ""))
-    requested_amount  = data.get("amount")
+    user_id_raw      = data.get("user_id")
+    requested_amount = data.get("amount")
 
-    if not user_id_raw or not upi_id or requested_amount is None:
+    # ── Method + payment address ───────────────────────────────────────────
+    # Supported methods: "upi" | "usdt_trc20" | "usdt" | "google_redeem" | "google"
+    # Backward compat: if method absent, check for legacy upi_id field
+    method_raw      = sanitize_text(data.get("method", "upi")).lower().strip()
+    payment_address = sanitize_text(data.get("payment_address", "") or data.get("upi_id", ""), max_length=256)
+
+    # Normalise method aliases
+    METHOD_ALIASES = {
+        "upi":           "upi",
+        "usdt":          "usdt_trc20",
+        "usdt_trc20":    "usdt_trc20",
+        "google":        "google_redeem",
+        "google_redeem": "google_redeem",
+    }
+    method = METHOD_ALIASES.get(method_raw)
+    if not method:
+        return jsonify({"status": "error", "message": "Invalid withdrawal method."}), 400
+
+    if not user_id_raw or requested_amount is None:
         return jsonify({"status": "error", "message": "Missing required fields."}), 400
 
     try:
@@ -1070,16 +1087,26 @@ def withdraw_api():
     if requested_amount > MAX_WITHDRAW:
         return jsonify({"status": "error", "message": "Amount exceeds maximum limit."}), 400
 
-    upi_pattern = re.compile(r"^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$")
-    if not upi_pattern.match(upi_id):
-        return jsonify({"status": "error", "message": "Invalid UPI ID format. (Example: name@upi)"}), 400
+    # ── Method-specific validation ─────────────────────────────────────────
+    if method == "upi":
+        upi_pattern = re.compile(r"^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$")
+        if not payment_address or not upi_pattern.match(payment_address):
+            return jsonify({"status": "error", "message": "Invalid UPI ID format. (Example: name@upi)"}), 400
+
+    elif method == "usdt_trc20":
+        trc20_pattern = re.compile(r"^T[A-Za-z0-9]{33}$")
+        if not payment_address or not trc20_pattern.match(payment_address):
+            return jsonify({"status": "error", "message": "Invalid TRC20 address. Must start with T and be 34 characters."}), 400
+
+    elif method == "google_redeem":
+        payment_address = "via_telegram"
 
     if is_rate_limited(f"withdraw_{user_id}", WITHDRAW_COOLDOWN):
         return jsonify(
             {"status": "error", "message": "One withdrawal request allowed per day. Please try again tomorrow."}
         ), 429
 
-    # ── Referral check — bypass karo jab REFERRAL_ACTIVE = False ──
+    # ── Referral check — bypass karo jab REFERRAL_ACTIVE = False ──────────
     if REFERRAL_ACTIVE:
         _ref_user = users_col.find_one({"user_id": user_id}, {"referral_count": 1, "_id": 0})
         ref_count = _ref_user.get("referral_count", 0) if _ref_user else 0
@@ -1103,23 +1130,40 @@ def withdraw_api():
             {"status": "error", "message": f"Insufficient balance. You have {user.get('coins', 0)} coins."}
         ), 400
 
-    inr_value  = requested_amount * 0.02
+    inr_value = requested_amount * 0.02
+
+    # ── Method display labels for admin notification ───────────────────────
+    METHOD_LABELS = {
+        "upi":          "🏦 UPI",
+        "usdt_trc20":   "💎 USDT TRC20",
+        "google_redeem":"🎁 Google Play",
+    }
+    method_label = METHOD_LABELS.get(method, method)
+
+    now_utc = datetime.utcnow()
+    IST_OFFSET = timedelta(hours=5, minutes=30)
+    now_ist = now_utc + IST_OFFSET
     withdrawal = {
-        "user_id":   user_id,
-        "upi_id":    upi_id,
-        "amount":    requested_amount,
-        "inr_value": inr_value,
-        "status":    "Pending \u23f3",
-        "timestamp": datetime.utcnow(),
-        "date":      datetime.utcnow().strftime("%d %b %Y, %I:%M %p UTC"),
+        "user_id":         user_id,
+        "method":          method,
+        "payment_address": payment_address,
+        "upi_id":          payment_address,      # backward compat for admin panel
+        "amount":          requested_amount,
+        "inr_value":       inr_value,
+        "status":          "Pending \u23f3",
+        "timestamp":       now_utc,
+        "date":            now_ist.strftime("%d %b %Y, %I:%M %p IST"),
     }
     withdrawals_col.insert_one(withdrawal)
+
+    addr_display = payment_address if payment_address != "via_telegram" else "Telegram DM"
     try:
         bot.send_message(
             ADMIN_ID,
             f"\U0001f4b8 *New Withdrawal Request*\n\n"
             f"User ID: `{user_id}`\n"
-            f"UPI ID: `{upi_id}`\n"
+            f"Method: {method_label}\n"
+            f"Address: `{addr_display}`\n"
             f"Requested: `{requested_amount}` coins (₹{inr_value:.2f})\n"
             f"Remaining Balance: `{result.get('coins', 0)}` coins\n"
             f"Date: {withdrawal['date']}",
