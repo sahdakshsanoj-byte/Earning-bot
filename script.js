@@ -396,10 +396,67 @@ async function fetchLiveData() {
             if (typeof loadPromoTasks === 'function') loadPromoTasks();
 
             loadLotteryStatus();
+
+            // ── Winner popup — sirf ek baar dikhao ──────────────────────────
+            if (data.pending_winner_popup) {
+                showWinnerPopup(data.pending_winner_prize || 0);
+            }
         }
     } catch (err) {
         showToast("⚠️ Connection error. Retrying...", "error");
         setTimeout(fetchLiveData, 15000);
+    }
+}
+
+// ============================================================
+// LOTTERY WINNER CELEBRATION POPUP
+// ============================================================
+
+function _spawnConfetti() {
+    const colors = ['#f1c40f','#e74c3c','#2ecc71','#3b82f6','#a855f7','#f97316','#ec4899','#fff'];
+    const count  = 60;
+    for (let i = 0; i < count; i++) {
+        const el = document.createElement('div');
+        el.className = 'confetti-piece';
+        el.style.cssText = [
+            `left: ${Math.random() * 100}vw`,
+            `background: ${colors[Math.floor(Math.random() * colors.length)]}`,
+            `width: ${6 + Math.random() * 10}px`,
+            `height: ${6 + Math.random() * 10}px`,
+            `border-radius: ${Math.random() > 0.5 ? '50%' : '2px'}`,
+            `animation-duration: ${2.5 + Math.random() * 2.5}s`,
+            `animation-delay: ${Math.random() * 1.2}s`,
+        ].join(';');
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 6000);
+    }
+}
+
+function showWinnerPopup(prize) {
+    const overlay = document.getElementById('winner-popup-overlay');
+    const prizeEl = document.getElementById('winner-prize-coins');
+    if (!overlay) return;
+
+    if (prizeEl) prizeEl.innerText = `+${prize} 🪙`;
+    overlay.style.display = 'flex';
+
+    // Confetti burst
+    _spawnConfetti();
+    setTimeout(_spawnConfetti, 900);
+
+    // Ack backend — flag clear karo (fire-and-forget)
+    if (userId) {
+        fetchWithRetry(`${CONFIG.API_BASE_URL}/ack_winner_popup/${userId}`, { method: 'POST' })
+            .catch(() => {});
+    }
+}
+
+function closeWinnerPopup() {
+    const overlay = document.getElementById('winner-popup-overlay');
+    if (overlay) {
+        overlay.style.opacity = '0';
+        overlay.style.transition = 'opacity 0.35s';
+        setTimeout(() => { overlay.style.display = 'none'; overlay.style.opacity = ''; }, 360);
     }
 }
 
