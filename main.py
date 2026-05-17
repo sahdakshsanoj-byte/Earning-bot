@@ -804,10 +804,22 @@ def get_user_data_api(user_id: int):
             "channel_claims":       user.get("channel_claims", {}),
             "promo_task_completions": promo_task_completions,
             "allcomplete_bonus_date": user.get("allcomplete_bonus_date", ""),
+            "pending_winner_popup": user.get("pending_winner_popup", False),
+            "pending_winner_prize": user.get("pending_winner_prize", 0),
         })
     except Exception as exc:
         logger.error("get_user error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
+
+
+@app.route("/ack_winner_popup/<int:user_id>", methods=["POST"])
+def ack_winner_popup(user_id: int):
+    """Frontend calls this once the winner popup is shown — clears the flag."""
+    users_col.update_one(
+        {"user_id": user_id},
+        {"$set": {"pending_winner_popup": False, "pending_winner_prize": 0}},
+    )
+    return jsonify({"status": "ok"})
 
 
 @app.route("/get_leaderboard")
@@ -1157,11 +1169,22 @@ def withdraw_api():
     withdrawals_col.insert_one(withdrawal)
 
     addr_display = payment_address if payment_address != "via_telegram" else "Telegram DM"
+
+    # Google Play requests mein username line extra add karo
+    tg_username   = result.get("username") or ""
+    username_line = ""
+    if method == "google_redeem":
+        if tg_username:
+            username_line = f"Username: @{tg_username}\n"
+        else:
+            username_line = "Username: _(not set)_\n"
+
     try:
         bot.send_message(
             ADMIN_ID,
             f"\U0001f4b8 *New Withdrawal Request*\n\n"
             f"User ID: `{user_id}`\n"
+            f"{username_line}"
             f"Method: {method_label}\n"
             f"Address: `{addr_display}`\n"
             f"Requested: `{requested_amount}` coins (₹{inr_value:.2f})\n"
@@ -2315,8 +2338,17 @@ def _perform_auto_draw(rid: str, notify_chat_id: int | None = None) -> dict:
     if not locked:
         return {"success": False, "message": "Round was just drawn by another process."}
 
-    # Credit prize to winner
-    users_col.update_one({"user_id": winner_id}, {"$inc": {"coins": prize}})
+    # Credit prize to winner + set popup flag (clears when user opens the Mini App)
+    users_col.update_one(
+        {"user_id": winner_id},
+        {
+            "$inc": {"coins": prize},
+            "$set": {
+                "pending_winner_popup": True,
+                "pending_winner_prize": prize,
+            },
+        },
+    )
     logger.info("Lottery drawn: round=%s winner=%s prize=%s", rid, winner_id, prize)
 
     # ── Notify participants ──────────────────────────────────────────────────
