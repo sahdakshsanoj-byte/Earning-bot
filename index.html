@@ -20,7 +20,8 @@
             background: rgba(15,23,42,0.80);
             border-radius: 10px;
             z-index: 10;
-            pointer-events: none;
+            pointer-events: all;
+            cursor: default;
         }
         .lock-icon {
             font-size: 28px;
@@ -35,8 +36,9 @@
             letter-spacing: 0.5px;
         }
         @keyframes lock-pulse {
-            0%,100% { transform: scale(1);   opacity: 1; }
-            50%      { transform: scale(1.2); opacity: 0.5; }
+            0%,100% { transform: scale(1) rotate(0deg);   }
+            25%      { transform: scale(1.12) rotate(-8deg); }
+            75%      { transform: scale(1.12) rotate(8deg);  }
         }
 
         /* ── Lottery Lock Overlay ── */
@@ -51,7 +53,8 @@
             border-radius: 16px;
             z-index: 10;
             backdrop-filter: blur(3px);
-            pointer-events: none;
+            pointer-events: all;
+            cursor: default;
         }
         .lottery-lock-icon {
             font-size: 36px;
@@ -648,7 +651,7 @@
             </div>
             <button class="btn" style="background:linear-gradient(135deg,#0088cc,#006aaa); font-weight:700;"
                 onclick="openAdminTelegram()">
-                💬 Message support on Telegram
+                💬 Message Admin on Telegram
             </button>
         </div>
 
