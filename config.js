@@ -33,7 +33,7 @@ const CONFIG = {
     //   false → Referral tab 🔒 locked dikhega (coming soon)
     //           Withdrawal mein referral condition "Not Required ✅" ho jaayegi
     // ──────────────────────────────────────────────────────────
-    REFERRAL_ACTIVE: false,
+    REFERRAL_ACTIVE: true,
 
     // ──────────────────────────────────────────────────────────
     // CLAIM AD GATE
