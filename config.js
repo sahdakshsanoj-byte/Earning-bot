@@ -102,7 +102,7 @@ const CONFIG = {
     SPONSORS: {
 
         slot1: {
-            active: false,
+            active: true,
             icon:   "💼",
             name:   "Sponsor Slot 1",
             desc:   "Contact admin to advertise here",
@@ -112,8 +112,8 @@ const CONFIG = {
         },
 
         slot2: {
-            active: false,
-            icon:   "📢",
+            active: true,
+            icon:   "👀",
             name:   "Sponsor Channel",
             desc:   "Join the channel & earn instantly",
             link:   "https://t.me/Cdotchat",
@@ -122,8 +122,8 @@ const CONFIG = {
         },
 
         slot3: {
-            active: false,
-            icon:   "🌟",
+            active: true,
+            icon:   "☎️",
             name:   "Code Verification Partner",
             desc:   "Visit the channel & enter the code to earn",
             link:   "https://t.me/cdoternoffical",
