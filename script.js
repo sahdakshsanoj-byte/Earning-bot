@@ -1485,8 +1485,8 @@ function switchTab(tabId, el) {
     if (tabId === 'leaderboard') refreshLeaderboard();
     if (tabId === 'history')     loadHistory();
 
-    // Re-apply referral lock jab withdraw tab khule
-    if (tabId === 'withdraw') setTimeout(applyReferralLock, 50);
+    // Re-apply referral lock jab rewards tab khule
+    if (tabId === 'rewards') setTimeout(applyReferralLock, 50);
 }
 
 // ============================================================
@@ -1624,7 +1624,7 @@ function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
 // REFERRAL LOCK — Withdraw tab pe lock jab refs < 5
 // ============================================================
 function applyReferralLock() {
-    const withdrawTab = document.getElementById('withdraw');
+    const withdrawTab = document.getElementById('withdraw-card');
     const refBox      = document.getElementById('ref-requirement-box');
     const refText     = document.getElementById('ref-progress-text');
     const refBarWrap  = document.getElementById('ref-bar-wrap');
@@ -1642,7 +1642,7 @@ function applyReferralLock() {
             const ov = document.createElement('div');
             ov.className  = 'refer-lock-overlay';
             ov.style.cssText = [
-                'position:fixed',
+                'position:absolute',
                 'inset:0',
                 'display:flex',
                 'flex-direction:column',
@@ -1650,6 +1650,7 @@ function applyReferralLock() {
                 'justify-content:center',
                 'background:rgba(10,15,30,0.93)',
                 'backdrop-filter:blur(6px)',
+                'border-radius:16px',
                 'z-index:9999',
                 'pointer-events:all',
                 'cursor:default',
@@ -1707,7 +1708,7 @@ function applyReferralLock() {
 }
 
 function _removeWithdrawLock(withdrawTab) {
-    if (!withdrawTab) withdrawTab = document.getElementById('withdraw');
+    if (!withdrawTab) withdrawTab = document.getElementById('withdraw-card');
     if (withdrawTab) {
         const stale = withdrawTab.querySelector('.refer-lock-overlay');
         if (stale) stale.remove();
