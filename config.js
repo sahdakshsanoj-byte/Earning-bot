@@ -24,7 +24,7 @@ const CONFIG = {
     //   This config switch is the FRONTEND lock — set to false to
     //   hide/lock the lottery without touching the backend at all.
     // ──────────────────────────────────────────────────────────
-    LOTTERY_ACTIVE: false,
+    LOTTERY_ACTIVE: true,
 
     // ──────────────────────────────────────────────────────────
     // REFERRAL LOCK
@@ -33,7 +33,7 @@ const CONFIG = {
     //   false → Referral tab 🔒 locked dikhega (coming soon)
     //           Withdrawal mein referral condition "Not Required ✅" ho jaayegi
     // ──────────────────────────────────────────────────────────
-    REFERRAL_ACTIVE: false,
+    REFERRAL_ACTIVE: true,
 
     // ──────────────────────────────────────────────────────────
     // CLAIM AD GATE
