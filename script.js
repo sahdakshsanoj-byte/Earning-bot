@@ -1509,4 +1509,3 @@ window.addEventListener('DOMContentLoaded', () => {
     setInterval(fetchLiveData,      300000);  // data refresh every 5 min
     setInterval(refreshLeaderboard, 600000);  // leaderboard refresh every 10 min
 });
-l
