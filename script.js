@@ -1629,11 +1629,113 @@ function applyReferralLock() {
     const refText     = document.getElementById('ref-progress-text');
     const refBarWrap  = document.getElementById('ref-bar-wrap');
     const helpRef     = document.getElementById('help-ref-rule');
+    const referTab    = document.getElementById('refer'); // ← YEH NEW LINE HAI
 
     const refCount    = getRefCount(userData.referrals);
     const refsMet     = refCount >= 5;
     const lockActive  = CONFIG.REFERRAL_ACTIVE !== false && !refsMet;
 
+    // ── Refer TAB lock — REFERRAL_ACTIVE: false hone par tab ko lock karo ──
+    if (CONFIG.REFERRAL_ACTIVE === false) {
+        if (referTab && !referTab.querySelector('.refer-tab-lock-overlay')) {
+            const ov = document.createElement('div');
+            ov.className = 'refer-tab-lock-overlay';
+            ov.style.cssText = [
+                'position:absolute',
+                'inset:0',
+                'display:flex',
+                'flex-direction:column',
+                'align-items:center',
+                'justify-content:center',
+                'background:rgba(10,15,30,0.90)',
+                'backdrop-filter:blur(6px)',
+                'z-index:9999',
+                'pointer-events:all',
+                'cursor:default',
+            ].join(';');
+            ov.innerHTML =
+                '<span style="font-size:52px;animation:lock-pulse 1.8s ease-in-out infinite;display:block;">🔒</span>' +
+                '<span style="font-size:16px;color:#f1c40f;font-weight:800;margin-top:14px;letter-spacing:0.5px;">Referral Coming Soon!</span>' +
+                '<span style="font-size:13px;color:#94a3b8;margin-top:6px;">Stay tuned for updates</span>';
+            ov.addEventListener('click', e => e.stopPropagation());
+            referTab.appendChild(ov);
+        }
+    } else {
+        // Agar REFERRAL_ACTIVE true ho gaya toh refer tab ka lock hata do
+        if (referTab) {
+            const stale = referTab.querySelector('.refer-tab-lock-overlay');
+            if (stale) stale.remove();
+        }
+    }
+
+    // ── CASE 1: Lock lagao — refs poore nahi hain ──────────────────────────
+    if (lockActive) {
+
+        if (withdrawTab && !withdrawTab.querySelector('.refer-lock-overlay')) {
+            const ov = document.createElement('div');
+            ov.className  = 'refer-lock-overlay';
+            ov.style.cssText = [
+                'position:absolute',
+                'inset:0',
+                'display:flex',
+                'flex-direction:column',
+                'align-items:center',
+                'justify-content:center',
+                'background:rgba(10,15,30,0.93)',
+                'backdrop-filter:blur(6px)',
+                'border-radius:16px',
+                'z-index:9999',
+                'pointer-events:all',
+                'cursor:default',
+            ].join(';');
+            ov.innerHTML =
+                '<span style="font-size:52px;animation:lock-pulse 1.8s ease-in-out infinite;display:block;">🔒</span>' +
+                `<span style="font-size:16px;color:#f1c40f;font-weight:800;margin-top:14px;letter-spacing:0.5px;">5 Referrals Required</span>` +
+                `<span style="font-size:13px;color:#94a3b8;margin-top:6px;">You have <b style="color:#e2e8f0;">${refCount}/5</b> referrals</span>` +
+                `<span style="font-size:12px;color:#64748b;margin-top:4px;">Invite ${5 - refCount} more friend${5 - refCount > 1 ? 's' : ''} to unlock withdrawal</span>`;
+            ov.addEventListener('click', e => e.stopPropagation());
+            withdrawTab.appendChild(ov);
+        } else if (withdrawTab) {
+            const existing = withdrawTab.querySelector('.refer-lock-overlay');
+            if (existing) {
+                const spans = existing.querySelectorAll('span');
+                if (spans[1]) spans[1].innerHTML = `You have <b style="color:#e2e8f0;">${refCount}/5</b> referrals`;
+                if (spans[2]) spans[2].textContent = `Invite ${5 - refCount} more friend${5 - refCount > 1 ? 's' : ''} to unlock withdrawal`;
+            }
+        }
+
+        if (refBox) { refBox.style.borderColor = '#e74c3c'; refBox.style.opacity = '1'; }
+        if (refText) { refText.style.color = '#e74c3c'; }
+        if (helpRef) {
+            helpRef.innerHTML = '• Referral Requirement: <b style="color:#f1c40f;">5 Users</b>';
+        }
+
+    // ── CASE 2: REFERRAL_ACTIVE = false — bypass mode ──────────────────────
+    } else if (CONFIG.REFERRAL_ACTIVE === false) {
+
+        _removeWithdrawLock(withdrawTab);
+        if (refBox)  { refBox.style.borderColor = '#2ecc71'; refBox.style.opacity = '1'; }
+        if (refText) { refText.innerText = '✅ Not Required'; refText.style.color = '#2ecc71'; }
+        if (refBarWrap) {
+            refBarWrap.innerHTML =
+                '<div style="height:100%;background:linear-gradient(90deg,#2ecc71,#27ae60);' +
+                'border-radius:20px;width:100%;transition:width 0.5s;"></div>';
+        }
+        if (helpRef) {
+            helpRef.innerHTML = '• Referral Requirement: <b style="color:#2ecc71;">Not Required ✅</b>';
+        }
+
+    // ── CASE 3: Refs poore hain — lock hata do ─────────────────────────────
+    } else {
+
+        _removeWithdrawLock(withdrawTab);
+        if (refBox)  { refBox.style.borderColor = '#2ecc71'; refBox.style.opacity = '1'; }
+        if (refText) { refText.style.color = '#2ecc71'; }
+        if (helpRef) {
+            helpRef.innerHTML = '• Referral Requirement: <b style="color:#2ecc71;">Completed ✅</b>';
+        }
+    }
+}
     // ── CASE 1: Lock lagao — refs poore nahi hain ──────────────────────────
     if (lockActive) {
 
