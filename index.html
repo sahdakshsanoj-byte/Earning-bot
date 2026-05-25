@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-   <script src='//libtl.com/sdk.js' data-zone='10822310' data-sdk='show_10822310'></script> 
+   <script src='//libtl.com/sdk.js' data-zone='10822310' data-sdk='show_10822310'></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Daksh Grand Earn</title>
@@ -173,6 +173,60 @@
             text-align: center;
             margin-bottom: 10px;
         }
+
+        /* ── Spin Wheel Card ── */
+        .spin-segment-row {
+            display: flex;
+            justify-content: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin: 10px 0 6px;
+        }
+        .spin-segment {
+            background: rgba(241,196,15,0.10);
+            border: 1px solid rgba(241,196,15,0.30);
+            border-radius: 8px;
+            padding: 4px 10px;
+            font-size: 12px;
+            color: #f1c40f;
+            font-weight: 700;
+        }
+        .spin-segment.miss {
+            color: #64748b;
+            border-color: #334155;
+            background: rgba(51,65,85,0.3);
+        }
+
+        /* Spin result pop animation */
+        @keyframes spinResultPop {
+            from { opacity: 0; transform: scale(0.6) translateY(8px); }
+            to   { opacity: 1; transform: scale(1) translateY(0);     }
+        }
+
+        /* ── Mining Card ── */
+        .mining-progress-bar-wrap {
+            background: #1e293b;
+            border-radius: 20px;
+            height: 6px;
+            overflow: hidden;
+            margin-top: 6px;
+        }
+        .mining-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #f59e0b, #f97316);
+            border-radius: 20px;
+            width: 0%;
+            transition: width 0.5s;
+        }
+
+        /* Mining pulse glow when active */
+        @keyframes miningGlow {
+            0%,100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.0); }
+            50%      { box-shadow: 0 0 12px 4px rgba(245,158,11,0.3); }
+        }
+        .mining-active-glow {
+            animation: miningGlow 2s ease-in-out infinite;
+        }
     </style>
 </head>
 <body>
@@ -247,6 +301,134 @@
             </button>
         </div>
 
+        <!-- ══════════════════════════════════════════════════ -->
+        <!-- 🎡 SPIN WHEEL CARD                                 -->
+        <!-- ══════════════════════════════════════════════════ -->
+        <div class="card" id="spin-card"
+             style="background:linear-gradient(135deg,#1a0a2e,#2d1b4e,#1a0a2e);
+                    border:1px solid #a855f7; position:relative; overflow:hidden;">
+
+            <!-- Header row -->
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <h4 style="color:#d8b4fe; margin:0;">🎡 Spin Wheel</h4>
+                <span id="spin-count-badge"
+                      style="font-size:11px; background:rgba(168,85,247,0.15);
+                             border:1px solid #7c3aed; border-radius:20px;
+                             padding:2px 10px; color:#c4b5fd; white-space:nowrap;">
+                    0/5 used
+                </span>
+            </div>
+
+            <p style="font-size:12px; color:#94a3b8; margin-bottom:8px;">
+                Watch 1 ad per spin • 5 spins/day • Win up to <b style="color:#f1c40f;">100 coins!</b>
+            </p>
+
+            <!-- Prize segments preview -->
+            <div class="spin-segment-row">
+                <span class="spin-segment miss">😅 Miss</span>
+                <span class="spin-segment">5 🪙</span>
+                <span class="spin-segment">10 🪙</span>
+                <span class="spin-segment">15 🪙</span>
+                <span class="spin-segment">20 🪙</span>
+                <span class="spin-segment">30 🪙</span>
+                <span class="spin-segment" style="color:#22c55e; border-color:#22c55e;">50 🪙</span>
+                <span class="spin-segment" style="color:#f1c40f; border-color:#f1c40f; background:rgba(241,196,15,0.15);">💎 100 🪙</span>
+            </div>
+
+            <!-- Result text (shown briefly after spin) -->
+            <div id="spin-result"
+                 style="display:none; text-align:center; font-size:18px; font-weight:800;
+                        margin: 6px 0; padding:8px; border-radius:10px;
+                        background:rgba(255,255,255,0.06);">
+            </div>
+
+            <button
+                id="spin-btn"
+                class="btn"
+                onclick="doSpin()"
+                style="background:linear-gradient(135deg,#f1c40f,#f39c12);
+                       color:#000; font-weight:700; margin-top:8px;">
+                🎡 Watch Ad &amp; Spin (5 left)
+            </button>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════ -->
+        <!-- ⛏️ COIN MINING CARD                                -->
+        <!-- ══════════════════════════════════════════════════ -->
+        <div class="card" id="mining-card"
+             style="background:linear-gradient(135deg,#0f1a08,#1a2f10,#0f1a08);
+                    border:1px solid #f59e0b; position:relative; overflow:hidden;">
+
+            <!-- Header row -->
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <h4 style="color:#fcd34d; margin:0;">⛏️ Coin Mining</h4>
+                <span style="font-size:11px; background:rgba(245,158,11,0.12);
+                             border:1px solid #f59e0b; border-radius:20px;
+                             padding:2px 10px; color:#fcd34d; white-space:nowrap;">
+                    +10 🪙/hr
+                </span>
+            </div>
+
+            <p style="font-size:12px; color:#94a3b8; margin-bottom:6px;">
+                Watch <b style="color:#fcd34d;">2 ads</b> → mine for <b style="color:#fcd34d;">1 hour</b> → collect <b style="color:#fcd34d;">10 coins!</b>
+            </p>
+
+            <!-- Ads progress -->
+            <div id="mining-ads-progress"
+                 style="font-size:11px; color:#64748b; margin-bottom:6px; text-align:center;">
+                0/2 ads watched
+            </div>
+
+            <!-- Status label -->
+            <div id="mining-status-label"
+                 style="font-size:12px; color:#94a3b8; text-align:center;
+                        margin-bottom:8px; font-weight:500; min-height:18px;">
+                Watch 2 ads to start mining!
+            </div>
+
+            <!-- Reward info strip -->
+            <div style="display:flex; gap:10px; justify-content:center;
+                        background:rgba(245,158,11,0.08); border-radius:10px;
+                        padding:8px 12px; margin-bottom:10px;">
+                <div style="text-align:center;">
+                    <p style="font-size:10px; color:#92400e; margin:0;">⏱️ Duration</p>
+                    <p style="font-size:14px; font-weight:700; color:#fcd34d; margin:0;">1 Hour</p>
+                </div>
+                <div style="width:1px; background:#334155;"></div>
+                <div style="text-align:center;">
+                    <p style="font-size:10px; color:#92400e; margin:0;">🪙 Reward</p>
+                    <p style="font-size:14px; font-weight:700; color:#fcd34d; margin:0;">10 Coins</p>
+                </div>
+                <div style="width:1px; background:#334155;"></div>
+                <div style="text-align:center;">
+                    <p style="font-size:10px; color:#92400e; margin:0;">📺 Ads</p>
+                    <p style="font-size:14px; font-weight:700; color:#fcd34d; margin:0;">2 Ads</p>
+                </div>
+            </div>
+
+            <!-- Watch Ad button (step 1 & 2) -->
+            <button
+                id="mining-watch-ad-btn"
+                class="btn"
+                onclick="watchMiningAd()"
+                style="background:linear-gradient(135deg,#f59e0b,#d97706);
+                       color:#000; font-weight:700; margin-bottom:6px; display:none;">
+                📺 Watch Ad 0/2
+            </button>
+
+            <!-- Collect button (step 3 — shown only after 1hr) -->
+            <button
+                id="mining-collect-btn"
+                class="btn"
+                onclick="collectMining()"
+                style="background:linear-gradient(135deg,#22c55e,#16a34a);
+                       color:#fff; font-weight:700; display:none;"
+                disabled>
+                ⛏️ Collect 10 Coins!
+            </button>
+
+        </div>
+
         <!-- Promo Code -->
         <div class="card" style="display:flex; flex-direction:column; gap:10px;">
             <h4 style="margin-bottom:4px;">🎫 Promo Code</h4>
@@ -317,7 +499,6 @@
                 </div>
             </div>
 
-            <!-- ── Referral Requirement Box — IDs added for JS lock control ── -->
             <div id="ref-requirement-box" style="background:#0f172a; border-radius:10px; padding:12px; margin-bottom:14px; border:1px solid #334155;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <span style="font-size:13px; color:#94a3b8;">👥 Referrals Required</span>
@@ -332,7 +513,6 @@
                 style="margin-bottom:10px;"
                 oninput="this.value = this.value.replace(/[^0-9]/g, '')">
 
-            <!-- ── Withdrawal Method Selector ── -->
             <div style="display:flex; gap:8px; margin-bottom:14px;">
                 <button id="method-btn-upi" onclick="selectWithdrawMethod('upi')"
                     style="flex:1; padding:9px 4px; border-radius:10px; border:2px solid #2ecc71;
@@ -354,16 +534,11 @@
                 </button>
             </div>
 
-            <!-- UPI Input -->
             <div id="method-input-upi">
-                <input type="text" id="upi-id" placeholder="Enter UPI ID (name@upi)"
-                    style="margin-bottom:4px;">
-                <p style="font-size:11px; color:#64748b; margin-bottom:12px;">
-                    Example: yourname@paytm, name@okicici
-                </p>
+                <input type="text" id="upi-id" placeholder="Enter UPI ID (name@upi)" style="margin-bottom:4px;">
+                <p style="font-size:11px; color:#64748b; margin-bottom:12px;">Example: yourname@paytm, name@okicici</p>
             </div>
 
-            <!-- USDT TRC20 Input -->
             <div id="method-input-usdt" style="display:none;">
                 <input type="text" id="usdt-address" placeholder="Enter USDT TRC20 wallet address"
                     style="margin-bottom:4px;" maxlength="34">
@@ -372,24 +547,16 @@
                 </p>
             </div>
 
-            <!-- Google Play Input -->
             <div id="method-input-google" style="display:none;">
                 <div style="background:#1e293b; border-radius:12px; padding:14px; margin-bottom:12px;
                             border:1px solid #2ecc7133; text-align:center;">
                     <div style="font-size:22px; margin-bottom:6px;">🎁</div>
-                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0; font-weight:600;">
-                        Google Play Gift Card
-                    </p>
-                    <p style="font-size:11px; color:#94a3b8; margin:0;">
-                        Code will be sent to you via Telegram after admin approval.
-                    </p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0; font-weight:600;">Google Play Gift Card</p>
+                    <p style="font-size:11px; color:#94a3b8; margin:0;">Code will be sent via Telegram after admin approval.</p>
                 </div>
             </div>
 
-            <p style="font-size:11px; color:#64748b; margin-bottom:10px;">
-                ⏳ 1 withdrawal request allowed per day.
-            </p>
-
+            <p style="font-size:11px; color:#64748b; margin-bottom:10px;">⏳ 1 withdrawal request allowed per day.</p>
             <button class="btn" style="background:#e74c3c;" onclick="requestWithdraw()">Withdraw Now</button>
         </div>
 
@@ -569,7 +736,6 @@
     </div>
 
     <!-- ===================== REFER TAB ===================== -->
-    <!-- position:relative + overflow:hidden — referral lock overlay ke liye zaroori -->
     <div id="refer" class="tab-content" style="display:none; position:relative; overflow:hidden;">
         <div class="card balance-card" style="text-align:center;">
             <h4>Refer & Earn 🚀</h4>
@@ -617,13 +783,14 @@
                     <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• YouTube Task: <b style="color:#f1c40f;">+5 🪙</b> (max 3/day)</p>
                     <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Website Task: <b style="color:#f1c40f;">+3 🪙</b> (max 3/day)</p>
                     <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Telegram Channel: <b style="color:#f1c40f;">+5 🪙</b> (one-time each)</p>
-                    <p style="font-size:13px; color:#e2e8f0; margin:0;">• Promotion Task: <b style="color:#f1c40f;">+5 🪙</b> (one-time each)</p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Promotion Task: <b style="color:#f1c40f;">+5 🪙</b> (one-time each)</p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• 🎡 Spin Wheel: <b style="color:#f1c40f;">up to 100 🪙</b> (5 spins/day • 1 ad each)</p>
+                    <p style="font-size:13px; color:#e2e8f0; margin:0;">• ⛏️ Coin Mining: <b style="color:#f1c40f;">+10 🪙/hr</b> (2 ads to start • 1hr cooldown)</p>
                 </div>
 
                 <div style="background:rgba(46,204,113,0.08); border-left:3px solid #2ecc71; border-radius:0 8px 8px 0; padding:10px 14px; margin-bottom:10px;">
                     <p style="font-size:13px; font-weight:700; color:#2ecc71; margin:0 0 8px 0;">📤 Withdrawal Rules</p>
                     <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;">• Minimum Withdrawal: <b style="color:#f1c40f;">5000 🪙</b></p>
-                    <!-- id="help-ref-rule" — JS se update hoga jab REFERRAL_ACTIVE = false -->
                     <p style="font-size:13px; color:#e2e8f0; margin:0 0 4px 0;" id="help-ref-rule">• Referral Requirement: <b style="color:#f1c40f;">5 Users</b></p>
                     <p style="font-size:13px; color:#e2e8f0; margin:0;">• Cooldown: <b style="color:#f1c40f;">1 Request per 24 Hours</b></p>
                 </div>
@@ -668,8 +835,6 @@
             <div style="margin-top:6px; padding-top:14px; border-top:1px solid #1e293b;">
                 <p style="font-size:11px; color:#64748b; margin-bottom:12px;">Follow us on social media</p>
                 <div class="social-icons-row">
-
-                    <!-- Instagram -->
                     <a href="https://www.instagram.com/cdotern_bot?igsh=MTUwdGVqczhiZTNjdA==" target="_blank" class="social-icon-link">
                         <div class="social-icon-circle" style="background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
@@ -678,8 +843,6 @@
                         </div>
                         <span class="social-icon-label">Instagram</span>
                     </a>
-
-                    <!-- Facebook -->
                     <a href="https://www.facebook.com/share/1DyrqPf6Gw/" target="_blank" class="social-icon-link">
                         <div class="social-icon-circle" style="background:#1877f2;">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
@@ -688,7 +851,6 @@
                         </div>
                         <span class="social-icon-label">Facebook</span>
                     </a>
-
                 </div>
             </div>
         </div>
@@ -703,19 +865,19 @@
         display: flex; justify-content: space-around; align-items: center;
         padding: 8px 0 12px 0; z-index: 999;
     ">
-        <div class="nav-item active" onclick="switchTab('rewards', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 12px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
+        <div class="nav-item active" onclick="switchTab('rewards', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 8px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
             <span style="font-size:20px;">🏠</span><span>Home</span>
         </div>
-        <div class="nav-item" onclick="switchTab('tasks', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 12px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
+        <div class="nav-item" onclick="switchTab('tasks', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 8px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
             <span style="font-size:20px;">✅</span><span>Tasks</span>
         </div>
-        <div class="nav-item" onclick="switchTab('leaderboard', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 12px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
+        <div class="nav-item" onclick="switchTab('leaderboard', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 8px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
             <span style="font-size:20px;">🏆</span><span>Top</span>
         </div>
-        <div class="nav-item" onclick="switchTab('refer', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 12px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
+        <div class="nav-item" onclick="switchTab('refer', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 8px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
             <span style="font-size:20px;">👥</span><span>Refer</span>
         </div>
-        <div class="nav-item" onclick="switchTab('help', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 12px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
+        <div class="nav-item" onclick="switchTab('help', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px 8px;border-radius:10px;font-size:10px;color:#94a3b8;gap:2px;">
             <span style="font-size:20px;">🎧</span><span>Support</span>
         </div>
     </div>
@@ -775,7 +937,6 @@
     async function claimPromoTask(taskId) {
         const userId = window.USER_ID;
         if (!userId) return showToast('Please open via Telegram bot.');
-
         try {
             const resp = await fetch(CONFIG.API_BASE_URL + '/claim_promo_task', {
                 method: 'POST',
@@ -783,7 +944,6 @@
                 body: JSON.stringify({ user_id: userId, task_id: taskId }),
             });
             const data = await resp.json();
-
             if (data.status === 'success') {
                 showToast(data.message || 'Coins credited!');
                 if (!window._promoTaskCompletions) window._promoTaskCompletions = [];
@@ -1022,7 +1182,7 @@
 
     <!-- Cache-bust query param: bump v=N every time you deploy a change -->
     <script src="config.js?v=4"></script>
-    <script src="script.js?v=6"></script>
+    <script src="script.js?v=7"></script>
 
 </body>
 </html>
