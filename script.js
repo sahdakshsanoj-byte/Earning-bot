@@ -338,6 +338,8 @@ async function fetchLiveData() {
             updateAllBonusUI(data);
             if (typeof loadPromoTasks === 'function') loadPromoTasks();
             loadLotteryStatus();
+            loadSpinStatus();
+            loadMiningStatus();
 
             if (data.pending_winner_popup) showWinnerPopup(data.pending_winner_prize || 0);
         }
@@ -492,6 +494,377 @@ async function buyLotteryTicket() {
         showToast('⚠️ Network error. Try again.', 'error');
     } finally {
         loadLotteryStatus();
+    }
+}
+
+// ============================================================
+// FEATURE LOCK HELPERS — spin-lock-overlay / mining-lock-overlay
+// ============================================================
+function _applyFeatureLock(card, overlayClass, label) {
+    if (!card) return;
+    if (card.querySelector('.' + overlayClass)) return;
+    if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
+    card.style.overflow = 'hidden';
+    const ov = document.createElement('div');
+    ov.className = overlayClass;
+    ov.style.cssText =
+        'position:absolute;inset:0;display:flex;flex-direction:column;' +
+        'align-items:center;justify-content:center;' +
+        'background:rgba(15,23,42,0.88);border-radius:16px;' +
+        'z-index:10;backdrop-filter:blur(3px);pointer-events:all;cursor:default;';
+    ov.innerHTML =
+        '<span style="font-size:36px;animation:lock-pulse 1.6s ease-in-out infinite;display:block;">🔒</span>' +
+        '<span style="font-size:13px;color:#e8d5ff;margin-top:8px;font-weight:700;letter-spacing:0.5px;">' + label + '</span>' +
+        '<span style="font-size:11px;color:#94a3b8;margin-top:3px;">Coming Soon</span>';
+    card.appendChild(ov);
+}
+
+function _removeFeatureLock(card, overlayClass) {
+    if (!card) return;
+    const ov = card.querySelector('.' + overlayClass);
+    if (ov) ov.remove();
+}
+
+// ============================================================
+// 🎡 SPIN WHEEL
+// ============================================================
+async function loadSpinStatus() {
+    if (!userId) return;
+    const card = document.getElementById('spin-card');
+    if (!card) return;
+    try {
+        const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
+        const cfg    = await cfgRes.json();
+
+        if (!cfg.spin_active) {
+            _applyFeatureLock(card, 'spin-lock-overlay', '🎡 Spin Wheel Coming Soon!');
+            return;
+        }
+        _removeFeatureLock(card, 'spin-lock-overlay');
+
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_spin_status/${userId}`);
+        const data = await res.json();
+
+        const badgeEl  = document.getElementById('spin-count-badge');
+        const resultEl = document.getElementById('spin-result');
+        const btn      = document.getElementById('spin-btn');
+
+        if (badgeEl) badgeEl.innerText = `${data.spins_done || 0}/${data.spins_total || 5} used`;
+
+        if ((data.spins_left || 0) <= 0) {
+            if (btn) {
+                btn.disabled    = true;
+                btn.innerText   = '✅ All Spins Used Today!';
+                btn.style.background = '#334155';
+                btn.style.color      = '#94a3b8';
+            }
+        } else {
+            if (btn) {
+                btn.disabled    = false;
+                btn.innerText   = `🎡 Watch Ad & Spin (${data.spins_left} left)`;
+                btn.style.background = 'linear-gradient(135deg,#f1c40f,#f39c12)';
+                btn.style.color      = '#000';
+            }
+        }
+    } catch (e) { /* silent */ }
+}
+
+async function doSpin() {
+    if (!userId) return showToast('User ID not found!', 'error');
+    if (_pendingRequests.has('doSpin')) return;
+    _pendingRequests.add('doSpin');
+
+    const btn = document.getElementById('spin-btn');
+    if (btn) { btn.disabled = true; btn.innerText = '📺 Loading Ad...'; }
+
+    // Step 1: get token
+    let spinToken = null;
+    try {
+        const tokenRes  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/spin_token/${userId}`, { method: 'POST' });
+        const tokenData = await tokenRes.json();
+        if (tokenData.status !== 'success' || !tokenData.token) {
+            showToast(tokenData.message || 'Could not get spin token.', 'error');
+            _pendingRequests.delete('doSpin');
+            if (btn) { btn.disabled = false; btn.innerText = '🎡 Watch Ad & Spin'; }
+            return;
+        }
+        spinToken = tokenData.token;
+    } catch (e) {
+        showToast('⚠️ Server error. Please retry.', 'error');
+        _pendingRequests.delete('doSpin');
+        if (btn) { btn.disabled = false; btn.innerText = '🎡 Watch Ad & Spin'; }
+        return;
+    }
+
+    // Step 2: show ad
+    if (btn) btn.innerText = '📺 Watching Ad...';
+    try {
+        await requireAdWatch();
+    } catch (e) {
+        showToast('📺 Watch the full ad to spin!', 'error');
+        _pendingRequests.delete('doSpin');
+        if (btn) { btn.disabled = false; btn.innerText = '🎡 Watch Ad & Spin'; }
+        return;
+    }
+
+    // Step 3: do spin
+    if (btn) btn.innerText = '🎡 Spinning...';
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/do_spin/${userId}`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ token: spinToken }),
+        });
+        const data = await res.json();
+
+        if (data.status === 'success') {
+            // Animate result text
+            const resultEl = document.getElementById('spin-result');
+            if (resultEl) {
+                resultEl.innerText       = data.reward > 0 ? `🎉 +${data.reward} coins!` : '😅 Miss! Better luck next time!';
+                resultEl.style.color     = data.reward >= 50 ? '#f1c40f' : data.reward > 0 ? '#2ecc71' : '#94a3b8';
+                resultEl.style.display   = 'block';
+                resultEl.style.animation = 'none';
+                void resultEl.offsetWidth;
+                resultEl.style.animation = 'spinResultPop 0.45s cubic-bezier(.17,.67,.35,1.3) both';
+                setTimeout(() => { if (resultEl) resultEl.style.display = 'none'; }, 3800);
+            }
+            const toast = data.reward >= 50 ? 'success' : data.reward > 0 ? 'success' : 'error';
+            showToast(data.message || `Spin result: ${data.reward} coins`, toast);
+            fetchLiveData();
+        } else {
+            showToast(data.message || 'Spin failed.', 'error');
+        }
+    } catch (e) {
+        showToast('⚠️ Error! Please retry.', 'error');
+    } finally {
+        _pendingRequests.delete('doSpin');
+        loadSpinStatus();
+    }
+}
+
+// ============================================================
+// ⛏️ COIN MINING
+// ============================================================
+let _miningInterval = null;
+
+function _startMiningCountdown(seconds, labelEl, collectBtn, onDone) {
+    if (_miningInterval) clearInterval(_miningInterval);
+    let secs = Math.max(0, Math.floor(seconds));
+    const fmt = n => String(n).padStart(2, '0');
+
+    const tick = () => {
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        const s = secs % 60;
+        if (labelEl)    labelEl.innerText    = `⛏️ Mining... ${fmt(h)}:${fmt(m)}:${fmt(s)} remaining`;
+        if (collectBtn) collectBtn.innerText = `Collect in ${fmt(h)}:${fmt(m)}:${fmt(s)}`;
+    };
+    tick();
+
+    _miningInterval = setInterval(() => {
+        secs--;
+        if (secs <= 0) {
+            clearInterval(_miningInterval);
+            _miningInterval = null;
+            if (labelEl)    labelEl.innerText    = '✅ Mining Complete! Collect your reward!';
+            if (collectBtn) {
+                collectBtn.disabled  = false;
+                collectBtn.innerText = '⛏️ Collect 10 Coins!';
+                collectBtn.style.background = 'linear-gradient(135deg,#22c55e,#16a34a)';
+            }
+            if (typeof onDone === 'function') onDone();
+        } else {
+            tick();
+        }
+    }, 1000);
+}
+
+function _startCooldownCountdown(seconds, watchBtn, labelEl) {
+    if (_miningInterval) clearInterval(_miningInterval);
+    let cd = Math.max(0, Math.floor(seconds));
+    const fmt = n => String(n).padStart(2, '0');
+
+    _miningInterval = setInterval(() => {
+        cd--;
+        const h = Math.floor(cd / 3600), m = Math.floor((cd % 3600) / 60), s = cd % 60;
+        if (watchBtn) watchBtn.innerText = `⏳ Cooldown ${fmt(h)}:${fmt(m)}:${fmt(s)}`;
+        if (labelEl)  labelEl.innerText  = `Cooldown active. Wait before mining again.`;
+        if (cd <= 0) {
+            clearInterval(_miningInterval);
+            _miningInterval = null;
+            loadMiningStatus();
+        }
+    }, 1000);
+}
+
+async function loadMiningStatus() {
+    if (!userId) return;
+    const card = document.getElementById('mining-card');
+    if (!card) return;
+
+    try {
+        const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
+        const cfg    = await cfgRes.json();
+
+        if (!cfg.mining_active) {
+            _applyFeatureLock(card, 'mining-lock-overlay', '⛏️ Coin Mining Coming Soon!');
+            return;
+        }
+        _removeFeatureLock(card, 'mining-lock-overlay');
+
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_mining_status/${userId}`);
+        const data = await res.json();
+
+        const statusEl  = document.getElementById('mining-status-label');
+        const adsEl     = document.getElementById('mining-ads-progress');
+        const watchBtn  = document.getElementById('mining-watch-ad-btn');
+        const collectBtn = document.getElementById('mining-collect-btn');
+
+        // Reset all
+        if (watchBtn)   { watchBtn.style.display   = 'none';  watchBtn.disabled  = false; }
+        if (collectBtn) { collectBtn.style.display  = 'none';  collectBtn.disabled = true; }
+
+        if (data.collect_ready) {
+            // Mining done — ready to collect
+            if (_miningInterval) { clearInterval(_miningInterval); _miningInterval = null; }
+            if (statusEl)   statusEl.innerText   = '✅ Mining Complete! Collect your reward!';
+            if (collectBtn) {
+                collectBtn.style.display  = '';
+                collectBtn.disabled       = false;
+                collectBtn.innerText      = '⛏️ Collect 10 Coins!';
+                collectBtn.style.background = 'linear-gradient(135deg,#22c55e,#16a34a)';
+            }
+
+        } else if (data.is_mining) {
+            // Mining in progress
+            if (statusEl)   statusEl.innerText  = '⛏️ Mining in progress...';
+            if (collectBtn) { collectBtn.style.display = ''; collectBtn.innerText = 'Mining...'; }
+            _startMiningCountdown(data.remaining_seconds, statusEl, collectBtn, () => loadMiningStatus());
+
+        } else if (data.cooldown_remaining > 0) {
+            // Cooldown
+            if (watchBtn) {
+                watchBtn.style.display = '';
+                watchBtn.disabled      = true;
+                watchBtn.innerText     = '⏳ Cooldown...';
+            }
+            if (statusEl) statusEl.innerText = 'Cooldown active. Please wait before mining again.';
+            _startCooldownCountdown(data.cooldown_remaining, watchBtn, statusEl);
+
+        } else {
+            // Idle — show watch ad button
+            const adsLeft = (data.ads_required || 2) - (data.ads_done || 0);
+            if (watchBtn) {
+                watchBtn.style.display = '';
+                watchBtn.disabled      = false;
+                watchBtn.innerText     = `📺 Watch Ad ${data.ads_done || 0}/${data.ads_required || 2}`;
+            }
+            if (statusEl) statusEl.innerText = `Watch ${adsLeft} more ad${adsLeft !== 1 ? 's' : ''} to start mining!`;
+            if (adsEl)    adsEl.innerText    = `${data.ads_done || 0}/${data.ads_required || 2} ads watched`;
+        }
+    } catch (e) { /* silent */ }
+}
+
+async function watchMiningAd() {
+    if (!userId) return showToast('User ID not found!', 'error');
+    if (_pendingRequests.has('miningAd')) return;
+    _pendingRequests.add('miningAd');
+
+    const btn = document.getElementById('mining-watch-ad-btn');
+    if (btn) { btn.disabled = true; btn.innerText = '📺 Loading Ad...'; }
+
+    // Step 1: get token
+    let miningToken = null;
+    try {
+        const tokenRes  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/mining_ad_token/${userId}`, { method: 'POST' });
+        const tokenData = await tokenRes.json();
+
+        if (tokenData.status === 'cooldown' || tokenData.status === 'mining') {
+            showToast(tokenData.message, 'error');
+            _pendingRequests.delete('miningAd');
+            loadMiningStatus();
+            return;
+        }
+        if (tokenData.status !== 'success' || !tokenData.token) {
+            showToast(tokenData.message || 'Could not start mining ad.', 'error');
+            _pendingRequests.delete('miningAd');
+            if (btn) { btn.disabled = false; btn.innerText = '📺 Watch Ad'; }
+            return;
+        }
+        miningToken = tokenData.token;
+    } catch (e) {
+        showToast('⚠️ Server error.', 'error');
+        _pendingRequests.delete('miningAd');
+        if (btn) { btn.disabled = false; btn.innerText = '📺 Watch Ad'; }
+        return;
+    }
+
+    // Step 2: show ad
+    if (btn) btn.innerText = '📺 Watching Ad...';
+    try {
+        await requireAdWatch();
+    } catch (e) {
+        showToast('📺 Watch the full ad to start mining!', 'error');
+        _pendingRequests.delete('miningAd');
+        if (btn) { btn.disabled = false; btn.innerText = '📺 Watch Ad'; }
+        return;
+    }
+
+    // Step 3: send token → start_mining
+    if (btn) btn.innerText = 'Processing...';
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/start_mining/${userId}`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ token: miningToken }),
+        });
+        const data = await res.json();
+
+        if (data.status === 'mining_started') {
+            showToast('⛏️ Mining started! Come back in 1 hour to collect 10 coins!', 'success');
+        } else if (data.status === 'ad_counted') {
+            showToast(data.message || 'Ad counted! Watch more to start mining.', 'success');
+        } else {
+            showToast(data.message || 'Error. Please retry.', 'error');
+        }
+    } catch (e) {
+        showToast('⚠️ Error! Please retry.', 'error');
+    } finally {
+        _pendingRequests.delete('miningAd');
+        loadMiningStatus();
+    }
+}
+
+async function collectMining() {
+    if (!userId) return showToast('User ID not found!', 'error');
+    if (_pendingRequests.has('collectMining')) return;
+    _pendingRequests.add('collectMining');
+
+    const btn = document.getElementById('mining-collect-btn');
+    if (btn) { btn.disabled = true; btn.innerText = 'Collecting...'; }
+
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/collect_mining/${userId}`, { method: 'POST' });
+        const data = await res.json();
+
+        if (data.status === 'success') {
+            showToast(`⛏️ +${data.reward} coins collected! 🪙`, 'success');
+            if (_miningInterval) { clearInterval(_miningInterval); _miningInterval = null; }
+            fetchLiveData();
+            loadMiningStatus();
+        } else if (data.status === 'not_ready') {
+            showToast(data.message, 'error');
+            loadMiningStatus();
+        } else {
+            showToast(data.message || 'Could not collect.', 'error');
+            if (btn) { btn.disabled = false; btn.innerText = '⛏️ Collect 10 Coins!'; }
+        }
+    } catch (e) {
+        showToast('⚠️ Error! Please retry.', 'error');
+        if (btn) { btn.disabled = false; btn.innerText = '⛏️ Collect 10 Coins!'; }
+    } finally {
+        _pendingRequests.delete('collectMining');
     }
 }
 
@@ -1258,6 +1631,8 @@ function switchTab(tabId, el) {
         refer:       'Refer & Earn',
         history:     'Withdrawal History',
         help:        'Help & Support',
+        spin:        '🎡 Spin Wheel',
+        mining:      '⛏️ Coin Mining',
     };
     const titleEl = document.getElementById('tab-title');
     if (titleEl) titleEl.textContent = titleMap[tabId] || '';
