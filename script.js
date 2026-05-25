@@ -7,8 +7,7 @@ tg.ready();
 tg.expand();
 tg.enableClosingConfirmation();
 
-const userId = tg.initDataUnsafe?.user?.id
-    || new URLSearchParams(window.location.search).get('user_id');
+const userId = tg.initDataUnsafe?.user?.id;
 
 window.USER_ID = userId;
 
@@ -476,7 +475,23 @@ async function buyLotteryTicket() {
     if (!userId) return showToast('⚠️ User ID error.', 'error');
     const btn = document.getElementById('lottery-btn');
     if (btn?.disabled) return;
+    if (btn) { btn.disabled = true; btn.innerText = '📺 Loading Ad...'; }
+
+    // Step 1: Watch ad before ticket purchase
+    try {
+        if (btn) btn.innerText = '📺 Watching Ad...';
+        await requireAdWatch();
+    } catch (e) {
+        showToast('📺 Watch the full ad to buy a ticket!', 'error');
+        if (btn) { btn.disabled = false; btn.innerText = '🎫 Buy Ticket'; }
+        return;
+    }
+
+    // Step 2: 10-second cooldown after ad
+    await _adCooldown(btn, '🎫 Buy Ticket');
     if (btn) { btn.disabled = true; btn.innerText = '⏳ Buying...'; }
+
+    // Step 3: purchase ticket
     try {
         const res  = await fetch(`${CONFIG.API_BASE_URL}/buy_lottery_ticket`, {
             method: 'POST',
@@ -493,6 +508,7 @@ async function buyLotteryTicket() {
     } catch (err) {
         showToast('⚠️ Network error. Try again.', 'error');
     } finally {
+        if (btn) btn.disabled = false;
         loadLotteryStatus();
     }
 }
@@ -526,8 +542,200 @@ function _removeFeatureLock(card, overlayClass) {
 }
 
 // ============================================================
-// 🎡 SPIN WHEEL
+// 🎡 SPIN WHEEL — Canvas + Sound Engine
 // ============================================================
+
+// Segments must match SPIN_REWARDS in main.py: [0, 5, 10, 15, 20, 30, 50, 100]
+const WHEEL_SEGMENTS = [
+    { label: 'Miss',   coins: 0,   color: '#1e293b', altColor: '#334155', textColor: '#94a3b8' },
+    { label: '5',      coins: 5,   color: '#5b21b6', altColor: '#7c3aed', textColor: '#fff'    },
+    { label: '10',     coins: 10,  color: '#1e40af', altColor: '#2563eb', textColor: '#fff'    },
+    { label: '15',     coins: 15,  color: '#0e7490', altColor: '#0891b2', textColor: '#fff'    },
+    { label: '20',     coins: 20,  color: '#065f46', altColor: '#059669', textColor: '#fff'    },
+    { label: '30',     coins: 30,  color: '#92400e', altColor: '#d97706', textColor: '#fff'    },
+    { label: '50',     coins: 50,  color: '#991b1b', altColor: '#dc2626', textColor: '#fff'    },
+    { label: '100',    coins: 100, color: '#854d0e', altColor: '#ca8a04', textColor: '#fef08a' },
+];
+
+const _WS_COUNT = WHEEL_SEGMENTS.length;
+const _WS_ANGLE = (2 * Math.PI) / _WS_COUNT;
+let   _wheelRot = 0;
+let   _wheelAnimId = null;
+let   _audioCtx    = null;
+
+function _getAudioCtx() {
+    if (!_audioCtx || _audioCtx.state === 'closed') {
+        try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    return _audioCtx;
+}
+
+function _playTick() {
+    try {
+        const ctx  = _getAudioCtx(); if (!ctx) return;
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = 'square';
+        osc.frequency.value = 600 + Math.random() * 300;
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
+        osc.start(); osc.stop(ctx.currentTime + 0.04);
+    } catch(e) {}
+}
+
+function _playWinSound(coins) {
+    try {
+        const ctx = _getAudioCtx(); if (!ctx) return;
+        if (coins === 0) {
+            const osc  = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(280, ctx.currentTime);
+            osc.frequency.linearRampToValueAtTime(120, ctx.currentTime + 0.35);
+            gain.gain.setValueAtTime(0.18, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+            osc.start(); osc.stop(ctx.currentTime + 0.35);
+        } else {
+            const notes = coins >= 100 ? [523, 659, 784, 1047, 1319]
+                        : coins >= 50  ? [523, 659, 784, 1047]
+                        : coins >= 20  ? [523, 659, 784]
+                        :                [523, 659];
+            notes.forEach((freq, i) => {
+                const osc  = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.type = 'sine';
+                osc.frequency.value = freq;
+                const t = ctx.currentTime + i * 0.13;
+                gain.gain.setValueAtTime(coins >= 50 ? 0.35 : 0.25, t);
+                gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+                osc.start(t); osc.stop(t + 0.22);
+            });
+        }
+    } catch(e) {}
+}
+
+function drawSpinWheel(rotation) {
+    const canvas = document.getElementById('spin-wheel-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const cx = W / 2, cy = H / 2;
+    const r  = cx - 6;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Outer glow ring
+    ctx.save();
+    ctx.shadowColor = '#a855f7'; ctx.shadowBlur = 16;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 3, 0, 2 * Math.PI);
+    ctx.strokeStyle = '#7c3aed'; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.restore();
+
+    WHEEL_SEGMENTS.forEach((seg, i) => {
+        const startA = rotation + i * _WS_ANGLE - Math.PI / 2;
+        const endA   = startA + _WS_ANGLE;
+
+        // Gradient fill per segment
+        const grd = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r);
+        grd.addColorStop(0, seg.altColor);
+        grd.addColorStop(1, seg.color);
+
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, r, startA, endA);
+        ctx.closePath();
+        ctx.fillStyle = grd;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Label
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(startA + _WS_ANGLE / 2);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = seg.textColor;
+        ctx.font = `bold 11px 'Segoe UI', sans-serif`;
+        const label = seg.coins === 0 ? 'Miss' : `${seg.label} c`;
+        ctx.fillText(label, r - 7, 4);
+        ctx.restore();
+    });
+
+    // Divider lines between segments
+    WHEEL_SEGMENTS.forEach((_, i) => {
+        const angle = rotation + i * _WS_ANGLE - Math.PI / 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    });
+
+    // Center circle
+    ctx.beginPath(); ctx.arc(cx, cy, 20, 0, 2 * Math.PI);
+    const cGrd = ctx.createRadialGradient(cx, cy, 2, cx, cy, 20);
+    cGrd.addColorStop(0, '#a855f7'); cGrd.addColorStop(1, '#1a0a2e');
+    ctx.fillStyle = cGrd; ctx.fill();
+    ctx.strokeStyle = '#d8b4fe'; ctx.lineWidth = 2; ctx.stroke();
+
+    // Center star/dot
+    ctx.fillStyle = '#fff';
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('★', cx, cy);
+}
+
+function animateSpinWheel(targetSegIdx, durationMs, onComplete) {
+    if (_wheelAnimId) cancelAnimationFrame(_wheelAnimId);
+
+    // Target rotation: put segment center under pointer (top = -PI/2 in canvas)
+    // Segment i center angle from 0: i * _WS_ANGLE + _WS_ANGLE/2
+    // We want: rotation + center = -PI/2  →  rotation = -PI/2 - center
+    const center     = targetSegIdx * _WS_ANGLE + _WS_ANGLE / 2;
+    const baseTarget = -Math.PI / 2 - center;
+
+    // Normalize to positive, then add full spins
+    const basePos    = ((baseTarget % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const curNorm    = ((_wheelRot   % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const extra      = (basePos - curNorm + 2 * Math.PI) % (2 * Math.PI);
+    const fullSpins  = 5 + Math.floor(Math.random() * 3);
+    const targetRot  = _wheelRot + fullSpins * 2 * Math.PI + extra;
+
+    const startRot   = _wheelRot;
+    const startTime  = performance.now();
+    let   lastTickSeg = -1;
+
+    function easeOut(t) { return 1 - Math.pow(1 - t, 4); }
+
+    function frame(now) {
+        const elapsed  = now - startTime;
+        const progress = Math.min(elapsed / durationMs, 1);
+        _wheelRot = startRot + (targetRot - startRot) * easeOut(progress);
+        drawSpinWheel(_wheelRot);
+
+        // Tick sound on each new segment boundary crossed
+        const curSeg = Math.floor(
+            (((_wheelRot / _WS_ANGLE) % _WS_COUNT) + _WS_COUNT) % _WS_COUNT
+        );
+        if (curSeg !== lastTickSeg) { _playTick(); lastTickSeg = curSeg; }
+
+        if (progress < 1) {
+            _wheelAnimId = requestAnimationFrame(frame);
+        } else {
+            _wheelRot = targetRot;
+            drawSpinWheel(_wheelRot);
+            _wheelAnimId = null;
+            if (onComplete) onComplete();
+        }
+    }
+    _wheelAnimId = requestAnimationFrame(frame);
+}
+
 async function loadSpinStatus() {
     if (!userId) return;
     const card = document.getElementById('spin-card');
@@ -607,40 +815,64 @@ async function doSpin() {
         return;
     }
 
-    // Step 3: do spin
-    if (btn) btn.innerText = '🎡 Spinning...';
+    // Step 2b: 10-second cooldown after ad
+    await _adCooldown(btn, '🎡 Watch Ad & Spin');
+
+    // Step 3: call API to get reward (server decides the prize)
+    if (btn) btn.innerText = '⏳ Getting result...';
+    let spinData = null;
     try {
         const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/do_spin/${userId}`, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({ token: spinToken }),
         });
-        const data = await res.json();
-
-        if (data.status === 'success') {
-            // Animate result text
-            const resultEl = document.getElementById('spin-result');
-            if (resultEl) {
-                resultEl.innerText       = data.reward > 0 ? `🎉 +${data.reward} coins!` : '😅 Miss! Better luck next time!';
-                resultEl.style.color     = data.reward >= 50 ? '#f1c40f' : data.reward > 0 ? '#2ecc71' : '#94a3b8';
-                resultEl.style.display   = 'block';
-                resultEl.style.animation = 'none';
-                void resultEl.offsetWidth;
-                resultEl.style.animation = 'spinResultPop 0.45s cubic-bezier(.17,.67,.35,1.3) both';
-                setTimeout(() => { if (resultEl) resultEl.style.display = 'none'; }, 3800);
-            }
-            const toast = data.reward >= 50 ? 'success' : data.reward > 0 ? 'success' : 'error';
-            showToast(data.message || `Spin result: ${data.reward} coins`, toast);
-            fetchLiveData();
-        } else {
-            showToast(data.message || 'Spin failed.', 'error');
-        }
+        spinData = await res.json();
     } catch (e) {
         showToast('⚠️ Error! Please retry.', 'error');
-    } finally {
+        _pendingRequests.delete('doSpin');
+        if (btn) { btn.disabled = false; btn.innerText = '🎡 Watch Ad & Spin'; }
+        return;
+    }
+
+    if (spinData.status !== 'success') {
+        showToast(spinData.message || 'Spin failed.', 'error');
         _pendingRequests.delete('doSpin');
         loadSpinStatus();
+        return;
     }
+
+    // Step 4: Animate wheel to land on the winning segment
+    const reward   = spinData.reward ?? 0;
+    const segIdx   = WHEEL_SEGMENTS.findIndex(s => s.coins === reward);
+    const targetSeg = segIdx >= 0 ? segIdx : 0;
+
+    if (btn) { btn.disabled = true; btn.innerText = '🎡 Spinning...'; }
+
+    animateSpinWheel(targetSeg, 4500, () => {
+        // Step 5: Play sound + show result after wheel stops
+        _playWinSound(reward);
+
+        const resultEl = document.getElementById('spin-result');
+        if (resultEl) {
+            resultEl.innerText = reward > 0
+                ? `🎉 +${reward} coins!`
+                : '😅 Miss! Better luck next time!';
+            resultEl.style.color   = reward >= 50 ? '#f1c40f' : reward > 0 ? '#2ecc71' : '#94a3b8';
+            resultEl.style.display = 'block';
+            resultEl.style.animation = 'none';
+            void resultEl.offsetWidth;
+            resultEl.style.animation = 'spinResultPop 0.5s cubic-bezier(.17,.67,.35,1.3) both';
+            setTimeout(() => { if (resultEl) resultEl.style.display = 'none'; }, 4000);
+        }
+
+        const toastType = reward > 0 ? 'success' : 'error';
+        showToast(spinData.message || (reward > 0 ? `+${reward} coins!` : 'Better luck next time!'), toastType);
+
+        _pendingRequests.delete('doSpin');
+        fetchLiveData();
+        loadSpinStatus();
+    });
 }
 
 // ============================================================
@@ -810,6 +1042,9 @@ async function watchMiningAd() {
         if (btn) { btn.disabled = false; btn.innerText = '📺 Watch Ad'; }
         return;
     }
+
+    // Step 2b: 10-second cooldown after ad
+    await _adCooldown(btn, '📺 Watch Ad');
 
     // Step 3: send token → start_mining
     if (btn) btn.innerText = 'Processing...';
@@ -1340,12 +1575,22 @@ async function claimAllBonus() {
 async function requireAdWatch() {
     if (!CONFIG.CLAIM_AD_ENABLED) return;
     const zoneId = getMonetagZoneId();
-    if (!zoneId) return;
-    try { await loadMonetagSdk(); } catch (e) { return; }
+    if (!zoneId) throw new Error('ad_config_missing');
+    try { await loadMonetagSdk(); } catch (e) { throw new Error('ad_sdk_failed'); }
     const showMonetagAd = getMonetagShowFunction();
-    if (!showMonetagAd) return;
+    if (!showMonetagAd) throw new Error('ad_function_missing');
     const result = await showMonetagAd({ ymid: String(userId), requestVar: 'claim_gate' });
     if (!result?.reward_event_type || result.reward_event_type !== 'valued') throw new Error('ad_skipped');
+}
+
+// 10-second cooldown after ad — shows countdown on button
+async function _adCooldown(btn, resumeLabel) {
+    const SECS = 10;
+    for (let i = SECS; i > 0; i--) {
+        if (btn) btn.innerText = `⏳ Wait ${i}s...`;
+        await new Promise(r => setTimeout(r, 1000));
+    }
+    if (btn && resumeLabel) btn.innerText = resumeLabel;
 }
 
 // ============================================================
@@ -1874,6 +2119,9 @@ window.addEventListener('DOMContentLoaded', () => {
         const u = String(CONFIG.ADMIN_TELEGRAM);
         adminEl.textContent = u.startsWith('@') ? u : '@' + u;
     }
+
+    // Draw spin wheel immediately so it shows on load
+    drawSpinWheel(_wheelRot);
 
     renderSponsorSlots({}, [], {});
     fetchLiveData();
