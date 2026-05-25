@@ -198,7 +198,62 @@ WITHDRAW_COOLDOWN = 86400
 DEVICE_RESET_COOLDOWN_DAYS = 3
 
 # ============================================================
-# 4b. LOTTERY DEFAULTS
+# 4b. SPIN WHEEL + COIN MINING DEFAULTS
+# ============================================================
+
+# --- Spin Wheel ---
+SPIN_PER_DAY     = 5       # Max spins per day
+SPIN_AD_REQUIRED = True    # Har spin ke liye 1 ad zaroori hai
+SPIN_TOKEN_TTL   = 300     # Ad token validity: 5 min
+
+# Rewards list aur unka weight (probability)
+# 0 = Miss (koi coin nahi)
+SPIN_REWARDS = [0,  5,  10, 15, 20,  30,  50,  100]
+SPIN_WEIGHTS = [15, 30, 25, 15, 8,   4,   2,   1  ]
+
+# --- Coin Mining ---
+MINING_ADS_REQUIRED   = 2  # Mining shuru karne ke liye 2 ads dekhne honge
+MINING_COOLDOWN_HOURS = 1  # 1 ghante baad hi dubara mine kar sakte ho
+MINING_DURATION_HOURS = 1  # 1 ghante ki mining session
+MINING_REWARD         = 10 # 1 session = 10 coins
+MINING_TOKEN_TTL      = 300
+
+_feature_cfg_cache      = None
+_feature_cfg_cache_time = 0.0
+FEATURE_CFG_CACHE_TTL   = 30
+
+
+def get_feature_config() -> dict:
+    """
+    DB se spin_active + mining_active fetch karo.
+    Default: dono active.
+    Admin /togglespin aur /togglemining se control kar sakta hai.
+    """
+    global _feature_cfg_cache, _feature_cfg_cache_time
+    now = time.time()
+    if _feature_cfg_cache is not None and now - _feature_cfg_cache_time < FEATURE_CFG_CACHE_TTL:
+        return _feature_cfg_cache
+    try:
+        doc = config_col.find_one({"_id": "feature_config"}) or {}
+        merged = {
+            "spin_active":   bool(doc.get("spin_active",   True)),
+            "mining_active": bool(doc.get("mining_active", True)),
+        }
+    except Exception:
+        merged = {"spin_active": True, "mining_active": True}
+    _feature_cfg_cache      = merged
+    _feature_cfg_cache_time = now
+    return merged
+
+
+def _bust_feature_cache() -> None:
+    global _feature_cfg_cache, _feature_cfg_cache_time
+    _feature_cfg_cache      = None
+    _feature_cfg_cache_time = 0.0
+
+
+# ============================================================
+# 4c. LOTTERY DEFAULTS
 # ============================================================
 
 LOTTERY_DEFAULTS = {
@@ -252,6 +307,166 @@ def _cleanup_rate_cache() -> None:
                 del _rate_cache[k]
         if expired:
             logger.debug("Rate cache cleanup: removed %d expired keys.", len(expired))
+
+
+# ============================================================
+# 5b. SECURITY — IP RATE LIMIT + SUSPICIOUS ACTIVITY + ADMIN LOCKOUT
+# ============================================================
+
+# --- Constants ---
+IP_RATE_LIMIT_REQUESTS  = 50    # Max requests per IP per minute
+IP_RATE_LIMIT_WINDOW    = 60    # Window in seconds
+IP_BAN_DURATION         = 900   # 15 min ban after exceeding limit
+
+ADMIN_MAX_FAIL_ATTEMPTS = 5     # Wrong admin tokens allowed
+ADMIN_LOCKOUT_SECONDS   = 900   # 15 min lockout after 5 fails
+
+SUSPICIOUS_THRESHOLD    = 20    # Requests per minute to trigger alert
+
+# --- In-memory trackers ---
+_ip_request_log:      dict = {}   # { ip: [(timestamp, endpoint), ...] }
+_ip_banned:           dict = {}   # { ip: ban_expires_timestamp }
+_failed_admin_logins: dict = {}   # { ip: {"count": int, "expires": float} }
+_suspicious_alerted:  dict = {}   # { ip: last_alert_timestamp }
+_security_lock = threading.Lock()
+
+
+def _get_client_ip() -> str:
+    """Request context se real IP nikalo."""
+    ip = request.headers.get("X-Forwarded-For", "") or request.remote_addr or ""
+    return ip.split(",")[0].strip()
+
+
+def _is_ip_banned(ip: str) -> bool:
+    """Check karo agar IP temporarily banned hai."""
+    now = time.time()
+    with _security_lock:
+        expires = _ip_banned.get(ip, 0.0)
+        return expires > now
+
+
+def _ban_ip(ip: str, duration: int = IP_BAN_DURATION) -> None:
+    """IP ko temporarily ban karo."""
+    with _security_lock:
+        _ip_banned[ip] = time.time() + duration
+    logger.warning("SECURITY: IP %s banned for %ds due to rate limit breach.", ip, duration)
+
+
+def _record_ip_request(ip: str, endpoint: str) -> int:
+    """
+    IP ka request count track karo last 60 seconds mein.
+    Returns: current count in window.
+    """
+    now = time.time()
+    cutoff = now - IP_RATE_LIMIT_WINDOW
+    with _security_lock:
+        history = _ip_request_log.get(ip, [])
+        history = [(ts, ep) for ts, ep in history if ts > cutoff]
+        history.append((now, endpoint))
+        _ip_request_log[ip] = history
+        return len(history)
+
+
+def _alert_admin_suspicious(ip: str, count: int, endpoint: str) -> None:
+    """Admin ko Telegram pe suspicious activity alert bhejo (max 1 alert per 5 min per IP)."""
+    now = time.time()
+    with _security_lock:
+        last = _suspicious_alerted.get(ip, 0.0)
+        if now - last < 300:
+            return
+        _suspicious_alerted[ip] = now
+
+    def _send():
+        try:
+            bot.send_message(
+                ADMIN_ID,
+                f"\u26a0\ufe0f *Suspicious Activity Detected!*\n\n"
+                f"\U0001f310 IP: `{ip}`\n"
+                f"\U0001f4ca Requests: `{count}` in last 60 seconds\n"
+                f"\U0001f517 Endpoint: `{endpoint}`\n\n"
+                f"_IP has been temporarily blocked for {IP_BAN_DURATION // 60} minutes._",
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            logger.warning("Suspicious alert send failed: %s", exc)
+
+    threading.Thread(target=_send, daemon=True, name=f"sec-alert-{ip}").start()
+
+
+def check_ip_security(endpoint: str) -> tuple[bool, str]:
+    """
+    Har request ke liye call karo.
+    Returns: (allowed: bool, reason: str)
+    """
+    ip = _get_client_ip()
+    if not ip:
+        return True, ""
+
+    if _is_ip_banned(ip):
+        logger.warning("SECURITY: Blocked request from banned IP %s to %s", ip, endpoint)
+        return False, "Too many requests. You have been temporarily blocked."
+
+    count = _record_ip_request(ip, endpoint)
+
+    if count > IP_RATE_LIMIT_REQUESTS:
+        _ban_ip(ip)
+        _alert_admin_suspicious(ip, count, endpoint)
+        return False, "Too many requests. You have been temporarily blocked."
+
+    if count > SUSPICIOUS_THRESHOLD:
+        _alert_admin_suspicious(ip, count, endpoint)
+
+    return True, ""
+
+
+def check_admin_login_attempt(ip: str, success: bool) -> tuple[bool, int]:
+    """
+    Admin login attempts track karo.
+    Returns: (allowed: bool, remaining_attempts: int)
+    """
+    now = time.time()
+    with _security_lock:
+        entry = _failed_admin_logins.get(ip, {"count": 0, "expires": 0.0})
+
+        if entry["expires"] > now:
+            remaining_secs = int(entry["expires"] - now)
+            return False, remaining_secs
+
+        if success:
+            _failed_admin_logins.pop(ip, None)
+            return True, 0
+
+        count = entry["count"] + 1
+        if count >= ADMIN_MAX_FAIL_ATTEMPTS:
+            _failed_admin_logins[ip] = {"count": count, "expires": now + ADMIN_LOCKOUT_SECONDS}
+            logger.warning("SECURITY: Admin login locked for IP %s after %d failed attempts.", ip, count)
+        else:
+            _failed_admin_logins[ip] = {"count": count, "expires": 0.0}
+
+        return True, ADMIN_MAX_FAIL_ATTEMPTS - count
+
+
+def _cleanup_security_caches() -> None:
+    """Purane IP ban/tracking data clean karo — memory leak se bachao."""
+    while True:
+        time.sleep(600)
+        now = time.time()
+        cutoff = now - IP_RATE_LIMIT_WINDOW
+        with _security_lock:
+            for ip in list(_ip_request_log.keys()):
+                _ip_request_log[ip] = [(ts, ep) for ts, ep in _ip_request_log[ip] if ts > cutoff]
+                if not _ip_request_log[ip]:
+                    del _ip_request_log[ip]
+            for ip in list(_ip_banned.keys()):
+                if _ip_banned[ip] <= now:
+                    del _ip_banned[ip]
+            for ip in list(_failed_admin_logins.keys()):
+                if _failed_admin_logins[ip]["expires"] <= now and _failed_admin_logins[ip]["count"] == 0:
+                    del _failed_admin_logins[ip]
+            for ip in list(_suspicious_alerted.keys()):
+                if _suspicious_alerted[ip] < now - 600:
+                    del _suspicious_alerted[ip]
+        logger.debug("Security cache cleanup done.")
 
 
 # ============================================================
@@ -613,8 +828,27 @@ CORS(app, origins=[FRONTEND_URL], supports_credentials=False)
 
 
 # ============================================================
-# 14. SECURITY HEADERS
+# 14. SECURITY HEADERS + IP FIREWALL
 # ============================================================
+
+@app.before_request
+def ip_firewall():
+    """Har request se pehle IP check karo — banned IPs block, suspicious IPs alert."""
+    # Static assets ya health endpoint skip karo
+    if request.path in ("/", "/favicon.ico"):
+        return None
+
+    ip = _get_client_ip()
+    if not ip:
+        return None
+
+    allowed, reason = check_ip_security(request.path)
+    if not allowed:
+        logger.warning("FIREWALL: Blocked IP %s → %s", ip, request.path)
+        return jsonify({"status": "error", "message": reason}), 429
+
+    return None
+
 
 @app.after_request
 def add_security_headers(response):
@@ -2189,13 +2423,59 @@ def admin_broadcast():
 
 @app.route("/admin/login", methods=["POST"])
 def admin_login():
+    ip        = _get_client_ip()
     data      = request.json or {}
     submitted = (data.get("token") or "").strip()
+
     if not ADMIN_TOKEN:
         return jsonify({"status": "error", "message": "ADMIN_TOKEN not configured on server"}), 500
+
+    # Lockout check karo pehle
+    allowed, info = check_admin_login_attempt(ip, success=False)
+    if not allowed:
+        mins = info // 60
+        secs = info % 60
+        logger.warning("SECURITY: Admin login blocked for IP %s (lockout %dm %ds remaining).", ip, mins, secs)
+        try:
+            bot.send_message(
+                ADMIN_ID,
+                f"\U0001f6a8 *Admin Login Lockout Active*\n\n"
+                f"\U0001f310 IP: `{ip}`\n"
+                f"\u23f3 Lockout remaining: `{mins}m {secs}s`\n\n"
+                f"_Someone is repeatedly trying to access admin panel from this IP._",
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+        return jsonify({
+            "status":  "error",
+            "message": f"Too many failed attempts. Try again in {mins}m {secs}s.",
+        }), 429
+
     if submitted and submitted == ADMIN_TOKEN:
+        check_admin_login_attempt(ip, success=True)
+        logger.info("Admin login success from IP %s", ip)
         return jsonify({"status": "success", "message": "Authenticated"})
-    return jsonify({"status": "error", "message": "Invalid token"}), 401
+
+    # Wrong token — attempts count badha do
+    _, remaining = check_admin_login_attempt(ip, success=False)
+    logger.warning("SECURITY: Admin login failed from IP %s (%d attempts remaining).", ip, remaining)
+    if remaining <= 2:
+        try:
+            bot.send_message(
+                ADMIN_ID,
+                f"\u26a0\ufe0f *Admin Login Alert*\n\n"
+                f"\U0001f310 IP: `{ip}`\n"
+                f"\u274c Wrong token entered\n"
+                f"\U0001f512 Attempts remaining before lockout: `{remaining}`",
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+    return jsonify({
+        "status":  "error",
+        "message": f"Invalid token. {remaining} attempt(s) remaining before lockout.",
+    }), 401
 
 
 @app.route("/admin/get_config", methods=["GET"])
@@ -2695,6 +2975,535 @@ def buy_lottery_ticket():
         "new_balance":  new_balance,
         "tickets_sold": len(refreshed.get("participants", [])),
     })
+
+
+# ============================================================
+# SPIN WHEEL + COIN MINING API ENDPOINTS
+# ============================================================
+
+# ── Feature Config (frontend ke liye) ────────────────────────
+
+@app.route("/get_feature_config", methods=["GET"])
+def get_feature_config_api():
+    """Frontend is se puchta hai ki spin/mining lock hai ya nahi."""
+    cfg = get_feature_config()
+    return jsonify({"status": "success", **cfg})
+
+
+# ══════════════════════════════════════════════════
+#  🎡 SPIN WHEEL
+# ══════════════════════════════════════════════════
+
+@app.route("/spin_token/<int:user_id>", methods=["POST"])
+def spin_token_api(user_id: int):
+    """
+    Step 1: Frontend pehle yeh call kare — ad dikhane se pehle.
+    Token milega, jisko /do_spin mein use karo.
+    """
+    if user_id <= 0:
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+
+    cfg = get_feature_config()
+    if not cfg.get("spin_active"):
+        return jsonify({"status": "locked", "message": "Spin Wheel is currently locked by admin."}), 403
+
+    if is_rate_limited(f"spintoken_{user_id}", 15):
+        return jsonify({"status": "error", "message": "Please wait before requesting another spin."}), 429
+
+    try:
+        user = users_col.find_one({"user_id": user_id}, {"blocked": 1, "spins_today": 1, "spins_date": 1})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
+
+        today     = str(date.today())
+        spins_date = user.get("spins_date", "")
+        spins_done = user.get("spins_today", 0) if spins_date == today else 0
+
+        if spins_done >= SPIN_PER_DAY:
+            return jsonify({
+                "status":  "error",
+                "message": f"Daily spin limit reached ({SPIN_PER_DAY}/{SPIN_PER_DAY}). Come back tomorrow!",
+                "data":    {"spins_done": spins_done, "spins_total": SPIN_PER_DAY},
+            }), 400
+
+        # Stale tokens saaf karo
+        ad_reward_tokens_col.delete_many({"user_id": user_id, "source": "spin_wheel"})
+
+        raw_token  = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        expires_at = datetime.utcnow() + timedelta(seconds=SPIN_TOKEN_TTL)
+
+        ad_reward_tokens_col.insert_one({
+            "_id":        token_hash,
+            "user_id":    user_id,
+            "source":     "spin_wheel",
+            "created_at": datetime.utcnow(),
+            "expires_at": expires_at,
+        })
+
+        return jsonify({
+            "status":      "success",
+            "token":       raw_token,
+            "expires_in":  SPIN_TOKEN_TTL,
+            "spins_done":  spins_done,
+            "spins_total": SPIN_PER_DAY,
+        })
+    except Exception as exc:
+        logger.error("spin_token_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/do_spin/<int:user_id>", methods=["POST"])
+def do_spin_api(user_id: int):
+    """
+    Step 2: Ad dekhne ke baad yahan token bhejo — spin result milega.
+    """
+    if user_id <= 0:
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+
+    cfg = get_feature_config()
+    if not cfg.get("spin_active"):
+        return jsonify({"status": "locked", "message": "Spin Wheel is currently locked by admin."}), 403
+
+    if is_rate_limited(f"dospin_{user_id}", 10):
+        return jsonify({"status": "error", "message": "Please wait before spinning again."}), 429
+
+    data      = request.get_json(silent=True) or {}
+    raw_token = (data.get("token") or "").strip()
+    if not raw_token:
+        return jsonify({"status": "error", "message": "Spin token missing. Watch the ad first."}), 400
+
+    try:
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        token_doc  = ad_reward_tokens_col.find_one_and_delete({
+            "_id":     token_hash,
+            "user_id": user_id,
+            "source":  "spin_wheel",
+        })
+        if not token_doc:
+            return jsonify({"status": "error", "message": "Invalid or already used spin token."}), 403
+        if token_doc.get("expires_at") and token_doc["expires_at"] < datetime.utcnow():
+            return jsonify({"status": "error", "message": "Spin token expired. Watch the ad again."}), 403
+
+        user = users_col.find_one({"user_id": user_id})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
+
+        today      = str(date.today())
+        spins_date = user.get("spins_date", "")
+        spins_done = user.get("spins_today", 0) if spins_date == today else 0
+
+        if spins_done >= SPIN_PER_DAY:
+            return jsonify({
+                "status":  "error",
+                "message": f"Daily spin limit reached ({SPIN_PER_DAY}/{SPIN_PER_DAY}). Come back tomorrow!",
+            }), 400
+
+        # Weighted random spin result
+        import random
+        reward = random.choices(SPIN_REWARDS, weights=SPIN_WEIGHTS, k=1)[0]
+        new_spins = spins_done + 1
+
+        update_op = {
+            "$set": {"spins_today": new_spins, "spins_date": today},
+        }
+        if reward > 0:
+            update_op["$inc"] = {"coins": reward}
+
+        users_col.update_one({"user_id": user_id}, update_op)
+        logger.info("User %s spun: reward=%s spins=%s/%s", user_id, reward, new_spins, SPIN_PER_DAY)
+
+        if reward == 0:
+            msg = "Better luck next time! \U0001f340"
+        elif reward >= 50:
+            msg = f"\U0001f389 JACKPOT! You won *{reward} coins*!"
+        else:
+            msg = f"You won *{reward} coins*! \U0001fa99"
+
+        return jsonify({
+            "status":      "success",
+            "reward":      reward,
+            "message":     msg,
+            "spins_done":  new_spins,
+            "spins_total": SPIN_PER_DAY,
+            "spins_left":  SPIN_PER_DAY - new_spins,
+        })
+    except Exception as exc:
+        logger.error("do_spin_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/get_spin_status/<int:user_id>", methods=["GET"])
+def get_spin_status_api(user_id: int):
+    """Frontend ke liye spin status — kitne spins bache hain."""
+    cfg = get_feature_config()
+    try:
+        user = users_col.find_one({"user_id": user_id}, {"spins_today": 1, "spins_date": 1})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        today      = str(date.today())
+        spins_date = user.get("spins_date", "")
+        spins_done = user.get("spins_today", 0) if spins_date == today else 0
+        return jsonify({
+            "status":       "success",
+            "spin_active":  cfg.get("spin_active", True),
+            "spins_done":   spins_done,
+            "spins_total":  SPIN_PER_DAY,
+            "spins_left":   max(0, SPIN_PER_DAY - spins_done),
+            "ad_required":  SPIN_AD_REQUIRED,
+        })
+    except Exception as exc:
+        logger.error("get_spin_status error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+# ══════════════════════════════════════════════════
+#  ⛏️ COIN MINING
+# ══════════════════════════════════════════════════
+
+@app.route("/mining_ad_token/<int:user_id>", methods=["POST"])
+def mining_ad_token_api(user_id: int):
+    """
+    Step 1: Mining shuru karne se pehle 2 ads dekhne hote hain.
+    Har ad ke liye ek token generate hota hai.
+    """
+    if user_id <= 0:
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+
+    cfg = get_feature_config()
+    if not cfg.get("mining_active"):
+        return jsonify({"status": "locked", "message": "Coin Mining is currently locked by admin."}), 403
+
+    if is_rate_limited(f"miningtoken_{user_id}", 15):
+        return jsonify({"status": "error", "message": "Please wait before requesting another mining token."}), 429
+
+    try:
+        user = users_col.find_one(
+            {"user_id": user_id},
+            {"blocked": 1, "mining_start_time": 1, "mining_ads_count": 1,
+             "mining_ads_date": 1, "last_mining_collect": 1}
+        )
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
+
+        # Mining cooldown check — 1 ghanta baad hi fir mine kar sakte ho
+        last_collect_str = user.get("last_mining_collect", "")
+        if last_collect_str:
+            try:
+                last_collect_dt = datetime.fromisoformat(last_collect_str)
+                elapsed         = (datetime.utcnow() - last_collect_dt).total_seconds()
+                cooldown_sec    = MINING_COOLDOWN_HOURS * 3600
+                if elapsed < cooldown_sec:
+                    remaining  = int(cooldown_sec - elapsed)
+                    mins       = remaining // 60
+                    secs       = remaining % 60
+                    return jsonify({
+                        "status":  "cooldown",
+                        "message": f"Mining cooldown active. Wait {mins}m {secs}s.",
+                        "data":    {"remaining_seconds": remaining},
+                    }), 400
+            except ValueError:
+                pass
+
+        # Check active mining session nahi hai
+        mining_start_str = user.get("mining_start_time", "")
+        if mining_start_str:
+            try:
+                mining_start_dt = datetime.fromisoformat(mining_start_str)
+                elapsed         = (datetime.utcnow() - mining_start_dt).total_seconds()
+                if elapsed < MINING_DURATION_HOURS * 3600:
+                    remaining  = int(MINING_DURATION_HOURS * 3600 - elapsed)
+                    mins       = remaining // 60
+                    secs       = remaining % 60
+                    return jsonify({
+                        "status":  "mining",
+                        "message": f"Mining already in progress! Collect in {mins}m {secs}s.",
+                        "data":    {"remaining_seconds": remaining},
+                    }), 400
+            except ValueError:
+                pass
+
+        # Today ke ads count
+        today    = str(date.today())
+        ads_date = user.get("mining_ads_date", "")
+        ads_done = user.get("mining_ads_count", 0) if ads_date == today else 0
+
+        if ads_done >= MINING_ADS_REQUIRED:
+            return jsonify({
+                "status":  "error",
+                "message": "Already watched all required ads. Start mining now!",
+                "data":    {"ads_done": ads_done, "ads_required": MINING_ADS_REQUIRED},
+            }), 400
+
+        raw_token  = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        expires_at = datetime.utcnow() + timedelta(seconds=MINING_TOKEN_TTL)
+
+        ad_reward_tokens_col.insert_one({
+            "_id":        token_hash,
+            "user_id":    user_id,
+            "source":     "coin_mining",
+            "created_at": datetime.utcnow(),
+            "expires_at": expires_at,
+        })
+
+        return jsonify({
+            "status":       "success",
+            "token":        raw_token,
+            "expires_in":   MINING_TOKEN_TTL,
+            "ads_done":     ads_done,
+            "ads_required": MINING_ADS_REQUIRED,
+        })
+    except Exception as exc:
+        logger.error("mining_ad_token error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/start_mining/<int:user_id>", methods=["POST"])
+def start_mining_api(user_id: int):
+    """
+    Step 2: Dono ads dekhne ke baad yahan call karo — mining shuru hogi.
+    Token consume hoga, mining_start_time set hogi.
+    """
+    if user_id <= 0:
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+
+    cfg = get_feature_config()
+    if not cfg.get("mining_active"):
+        return jsonify({"status": "locked", "message": "Coin Mining is currently locked by admin."}), 403
+
+    if is_rate_limited(f"startmining_{user_id}", 20):
+        return jsonify({"status": "error", "message": "Please wait before starting mining."}), 429
+
+    data      = request.get_json(silent=True) or {}
+    raw_token = (data.get("token") or "").strip()
+    if not raw_token:
+        return jsonify({"status": "error", "message": "Mining token missing. Watch the ad first."}), 400
+
+    try:
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        token_doc  = ad_reward_tokens_col.find_one_and_delete({
+            "_id":     token_hash,
+            "user_id": user_id,
+            "source":  "coin_mining",
+        })
+        if not token_doc:
+            return jsonify({"status": "error", "message": "Invalid or already used mining token."}), 403
+        if token_doc.get("expires_at") and token_doc["expires_at"] < datetime.utcnow():
+            return jsonify({"status": "error", "message": "Mining token expired. Watch the ad again."}), 403
+
+        user = users_col.find_one({"user_id": user_id})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
+
+        today    = str(date.today())
+        ads_date = user.get("mining_ads_date", "")
+        ads_done = user.get("mining_ads_count", 0) if ads_date == today else 0
+        new_ads  = ads_done + 1
+
+        users_col.update_one(
+            {"user_id": user_id},
+            {"$set": {"mining_ads_count": new_ads, "mining_ads_date": today}},
+        )
+
+        # Agar dono ads dekh liye — mining shuru
+        if new_ads >= MINING_ADS_REQUIRED:
+            now = datetime.utcnow()
+            users_col.update_one(
+                {"user_id": user_id},
+                {"$set": {
+                    "mining_start_time": now.isoformat(),
+                    "mining_ads_count":  0,
+                    "mining_ads_date":   "",
+                }},
+            )
+            collect_at = now + timedelta(hours=MINING_DURATION_HOURS)
+            logger.info("User %s started mining. Collect at %s", user_id, collect_at.isoformat())
+            return jsonify({
+                "status":          "mining_started",
+                "message":         f"\u26cf\ufe0f Mining started! Come back in {MINING_DURATION_HOURS} hour(s) to collect {MINING_REWARD} coins!",
+                "collect_at_utc":  collect_at.isoformat(),
+                "collect_seconds": MINING_DURATION_HOURS * 3600,
+                "reward":          MINING_REWARD,
+            })
+
+        return jsonify({
+            "status":       "ad_counted",
+            "message":      f"Ad {new_ads}/{MINING_ADS_REQUIRED} counted! Watch {MINING_ADS_REQUIRED - new_ads} more ad(s) to start mining.",
+            "ads_done":     new_ads,
+            "ads_required": MINING_ADS_REQUIRED,
+        })
+    except Exception as exc:
+        logger.error("start_mining_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/collect_mining/<int:user_id>", methods=["POST"])
+def collect_mining_api(user_id: int):
+    """
+    Step 3: 1 ghante baad collect karo — 10 coins milenge.
+    """
+    if user_id <= 0:
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+
+    cfg = get_feature_config()
+    if not cfg.get("mining_active"):
+        return jsonify({"status": "locked", "message": "Coin Mining is currently locked by admin."}), 403
+
+    if is_rate_limited(f"collectmining_{user_id}", 10):
+        return jsonify({"status": "error", "message": "Please wait before collecting."}), 429
+
+    try:
+        user = users_col.find_one(
+            {"user_id": user_id},
+            {"blocked": 1, "mining_start_time": 1}
+        )
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
+
+        mining_start_str = user.get("mining_start_time", "")
+        if not mining_start_str:
+            return jsonify({"status": "error", "message": "No active mining session. Start mining first!"}), 400
+
+        try:
+            mining_start_dt = datetime.fromisoformat(mining_start_str)
+        except ValueError:
+            return jsonify({"status": "error", "message": "Invalid mining session. Please start again."}), 400
+
+        elapsed     = (datetime.utcnow() - mining_start_dt).total_seconds()
+        required    = MINING_DURATION_HOURS * 3600
+
+        if elapsed < required:
+            remaining = int(required - elapsed)
+            mins      = remaining // 60
+            secs      = remaining % 60
+            return jsonify({
+                "status":  "not_ready",
+                "message": f"Mining in progress! Collect in {mins}m {secs}s.",
+                "data":    {"remaining_seconds": remaining},
+            }), 400
+
+        now = datetime.utcnow()
+        users_col.update_one(
+            {"user_id": user_id},
+            {
+                "$inc": {"coins": MINING_REWARD},
+                "$set": {
+                    "mining_start_time":   "",
+                    "last_mining_collect": now.isoformat(),
+                    "mining_ads_count":    0,
+                    "mining_ads_date":     "",
+                },
+            },
+        )
+        logger.info("User %s collected mining reward: %s coins", user_id, MINING_REWARD)
+        return jsonify({
+            "status":  "success",
+            "message": f"\u26cf\ufe0f Mining complete! *{MINING_REWARD} coins* added to your balance! \U0001fa99",
+            "reward":  MINING_REWARD,
+        })
+    except Exception as exc:
+        logger.error("collect_mining_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/get_mining_status/<int:user_id>", methods=["GET"])
+def get_mining_status_api(user_id: int):
+    """Frontend ke liye mining ka current state."""
+    cfg = get_feature_config()
+    try:
+        user = users_col.find_one(
+            {"user_id": user_id},
+            {"blocked": 1, "mining_start_time": 1, "mining_ads_count": 1,
+             "mining_ads_date": 1, "last_mining_collect": 1}
+        )
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+
+        now      = datetime.utcnow()
+        today    = str(date.today())
+        ads_date = user.get("mining_ads_date", "")
+        ads_done = user.get("mining_ads_count", 0) if ads_date == today else 0
+
+        mining_start_str   = user.get("mining_start_time", "")
+        is_mining          = False
+        collect_ready      = False
+        remaining_seconds  = 0
+        cooldown_remaining = 0
+
+        if mining_start_str:
+            try:
+                mining_start_dt = datetime.fromisoformat(mining_start_str)
+                elapsed         = (now - mining_start_dt).total_seconds()
+                required        = MINING_DURATION_HOURS * 3600
+                if elapsed < required:
+                    is_mining         = True
+                    remaining_seconds = int(required - elapsed)
+                else:
+                    collect_ready = True
+            except ValueError:
+                pass
+
+        last_collect_str = user.get("last_mining_collect", "")
+        if last_collect_str and not is_mining and not collect_ready:
+            try:
+                last_dt  = datetime.fromisoformat(last_collect_str)
+                elapsed  = (now - last_dt).total_seconds()
+                cooldown = MINING_COOLDOWN_HOURS * 3600
+                if elapsed < cooldown:
+                    cooldown_remaining = int(cooldown - elapsed)
+            except ValueError:
+                pass
+
+        return jsonify({
+            "status":              "success",
+            "mining_active":       cfg.get("mining_active", True),
+            "is_mining":           is_mining,
+            "collect_ready":       collect_ready,
+            "remaining_seconds":   remaining_seconds,
+            "cooldown_remaining":  cooldown_remaining,
+            "ads_done":            ads_done,
+            "ads_required":        MINING_ADS_REQUIRED,
+            "reward":              MINING_REWARD,
+        })
+    except Exception as exc:
+        logger.error("get_mining_status error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+# ── Admin API: feature lock/unlock ────────────────────────────
+
+@app.route("/admin/set_feature", methods=["POST"])
+def admin_set_feature():
+    """Admin spin ya mining ko lock/unlock kare."""
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data    = request.get_json(silent=True) or {}
+    feature = (data.get("feature") or "").strip().lower()
+    active  = bool(data.get("active", True))
+    if feature not in ("spin", "mining"):
+        return jsonify({"status": "error", "message": "feature must be 'spin' or 'mining'"}), 400
+    field = "spin_active" if feature == "spin" else "mining_active"
+    config_col.update_one(
+        {"_id": "feature_config"},
+        {"$set": {field: active}},
+        upsert=True,
+    )
+    _bust_feature_cache()
+    label  = "Spin Wheel" if feature == "spin" else "Coin Mining"
+    status = "UNLOCKED \u2705" if active else "LOCKED \U0001f512"
+    logger.info("Admin set %s → %s", feature, status)
+    return jsonify({"status": "success", "message": f"{label} is now {status}"})
 
 
 # ============================================================
@@ -3263,6 +4072,11 @@ def admin_panel_command(message):
         "\u2022 /lotterystats \u2014 Today's stats\n"
         "\u2022 /drawlottery \u2014 Manual draw (auto at 00:00 UTC)\n\n"
         "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+        "\U0001f3a1 *Spin Wheel & Mining*\n"
+        "\u2022 /togglespin \u2014 Lock \U0001f512 / Unlock \u2705 Spin Wheel\n"
+        "\u2022 /togglemining \u2014 Lock \U0001f512 / Unlock \u2705 Coin Mining\n"
+        "\u2022 /featurestatus \u2014 Check spin & mining lock status\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
         "\U0001f6ab *User Management*\n"
         "\u2022 /block `<user_id>` \u2014 Block user\n"
         "\u2022 /unblock `<user_id>` \u2014 Unblock user\n"
@@ -3280,6 +4094,82 @@ def admin_panel_command(message):
         "\u2022 /listcodefilters \u2014 List blocked words\n"
     )
     bot.reply_to(message, text, parse_mode="Markdown")
+
+
+@bot.message_handler(commands=["togglespin"])
+def toggle_spin_command(message):
+    """Admin: /togglespin — Spin Wheel ko lock ya unlock karo."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        doc = config_col.find_one({"_id": "feature_config"}) or {}
+        current = bool(doc.get("spin_active", True))
+        new_val = not current
+        config_col.update_one(
+            {"_id": "feature_config"},
+            {"$set": {"spin_active": new_val}},
+            upsert=True,
+        )
+        _bust_feature_cache()
+        status = "\u2705 UNLOCKED — Users can now spin!" if new_val else "\U0001f512 LOCKED — Spin Wheel hidden for all users."
+        bot.reply_to(
+            message,
+            f"\U0001f3a1 *Spin Wheel Updated*\n\n{status}",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin toggled spin_active → %s", new_val)
+    except Exception as exc:
+        logger.error("togglespin error: %s", exc)
+        bot.reply_to(message, "Server error. Please try again.")
+
+
+@bot.message_handler(commands=["togglemining"])
+def toggle_mining_command(message):
+    """Admin: /togglemining — Coin Mining ko lock ya unlock karo."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        doc = config_col.find_one({"_id": "feature_config"}) or {}
+        current = bool(doc.get("mining_active", True))
+        new_val = not current
+        config_col.update_one(
+            {"_id": "feature_config"},
+            {"$set": {"mining_active": new_val}},
+            upsert=True,
+        )
+        _bust_feature_cache()
+        status = "\u2705 UNLOCKED — Users can now mine coins!" if new_val else "\U0001f512 LOCKED — Coin Mining hidden for all users."
+        bot.reply_to(
+            message,
+            f"\u26cf\ufe0f *Coin Mining Updated*\n\n{status}",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin toggled mining_active → %s", new_val)
+    except Exception as exc:
+        logger.error("togglemining error: %s", exc)
+        bot.reply_to(message, "Server error. Please try again.")
+
+
+@bot.message_handler(commands=["featurestatus"])
+def feature_status_command(message):
+    """Admin: /featurestatus — Spin & Mining ka current lock status dekho."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        cfg = get_feature_config()
+        spin_s   = "\u2705 Unlocked" if cfg.get("spin_active")   else "\U0001f512 Locked"
+        mining_s = "\u2705 Unlocked" if cfg.get("mining_active") else "\U0001f512 Locked"
+        bot.reply_to(
+            message,
+            f"\U0001f3a1 *Feature Status*\n\n"
+            f"\U0001f3a1 Spin Wheel:  {spin_s}\n"
+            f"\u26cf\ufe0f Coin Mining: {mining_s}\n\n"
+            f"Use /togglespin or /togglemining to change.",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logger.error("featurestatus error: %s", exc)
+        bot.reply_to(message, "Server error. Please try again.")
 
 
 @bot.message_handler(commands=["stats"])
@@ -4128,11 +5018,12 @@ def uptime_ping() -> None:
 # ============================================================
 
 if __name__ == "__main__":
-    Thread(target=run_bot,                  daemon=True).start()
-    Thread(target=uptime_ping,              daemon=True).start()
-    Thread(target=refresh_leaderboard_loop, daemon=True).start()
-    Thread(target=_cleanup_rate_cache,      daemon=True).start()
-    Thread(target=auto_lottery_draw_loop,   daemon=True).start()
+    Thread(target=run_bot,                    daemon=True).start()
+    Thread(target=uptime_ping,                daemon=True).start()
+    Thread(target=refresh_leaderboard_loop,   daemon=True).start()
+    Thread(target=_cleanup_rate_cache,        daemon=True).start()
+    Thread(target=auto_lottery_draw_loop,     daemon=True).start()
+    Thread(target=_cleanup_security_caches,   daemon=True).start()
 
     port = int(os.getenv("PORT", 5000))
     logger.info("Starting Flask on port %s...", port)
