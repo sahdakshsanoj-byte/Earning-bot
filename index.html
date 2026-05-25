@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-   <script src='//libtl.com/sdk.js' data-zone='10822310' data-sdk='show_10822310'></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Daksh Grand Earn</title>
@@ -203,6 +202,35 @@
             to   { opacity: 1; transform: scale(1) translateY(0);     }
         }
 
+        /* ── Spin Wheel Canvas ── */
+        .spin-wheel-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 8px 0 10px;
+        }
+        .spin-pointer-wrap {
+            position: relative;
+            display: inline-block;
+        }
+        .spin-pointer {
+            position: absolute;
+            top: -4px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-top: 22px solid #f1c40f;
+            z-index: 5;
+            filter: drop-shadow(0 0 6px #f1c40f);
+        }
+        #spin-wheel-canvas {
+            border-radius: 50%;
+            display: block;
+        }
+
         /* ── Mining Card ── */
         .mining-progress-bar-wrap {
             background: #1e293b;
@@ -299,134 +327,6 @@
                 style="background:#ffd700; color:#1a1a1a; font-weight:700; margin-top:10px;">
                 🎫 Buy Ticket
             </button>
-        </div>
-
-        <!-- ══════════════════════════════════════════════════ -->
-        <!-- 🎡 SPIN WHEEL CARD                                 -->
-        <!-- ══════════════════════════════════════════════════ -->
-        <div class="card" id="spin-card"
-             style="background:linear-gradient(135deg,#1a0a2e,#2d1b4e,#1a0a2e);
-                    border:1px solid #a855f7; position:relative; overflow:hidden;">
-
-            <!-- Header row -->
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <h4 style="color:#d8b4fe; margin:0;">🎡 Spin Wheel</h4>
-                <span id="spin-count-badge"
-                      style="font-size:11px; background:rgba(168,85,247,0.15);
-                             border:1px solid #7c3aed; border-radius:20px;
-                             padding:2px 10px; color:#c4b5fd; white-space:nowrap;">
-                    0/5 used
-                </span>
-            </div>
-
-            <p style="font-size:12px; color:#94a3b8; margin-bottom:8px;">
-                Watch 1 ad per spin • 5 spins/day • Win up to <b style="color:#f1c40f;">100 coins!</b>
-            </p>
-
-            <!-- Prize segments preview -->
-            <div class="spin-segment-row">
-                <span class="spin-segment miss">😅 Miss</span>
-                <span class="spin-segment">5 🪙</span>
-                <span class="spin-segment">10 🪙</span>
-                <span class="spin-segment">15 🪙</span>
-                <span class="spin-segment">20 🪙</span>
-                <span class="spin-segment">30 🪙</span>
-                <span class="spin-segment" style="color:#22c55e; border-color:#22c55e;">50 🪙</span>
-                <span class="spin-segment" style="color:#f1c40f; border-color:#f1c40f; background:rgba(241,196,15,0.15);">💎 100 🪙</span>
-            </div>
-
-            <!-- Result text (shown briefly after spin) -->
-            <div id="spin-result"
-                 style="display:none; text-align:center; font-size:18px; font-weight:800;
-                        margin: 6px 0; padding:8px; border-radius:10px;
-                        background:rgba(255,255,255,0.06);">
-            </div>
-
-            <button
-                id="spin-btn"
-                class="btn"
-                onclick="doSpin()"
-                style="background:linear-gradient(135deg,#f1c40f,#f39c12);
-                       color:#000; font-weight:700; margin-top:8px;">
-                🎡 Watch Ad &amp; Spin (5 left)
-            </button>
-        </div>
-
-        <!-- ══════════════════════════════════════════════════ -->
-        <!-- ⛏️ COIN MINING CARD                                -->
-        <!-- ══════════════════════════════════════════════════ -->
-        <div class="card" id="mining-card"
-             style="background:linear-gradient(135deg,#0f1a08,#1a2f10,#0f1a08);
-                    border:1px solid #f59e0b; position:relative; overflow:hidden;">
-
-            <!-- Header row -->
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <h4 style="color:#fcd34d; margin:0;">⛏️ Coin Mining</h4>
-                <span style="font-size:11px; background:rgba(245,158,11,0.12);
-                             border:1px solid #f59e0b; border-radius:20px;
-                             padding:2px 10px; color:#fcd34d; white-space:nowrap;">
-                    +10 🪙/hr
-                </span>
-            </div>
-
-            <p style="font-size:12px; color:#94a3b8; margin-bottom:6px;">
-                Watch <b style="color:#fcd34d;">2 ads</b> → mine for <b style="color:#fcd34d;">1 hour</b> → collect <b style="color:#fcd34d;">10 coins!</b>
-            </p>
-
-            <!-- Ads progress -->
-            <div id="mining-ads-progress"
-                 style="font-size:11px; color:#64748b; margin-bottom:6px; text-align:center;">
-                0/2 ads watched
-            </div>
-
-            <!-- Status label -->
-            <div id="mining-status-label"
-                 style="font-size:12px; color:#94a3b8; text-align:center;
-                        margin-bottom:8px; font-weight:500; min-height:18px;">
-                Watch 2 ads to start mining!
-            </div>
-
-            <!-- Reward info strip -->
-            <div style="display:flex; gap:10px; justify-content:center;
-                        background:rgba(245,158,11,0.08); border-radius:10px;
-                        padding:8px 12px; margin-bottom:10px;">
-                <div style="text-align:center;">
-                    <p style="font-size:10px; color:#92400e; margin:0;">⏱️ Duration</p>
-                    <p style="font-size:14px; font-weight:700; color:#fcd34d; margin:0;">1 Hour</p>
-                </div>
-                <div style="width:1px; background:#334155;"></div>
-                <div style="text-align:center;">
-                    <p style="font-size:10px; color:#92400e; margin:0;">🪙 Reward</p>
-                    <p style="font-size:14px; font-weight:700; color:#fcd34d; margin:0;">10 Coins</p>
-                </div>
-                <div style="width:1px; background:#334155;"></div>
-                <div style="text-align:center;">
-                    <p style="font-size:10px; color:#92400e; margin:0;">📺 Ads</p>
-                    <p style="font-size:14px; font-weight:700; color:#fcd34d; margin:0;">2 Ads</p>
-                </div>
-            </div>
-
-            <!-- Watch Ad button (step 1 & 2) -->
-            <button
-                id="mining-watch-ad-btn"
-                class="btn"
-                onclick="watchMiningAd()"
-                style="background:linear-gradient(135deg,#f59e0b,#d97706);
-                       color:#000; font-weight:700; margin-bottom:6px; display:none;">
-                📺 Watch Ad 0/2
-            </button>
-
-            <!-- Collect button (step 3 — shown only after 1hr) -->
-            <button
-                id="mining-collect-btn"
-                class="btn"
-                onclick="collectMining()"
-                style="background:linear-gradient(135deg,#22c55e,#16a34a);
-                       color:#fff; font-weight:700; display:none;"
-                disabled>
-                ⛏️ Collect 10 Coins!
-            </button>
-
         </div>
 
         <!-- Promo Code -->
@@ -568,6 +468,111 @@
         <div class="card balance-card" style="background:linear-gradient(135deg,#f1c40f,#f39c12); text-align:center;">
             <h4 style="color:#000;">Daily Tasks 🌟</h4>
             <p style="color:#1a1a1a; font-size:13px;">Tasks reset every day. Complete and earn!</p>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════ -->
+        <!-- 🎡 SPIN WHEEL CARD                                 -->
+        <!-- ══════════════════════════════════════════════════ -->
+        <div class="card" id="spin-card"
+             style="background:linear-gradient(135deg,#1a0a2e,#2d1b4e,#1a0a2e);
+                    border:1px solid #a855f7; position:relative; overflow:hidden;">
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <h4 style="color:#d8b4fe; margin:0;">🎡 Spin Wheel</h4>
+                <span id="spin-count-badge"
+                      style="font-size:11px; background:rgba(168,85,247,0.15);
+                             border:1px solid #7c3aed; border-radius:20px;
+                             padding:2px 10px; color:#c4b5fd; white-space:nowrap;">
+                    0/5 used
+                </span>
+            </div>
+
+            <p style="font-size:12px; color:#94a3b8; margin-bottom:4px;">
+                Watch 1 ad per spin • 5 spins/day • Win up to <b style="color:#f1c40f;">100 coins!</b>
+            </p>
+
+            <div class="spin-wheel-wrap">
+                <div class="spin-pointer-wrap">
+                    <div class="spin-pointer"></div>
+                    <canvas id="spin-wheel-canvas" width="220" height="220"></canvas>
+                </div>
+            </div>
+
+            <div id="spin-result"
+                 style="display:none; text-align:center; font-size:20px; font-weight:800;
+                        margin: 4px 0 8px; padding:10px; border-radius:12px;
+                        background:rgba(255,255,255,0.07); letter-spacing:0.5px;">
+            </div>
+
+            <button id="spin-btn" class="btn" onclick="doSpin()"
+                style="background:linear-gradient(135deg,#f1c40f,#f39c12);
+                       color:#000; font-weight:700; margin-top:4px;">
+                🎡 Watch Ad &amp; Spin (5 left)
+            </button>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════ -->
+        <!-- ⛏️ COIN MINING CARD                                -->
+        <!-- ══════════════════════════════════════════════════ -->
+        <div class="card" id="mining-card"
+             style="background:linear-gradient(135deg,#0f1a08,#1a2f10,#0f1a08);
+                    border:1px solid #f59e0b; position:relative; overflow:hidden;">
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <h4 style="color:#fcd34d; margin:0;">⛏️ Coin Mining</h4>
+                <span style="font-size:11px; background:rgba(245,158,11,0.12);
+                             border:1px solid #f59e0b; border-radius:20px;
+                             padding:2px 10px; color:#fcd34d; white-space:nowrap;">
+                    +10 🪙/hr
+                </span>
+            </div>
+
+            <p style="font-size:12px; color:#94a3b8; margin-bottom:6px;">
+                Watch <b style="color:#fcd34d;">2 ads</b> → mine for <b style="color:#fcd34d;">1 hour</b> → collect <b style="color:#fcd34d;">10 coins!</b>
+            </p>
+
+            <div id="mining-ads-progress"
+                 style="font-size:11px; color:#64748b; margin-bottom:6px; text-align:center;">
+                0/2 ads watched
+            </div>
+
+            <div id="mining-status-label"
+                 style="font-size:12px; color:#94a3b8; text-align:center;
+                        margin-bottom:8px; font-weight:500; min-height:18px;">
+                Watch 2 ads to start mining!
+            </div>
+
+            <div style="display:flex; gap:10px; justify-content:center;
+                        background:rgba(245,158,11,0.08); border-radius:10px;
+                        padding:8px 12px; margin-bottom:10px;">
+                <div style="text-align:center;">
+                    <p style="font-size:10px; color:#92400e; margin:0;">⏱️ Duration</p>
+                    <p style="font-size:14px; font-weight:700; color:#fcd34d; margin:0;">1 Hour</p>
+                </div>
+                <div style="width:1px; background:#334155;"></div>
+                <div style="text-align:center;">
+                    <p style="font-size:10px; color:#92400e; margin:0;">🪙 Reward</p>
+                    <p style="font-size:14px; font-weight:700; color:#fcd34d; margin:0;">10 Coins</p>
+                </div>
+                <div style="width:1px; background:#334155;"></div>
+                <div style="text-align:center;">
+                    <p style="font-size:10px; color:#92400e; margin:0;">📺 Ads</p>
+                    <p style="font-size:14px; font-weight:700; color:#fcd34d; margin:0;">2 Ads</p>
+                </div>
+            </div>
+
+            <button id="mining-watch-ad-btn" class="btn" onclick="watchMiningAd()"
+                style="background:linear-gradient(135deg,#f59e0b,#d97706);
+                       color:#000; font-weight:700; margin-bottom:6px; display:none;">
+                📺 Watch Ad 0/2
+            </button>
+
+            <button id="mining-collect-btn" class="btn" onclick="collectMining()"
+                style="background:linear-gradient(135deg,#22c55e,#16a34a);
+                       color:#fff; font-weight:700; display:none;"
+                disabled>
+                ⛏️ Collect 10 Coins!
+            </button>
         </div>
 
         <!-- All-Tasks Complete Bonus -->
