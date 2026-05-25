@@ -180,7 +180,11 @@ MAX_YT_TASKS_PER_DAY  = 3
 MAX_WEB_TASKS_PER_DAY = 3
 
 CHANNEL_IDS                = ["official", "channel2", "channel3", "slot1", "slot2", "slot3", "slot4"]
-CHANNEL_REWARD_PER_CHANNEL = 5
+CHANNEL_REWARD_PER_CHANNEL = 5          # default reward for official channels
+CHANNEL_REWARDS            = {          # per-channel override (sponsor slots earn less)
+    "slot1": 3,
+    "slot2": 3,
+}
 CHANNEL_TOTAL_REWARD       = 15
 
 MAX_ADS_PER_DAY            = 10
@@ -213,7 +217,7 @@ SPIN_WEIGHTS = [15, 30, 25, 15, 8,   4,   2,   1  ]
 
 # --- Coin Mining ---
 MINING_ADS_REQUIRED   = 2  # Mining shuru karne ke liye 2 ads dekhne honge
-MINING_COOLDOWN_HOURS = 1  # 1 ghante baad hi dubara mine kar sakte ho
+MINING_COOLDOWN_SECS  = 60  # 1 minute baad hi dubara mine kar sakte ho
 MINING_DURATION_HOURS = 1  # 1 ghante ki mining session
 MINING_REWARD         = 10 # 1 session = 10 coins
 MINING_TOKEN_TTL      = 300
@@ -332,9 +336,16 @@ _security_lock = threading.Lock()
 
 
 def _get_client_ip() -> str:
-    """Request context se real IP nikalo."""
-    ip = request.headers.get("X-Forwarded-For", "") or request.remote_addr or ""
-    return ip.split(",")[0].strip()
+    """Request context se real IP nikalo.
+    X-Forwarded-For ke last IP ko use karo — Render proxy real IP append karta hai end mein.
+    Pehla IP attacker set kar sakta hai (spoofing), isliye last trusted hai.
+    """
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        ips = [ip.strip() for ip in forwarded.split(",") if ip.strip()]
+        if ips:
+            return ips[-1]
+    return request.remote_addr or ""
 
 
 def _is_ip_banned(ip: str) -> bool:
@@ -1090,12 +1101,13 @@ def daily_claim_token_api(user_id: int):
             return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
 
         now   = datetime.utcnow()
-        today = str(date.today())
         last_ts = user.get("last_claim_ts", "")
         if last_ts:
             try:
                 last_dt = datetime.fromisoformat(last_ts)
-                if last_dt.date().isoformat() == today:
+                # 24-hour strict window — date comparison nahi, exact time check
+                elapsed = (now - last_dt).total_seconds()
+                if elapsed < 86400:
                     next_claim_dt = last_dt + timedelta(hours=24)
                     remaining     = next_claim_dt - now
                     total_secs    = max(0, int(remaining.total_seconds()))
@@ -1104,7 +1116,7 @@ def daily_claim_token_api(user_id: int):
                     s = total_secs % 60
                     return jsonify({
                         "status":  "error",
-                        "message": f"Already claimed today! Come back in {h}h {m}m {s}s.",
+                        "message": f"Already claimed! Come back in {h}h {m}m {s}s.",
                         "data":    {
                             "remaining_seconds": total_secs,
                             "next_claim_utc":    next_claim_dt.isoformat(),
@@ -1158,7 +1170,8 @@ def claim_daily_api(user_id: int):
 
         if claim_token_raw:
             token_hash = hashlib.sha256(claim_token_raw.encode()).hexdigest()
-            token_doc  = ad_reward_tokens_col.find_one_and_delete({
+            # Pehle find karo, expiry check karo, PHIR delete karo
+            token_doc = ad_reward_tokens_col.find_one({
                 "_id":     token_hash,
                 "user_id": user_id,
                 "source":  "daily_claim",
@@ -1169,18 +1182,22 @@ def claim_daily_api(user_id: int):
                     "message": "Invalid or already used token. Please watch the ad again.",
                 }), 403
             if token_doc.get("expires_at") and token_doc["expires_at"] < datetime.utcnow():
+                ad_reward_tokens_col.delete_one({"_id": token_hash})
                 return jsonify({
                     "status":  "error",
                     "message": "Ad session expired. Please try again.",
                 }), 403
+            # Valid token — delete karo (consume)
+            ad_reward_tokens_col.delete_one({"_id": token_hash})
 
-        now   = datetime.utcnow()
-        today = str(date.today())
+        now     = datetime.utcnow()
         last_ts = user.get("last_claim_ts", "")
         if last_ts:
             try:
                 last_dt = datetime.fromisoformat(last_ts)
-                if last_dt.date().isoformat() == today:
+                # 24-hour strict window — date nahi, exact time check
+                elapsed = (now - last_dt).total_seconds()
+                if elapsed < 86400:
                     next_claim_dt = last_dt + timedelta(hours=24)
                     remaining     = next_claim_dt - now
                     total_secs    = max(0, int(remaining.total_seconds()))
@@ -1189,7 +1206,7 @@ def claim_daily_api(user_id: int):
                     s = total_secs % 60
                     return jsonify({
                         "status":  "error",
-                        "message": f"Already claimed today! Come back in {h}h {m}m {s}s.",
+                        "message": f"Already claimed! Come back in {h}h {m}m {s}s.",
                         "data":    {
                             "remaining_seconds": total_secs,
                             "next_claim_utc":    next_claim_dt.isoformat(),
@@ -1343,11 +1360,21 @@ def withdraw_api():
     elif method == "google_redeem":
         payment_address = "via_telegram"
 
-    if is_rate_limited(f"withdraw_{user_id}", WITHDRAW_COOLDOWN):
-        return jsonify({
-            "status":  "error",
-            "message": "One withdrawal request allowed per day. Please try again tomorrow.",
-        }), 429
+    # MongoDB-backed withdrawal cooldown — server restart se reset nahi hoga
+    _last_wd = withdrawals_col.find_one(
+        {"user_id": user_id},
+        sort=[("timestamp", -1)],
+        projection={"timestamp": 1},
+    )
+    if _last_wd and _last_wd.get("timestamp"):
+        _wd_elapsed = (datetime.utcnow() - _last_wd["timestamp"]).total_seconds()
+        if _wd_elapsed < WITHDRAW_COOLDOWN:
+            _wd_remaining_h = int((WITHDRAW_COOLDOWN - _wd_elapsed) // 3600)
+            _wd_remaining_m = int(((WITHDRAW_COOLDOWN - _wd_elapsed) % 3600) // 60)
+            return jsonify({
+                "status":  "error",
+                "message": f"One withdrawal per day allowed. Try again in {_wd_remaining_h}h {_wd_remaining_m}m.",
+            }), 429
 
     if REFERRAL_ACTIVE:
         _ref_user = users_col.find_one({"user_id": user_id}, {"referral_count": 1, "_id": 0})
@@ -1738,17 +1765,18 @@ def claim_channel_api():
                         "message": "Please join the channel first, then tap Retry!",
                     }), 400
 
+        reward = CHANNEL_REWARDS.get(channel_id, CHANNEL_REWARD_PER_CHANNEL)
         users_col.update_one(
             {"user_id": user_id},
             {
-                "$inc": {"coins": CHANNEL_REWARD_PER_CHANNEL},
+                "$inc": {"coins": reward},
                 "$set": {f"channel_claims.{channel_id}": True},
             },
         )
         return jsonify({
             "status":  "success",
-            "message": f"{CHANNEL_REWARD_PER_CHANNEL} coins credited for joining the channel!",
-            "data":    {"reward": CHANNEL_REWARD_PER_CHANNEL},
+            "message": f"{reward} coins credited for joining the channel!",
+            "data":    {"reward": reward},
         })
     except Exception as exc:
         logger.error("claim_channel error for %s: %s", user_id, exc)
@@ -3198,7 +3226,7 @@ def mining_ad_token_api(user_id: int):
             try:
                 last_collect_dt = datetime.fromisoformat(last_collect_str)
                 elapsed         = (datetime.utcnow() - last_collect_dt).total_seconds()
-                cooldown_sec    = MINING_COOLDOWN_HOURS * 3600
+                cooldown_sec    = MINING_COOLDOWN_SECS
                 if elapsed < cooldown_sec:
                     remaining  = int(cooldown_sec - elapsed)
                     mins       = remaining // 60
@@ -3459,7 +3487,7 @@ def get_mining_status_api(user_id: int):
             try:
                 last_dt  = datetime.fromisoformat(last_collect_str)
                 elapsed  = (now - last_dt).total_seconds()
-                cooldown = MINING_COOLDOWN_HOURS * 3600
+                cooldown = MINING_COOLDOWN_SECS
                 if elapsed < cooldown:
                     cooldown_remaining = int(cooldown - elapsed)
             except ValueError:
