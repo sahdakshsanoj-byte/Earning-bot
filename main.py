@@ -4204,17 +4204,74 @@ def feature_status_command(message):
 def get_stats(message):
     if int(message.from_user.id) != ADMIN_ID:
         return
-    total_u   = users_col.count_documents({})
-    pending_w = withdrawals_col.count_documents({"status": "Pending \u23f3"})
-    today_j   = users_col.count_documents({"joined": str(date.today())})
-    bot.reply_to(
-        message,
-        f"\U0001f4ca *Bot Stats*\n\n"
-        f"\U0001f465 Total Users: `{total_u}`\n"
-        f"\U0001f195 Today Joined: `{today_j}`\n"
-        f"\U0001f4b8 Pending Withdrawals: `{pending_w}`",
-        parse_mode="Markdown",
-    )
+
+    try:
+        # ── User counts ──
+        total_users   = users_col.count_documents({})
+        today_joined  = users_col.count_documents({"joined": str(date.today())})
+        banned_users  = users_col.count_documents({"blocked": True})
+        active_today  = users_col.count_documents({"last_active": str(date.today())})
+
+        # ── Coins currently held by all users ──
+        coins_agg = list(users_col.aggregate([
+            {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$coins", 0]}}}}
+        ]))
+        coins_in_wallets = int(coins_agg[0]["total"]) if coins_agg else 0
+
+        # ── Coins paid out via approved withdrawals ──
+        wd_agg = list(withdrawals_col.aggregate([
+            {"$match": {"status": "Approved \u2705"}},
+            {"$group": {"_id": None, "total": {"$sum": {
+                "$ifNull": ["$coins", {"$ifNull": ["$amount", 0]}]
+            }}}}
+        ]))
+        coins_paid_out = int(wd_agg[0]["total"]) if wd_agg else 0
+
+        # ── Total coins ever generated = held + paid out ──
+        total_coins_generated = coins_in_wallets + coins_paid_out
+
+        # ── Withdrawal counts ──
+        pending_wd  = withdrawals_col.count_documents({"status": "Pending \u23f3"})
+        approved_wd = withdrawals_col.count_documents({"status": "Approved \u2705"})
+        rejected_wd = withdrawals_col.count_documents({"status": "Rejected \u274c"})
+
+        # ── Top earner ──
+        top = users_col.find_one(
+            {"blocked": {"$ne": True}},
+            {"username": 1, "first_name": 1, "coins": 1},
+            sort=[("coins", -1)]
+        )
+        top_name  = top.get("username") or top.get("first_name") or "Unknown" if top else "—"
+        top_coins = top.get("coins", 0) if top else 0
+
+        text = (
+            "\U0001f4ca *Daksh Grand Earn — Full Stats*\n"
+            "\n"
+            "\U0001f465 *Users*\n"
+            f"  Total: `{total_users:,}`\n"
+            f"  Today Joined: `{today_joined:,}`\n"
+            f"  Active Today: `{active_today:,}`\n"
+            f"  Banned: `{banned_users}`\n"
+            "\n"
+            "\U0001fa99 *Coins*\n"
+            f"  Total Generated: `{total_coins_generated:,}` \U0001fa99\n"
+            f"  In Wallets: `{coins_in_wallets:,}` \U0001fa99\n"
+            f"  Paid Out: `{coins_paid_out:,}` \U0001fa99\n"
+            "\n"
+            "\U0001f4b8 *Withdrawals*\n"
+            f"  Pending: `{pending_wd}`\n"
+            f"  Approved: `{approved_wd}`\n"
+            f"  Rejected: `{rejected_wd}`\n"
+            "\n"
+            "\U0001f3c6 *Top Earner*\n"
+            f"  {top_name}: `{top_coins:,}` \U0001fa99"
+        )
+
+    except Exception as exc:
+        logger.error("get_stats error: %s", exc)
+        text = "\u26a0\ufe0f Error fetching stats. Check logs."
+
+    bot.reply_to(message, text, parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["health"])
