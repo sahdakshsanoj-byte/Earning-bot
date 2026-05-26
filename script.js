@@ -693,11 +693,12 @@ function drawSpinWheel(rotation) {
 function animateSpinWheel(targetSegIdx, durationMs, onComplete) {
     if (_wheelAnimId) cancelAnimationFrame(_wheelAnimId);
 
-    // Target rotation: put segment center under pointer (top = -PI/2 in canvas)
-    // Segment i center angle from 0: i * _WS_ANGLE + _WS_ANGLE/2
-    // We want: rotation + center = -PI/2  →  rotation = -PI/2 - center
+    // Target rotation: put segment center under pointer (top of wheel)
+    // drawSpinWheel draws segment i center at: rotation + i*_WS_ANGLE - π/2 + _WS_ANGLE/2
+    // For that to equal -π/2 (top, where pointer is):
+    //   rotation + center - π/2 = -π/2  →  rotation = -center
     const center     = targetSegIdx * _WS_ANGLE + _WS_ANGLE / 2;
-    const baseTarget = -Math.PI / 2 - center;
+    const baseTarget = -center;
 
     // Normalize to positive, then add full spins
     const basePos    = ((baseTarget % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
