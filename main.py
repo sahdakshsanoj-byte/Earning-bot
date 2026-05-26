@@ -55,14 +55,15 @@ logger = logging.getLogger(__name__)
 # 2. ENVIRONMENT VARIABLES
 # ============================================================
 
-BOT_TOKEN      = (os.getenv("BOT_TOKEN")      or "").strip()
-MONGO_URI      = (os.getenv("MONGO_URI")       or "").strip()
-ADMIN_ID_STR   = (os.getenv("ADMIN_ID")        or "").strip()
-BOT_USERNAME   = (os.getenv("BOT_USERNAME")    or "YourBotUsername").strip()
-RENDER_URL     = (os.getenv("RENDER_URL")      or "").strip()
-FRONTEND_URL   = (os.getenv("FRONTEND_URL")    or "https://sahdakshsanoj-byte.github.io").strip()
-ADMIN_TOKEN    = (os.getenv("ADMIN_TOKEN")     or "").strip()
-MOD_TOKEN      = (os.getenv("MOD_TOKEN")       or "").strip()
+BOT_TOKEN         = (os.getenv("BOT_TOKEN")         or "").strip()
+MONGO_URI         = (os.getenv("MONGO_URI")          or "").strip()
+ADMIN_ID_STR      = (os.getenv("ADMIN_ID")           or "").strip()
+BOT_USERNAME      = (os.getenv("BOT_USERNAME")       or "YourBotUsername").strip()
+RENDER_URL        = (os.getenv("RENDER_URL")         or "").strip()
+FRONTEND_URL      = (os.getenv("FRONTEND_URL")       or "https://sahdakshsanoj-byte.github.io").strip()
+ADMIN_TOKEN       = (os.getenv("ADMIN_TOKEN")        or "").strip()
+MOD_TOKEN         = (os.getenv("MOD_TOKEN")          or "").strip()
+MONETAG_API_TOKEN = (os.getenv("MONETAG_API_TOKEN")  or "").strip()  # Monetag publisher API token
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:32] if BOT_TOKEN else ""
 
 # Referral Lock — Render dashboard mein set karo: REFERRAL_ACTIVE = false → bypass referral check
@@ -4272,6 +4273,106 @@ def get_stats(message):
         text = "\u26a0\ufe0f Error fetching stats. Check logs."
 
     bot.reply_to(message, text, parse_mode="Markdown")
+
+
+@bot.message_handler(commands=["monetag"])
+def cmd_monetag_stats(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+
+    today_str = str(date.today())
+    lines = ["\U0001f4b0 *Monetag Earning Stats*\n"]
+
+    # ── Part 1: Internal ad stats from MongoDB ──
+    try:
+        # Total ads watched today across all users
+        agg_today = list(users_col.aggregate([
+            {"$match": {"ads_date": today_str}},
+            {"$group": {"_id": None,
+                        "total_ads": {"$sum": {"$ifNull": ["$ads_today", 0]}},
+                        "users":     {"$sum": 1}}}
+        ]))
+        ads_today_total = int(agg_today[0]["total_ads"]) if agg_today else 0
+        active_ad_users = int(agg_today[0]["users"])     if agg_today else 0
+
+        # All-time total ads (sum of ads_today for all dates — best estimate from DB)
+        agg_all = list(users_col.aggregate([
+            {"$group": {"_id": None,
+                        "total": {"$sum": {"$ifNull": ["$ads_today", 0]}}}}
+        ]))
+        # Note: ads_today resets daily so this only reflects today across all users;
+        # for all-time we use a separate counter if available, else show today only.
+        total_users_ever = users_col.count_documents({})
+
+        lines.append("\U0001f4ca *Internal Tracker (MongoDB)*")
+        lines.append(f"  Ads Watched Today: `{ads_today_total:,}`")
+        lines.append(f"  Users Who Watched Ads Today: `{active_ad_users}`")
+        lines.append(f"  Max Possible Today: `{total_users_ever * MAX_ADS_PER_DAY:,}` ({total_users_ever}u × {MAX_ADS_PER_DAY})")
+        lines.append(f"  Fill Rate: `{round(ads_today_total / max(total_users_ever * MAX_ADS_PER_DAY, 1) * 100, 1)}%`")
+        lines.append("")
+    except Exception as e:
+        logger.error("monetag internal stats error: %s", e)
+        lines.append("  ⚠️ Internal stats error")
+        lines.append("")
+
+    # ── Part 2: Monetag Publisher API ──
+    if not MONETAG_API_TOKEN:
+        lines.append("\U0001f512 *Monetag API*")
+        lines.append("  Not configured\\.")
+        lines.append("  Set `MONETAG_API_TOKEN` env var on Render\\.")
+        lines.append("  Get token: Monetag Dashboard → API → Publisher Token")
+    else:
+        try:
+            yesterday_str = str(date.fromordinal(date.today().toordinal() - 1))
+            api_url = "https://api.monetag.com/api/pub/statistic/list/"
+            headers = {
+                "Authorization": f"Bearer {MONETAG_API_TOKEN}",
+                "Content-Type":  "application/json",
+            }
+            # Fetch last 7 days
+            payload = {
+                "from_date": str(date.fromordinal(date.today().toordinal() - 6)),
+                "to_date":   today_str,
+            }
+            resp = req_lib.post(api_url, json=payload, headers=headers, timeout=10)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                rows = data.get("data") or data.get("results") or (data if isinstance(data, list) else [])
+
+                total_impr   = sum(int(r.get("impressions", 0))   for r in rows)
+                total_clicks = sum(int(r.get("clicks", 0))        for r in rows)
+                total_rev    = sum(float(r.get("revenue", 0))     for r in rows)
+                avg_cpm      = (total_rev / max(total_impr, 1)) * 1000
+
+                # Today's row if available
+                today_row  = next((r for r in rows if r.get("date") == today_str), None)
+                today_rev  = float(today_row.get("revenue", 0))    if today_row else 0.0
+                today_impr = int(today_row.get("impressions", 0))  if today_row else 0
+
+                lines.append("\U0001f7e2 *Monetag API (Live)*")
+                lines.append(f"  📅 Today Revenue: `${today_rev:.4f}`")
+                lines.append(f"  📅 Today Impressions: `{today_impr:,}`")
+                lines.append(f"  📆 Last 7 Days Revenue: `${total_rev:.4f}`")
+                lines.append(f"  📆 Last 7 Days Impressions: `{total_impr:,}`")
+                lines.append(f"  📆 Last 7 Days Clicks: `{total_clicks:,}`")
+                lines.append(f"  📊 Avg CPM: `${avg_cpm:.3f}`")
+
+            elif resp.status_code == 401:
+                lines.append("  ❌ Monetag API: Invalid token\\. Check `MONETAG_API_TOKEN`\\.")
+            else:
+                lines.append(f"  ⚠️ Monetag API error: HTTP {resp.status_code}")
+
+        except req_lib.exceptions.Timeout:
+            lines.append("  ⚠️ Monetag API timeout\\. Try again\\.")
+        except Exception as e:
+            logger.error("monetag api error: %s", e)
+            lines.append(f"  ⚠️ Monetag API error: {type(e).__name__}")
+
+    lines.append("")
+    lines.append("_Use /stats for full user & coin stats_")
+
+    bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["health"])
