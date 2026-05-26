@@ -196,7 +196,7 @@ AD_MIN_PER_DAY             = 8
 PROMO_TASK_REWARD = 5
 ALL_TASKS_BONUS   = 10
 
-MIN_WITHDRAW      = 5000
+MIN_WITHDRAW      = 25000
 MAX_WITHDRAW      = 100000
 WITHDRAW_COOLDOWN = 86400
 
@@ -1377,13 +1377,14 @@ def withdraw_api():
                 "message": f"One withdrawal per day allowed. Try again in {_wd_remaining_h}h {_wd_remaining_m}m.",
             }), 429
 
+    # ── Referral check (REFERRAL_ACTIVE env var se on/off) ──────────────────
     if REFERRAL_ACTIVE:
         _ref_user = users_col.find_one({"user_id": user_id}, {"referral_count": 1, "_id": 0})
         ref_count = _ref_user.get("referral_count", 0) if _ref_user else 0
         if ref_count < 5:
             return jsonify({
                 "status":  "error",
-                "message": f"You need {5 - ref_count} more referrals to withdraw.",
+                "message": f"You need {5 - ref_count} more referral(s) to unlock withdrawal.",
             }), 400
 
     result = users_col.find_one_and_update(
