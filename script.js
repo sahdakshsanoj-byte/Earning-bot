@@ -22,7 +22,7 @@ let monetagPreloaded   = false;
 const MAX_ADS_PER_DAY    = 10;
 const MAX_YT_PER_DAY     = 3;
 const MAX_WEB_PER_DAY    = 3;
-const MIN_WITHDRAW_COINS = 5000;
+const MIN_WITHDRAW_COINS = 25000;
 const ALL_TASKS_BONUS    = 10;
 
 // ============================================================
@@ -1229,8 +1229,12 @@ async function requestWithdraw() {
     if (reqAmount < MIN_WITHDRAW_COINS) return showToast(`Minimum ${MIN_WITHDRAW_COINS} coins required.`, "error");
     if (reqAmount > totalCoins)         return showToast(`Insufficient balance. You have ${totalCoins} coins.`, "error");
 
-    if (CONFIG.REFERRAL_ACTIVE !== false && refCount < 5) {
-        return showToast(`You need 5 referrals to withdraw. You have ${refCount}/5.`, "error");
+    // Referral check — CONFIG.REFERRAL_ACTIVE: true hone par 5 referrals zaroori
+    if (CONFIG.REFERRAL_ACTIVE === true) {
+        const refCount = getRefCount(userData?.referrals);
+        if (refCount < 5) {
+            return showToast(`You need ${5 - refCount} more referral(s) to unlock withdrawal.`, "error");
+        }
     }
 
     let paymentAddress = '';
