@@ -59,7 +59,7 @@ const CONFIG = {
     //   Default: false (locked) — change to true when you have
     //   YT videos ready and want users to start earning from them.
     // ──────────────────────────────────────────────────────────
-    YT_TASKS_ACTIVE: false,
+    YT_TASKS_ACTIVE: true,
 
     // YouTube video links for Task tab (replace with your own)
     YT_LINKS: {
