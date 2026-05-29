@@ -3533,6 +3533,202 @@ def get_mining_status_api(user_id: int):
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
+# ============================================================
+# 💣 BOMB BOX CHALLENGE — Web App API
+# ============================================================
+
+@app.route("/bomb_box_status/<int:user_id>", methods=["GET"])
+def bomb_box_status_api(user_id: int):
+    try:
+        cfg = get_feature_config()
+        if not cfg.get("bomb_box_active", True):
+            return jsonify({"bomb_box_active": False})
+
+        user = users_col.find_one({"user_id": user_id, "blocked": {"$ne": True}})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+
+        last = bomb_box_col.find_one(
+            {"user_id": user_id, "played": True},
+            sort=[("timestamp", -1)]
+        )
+        cooldown_remaining = 0
+        if last:
+            elapsed = time.time() - last.get("timestamp", 0)
+            cooldown_remaining = max(0, int(BOMB_BOX_COOLDOWN_SECS - elapsed))
+
+        active_game = bomb_box_col.find_one({
+            "user_id":  user_id,
+            "played":   False,
+            "timestamp": {"$gt": time.time() - BOMB_BOX_GAME_TTL},
+        })
+
+        return jsonify({
+            "bomb_box_active":   True,
+            "cooldown_remaining": cooldown_remaining,
+            "active_game_id":    active_game["game_id"] if active_game else None,
+        })
+    except Exception as exc:
+        logger.error("bomb_box_status error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/bomb_box_token/<int:user_id>", methods=["POST"])
+def bomb_box_token_api(user_id: int):
+    try:
+        cfg = get_feature_config()
+        if not cfg.get("bomb_box_active", True):
+            return jsonify({"status": "error", "message": "Bomb Box is currently locked."}), 403
+
+        user = users_col.find_one({"user_id": user_id, "blocked": {"$ne": True}})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+
+        last = bomb_box_col.find_one(
+            {"user_id": user_id, "played": True},
+            sort=[("timestamp", -1)]
+        )
+        if last:
+            elapsed    = time.time() - last.get("timestamp", 0)
+            remaining  = BOMB_BOX_COOLDOWN_SECS - elapsed
+            if remaining > 0:
+                mins = int(remaining // 60)
+                secs = int(remaining % 60)
+                return jsonify({
+                    "status":  "cooldown",
+                    "message": f"Cooldown active. Come back in {mins}m {secs}s.",
+                }), 429
+
+        token      = secrets.token_hex(16)
+        expires_at = datetime.utcnow() + timedelta(seconds=BOMB_BOX_GAME_TTL)
+        ad_reward_tokens_col.insert_one({
+            "token":      token,
+            "user_id":    user_id,
+            "type":       "bomb_box",
+            "expires_at": expires_at,
+        })
+        return jsonify({"status": "success", "token": token})
+    except Exception as exc:
+        logger.error("bomb_box_token error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/bomb_box_start/<int:user_id>", methods=["POST"])
+def bomb_box_start_api(user_id: int):
+    try:
+        cfg = get_feature_config()
+        if not cfg.get("bomb_box_active", True):
+            return jsonify({"status": "error", "message": "Bomb Box is currently locked."}), 403
+
+        data  = request.get_json(silent=True) or {}
+        token = (data.get("token") or "").strip()
+        if not token:
+            return jsonify({"status": "error", "message": "Ad token required."}), 400
+
+        now     = datetime.utcnow()
+        tok_doc = ad_reward_tokens_col.find_one_and_delete({
+            "token":      token,
+            "user_id":    user_id,
+            "type":       "bomb_box",
+            "expires_at": {"$gt": now},
+        })
+        if not tok_doc:
+            return jsonify({"status": "error", "message": "Invalid or expired ad token. Watch the ad again."}), 400
+
+        user = users_col.find_one({"user_id": user_id, "blocked": {"$ne": True}})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+
+        # Re-check cooldown
+        last = bomb_box_col.find_one(
+            {"user_id": user_id, "played": True},
+            sort=[("timestamp", -1)]
+        )
+        if last:
+            elapsed = time.time() - last.get("timestamp", 0)
+            if BOMB_BOX_COOLDOWN_SECS - elapsed > 0:
+                return jsonify({"status": "cooldown", "message": "Cooldown still active."}), 429
+
+        # Expire any stale active games
+        bomb_box_col.update_many(
+            {"user_id": user_id, "played": False},
+            {"$set": {"played": True, "expired": True}},
+        )
+
+        game_id = secrets.token_hex(12)
+        boxes   = _make_box_layout()
+        bomb_box_col.insert_one({
+            "game_id":   game_id,
+            "user_id":   user_id,
+            "boxes":     boxes,
+            "played":    False,
+            "timestamp": time.time(),
+        })
+        return jsonify({"status": "success", "game_id": game_id})
+    except Exception as exc:
+        logger.error("bomb_box_start error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/bomb_box_pick/<int:user_id>", methods=["POST"])
+def bomb_box_pick_api(user_id: int):
+    try:
+        data      = request.get_json(silent=True) or {}
+        game_id   = (data.get("game_id")   or "").strip()
+        box_index = data.get("box_index")
+
+        if not game_id or box_index is None:
+            return jsonify({"status": "error", "message": "game_id and box_index required."}), 400
+
+        box_index = int(box_index)
+        if box_index not in range(4):
+            return jsonify({"status": "error", "message": "Invalid box index."}), 400
+
+        now  = time.time()
+        game = bomb_box_col.find_one_and_update(
+            {
+                "game_id":   game_id,
+                "user_id":   user_id,
+                "played":    False,
+                "timestamp": {"$gt": now - BOMB_BOX_GAME_TTL},
+            },
+            {"$set": {"played": True, "pick": box_index, "result_time": now}},
+            return_document=True,
+        )
+
+        if game is None:
+            return jsonify({"status": "error", "message": "Game expired or already played. Start a new game."}), 400
+
+        boxes     = game["boxes"]
+        chosen    = boxes[box_index]
+        box_type  = chosen["type"]
+        coins_won = chosen["value"] if box_type == "reward" else 0
+
+        if box_type == "reward":
+            users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins_won}})
+            bomb_box_col.update_one({"game_id": game_id}, {"$set": {"coins_won": coins_won, "won": True}})
+            message = random.choice(BOMB_BOX_FUN_WIN_MSGS)
+        else:
+            bomb_box_col.update_one({"game_id": game_id}, {"$set": {"coins_won": 0, "won": False}})
+            message = random.choice(BOMB_BOX_FUN_BOMB_MSGS)
+
+        reveal      = [{"index": i, "type": b["type"], "value": b["value"]} for i, b in enumerate(boxes)]
+        new_balance = (users_col.find_one({"user_id": user_id}) or {}).get("coins", 0)
+
+        return jsonify({
+            "status":      "success",
+            "result":      box_type,
+            "coins_won":   coins_won,
+            "message":     message.replace("*", ""),
+            "reveal":      reveal,
+            "picked":      box_index,
+            "new_balance": new_balance,
+        })
+    except Exception as exc:
+        logger.error("bomb_box_pick error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
 # ── Admin API: feature lock/unlock ────────────────────────────
 
 @app.route("/admin/set_feature", methods=["POST"])
@@ -3543,9 +3739,9 @@ def admin_set_feature():
     data    = request.get_json(silent=True) or {}
     feature = (data.get("feature") or "").strip().lower()
     active  = bool(data.get("active", True))
-    if feature not in ("spin", "mining"):
-        return jsonify({"status": "error", "message": "feature must be 'spin' or 'mining'"}), 400
-    field = "spin_active" if feature == "spin" else "mining_active"
+    if feature not in ("spin", "mining", "bomb_box"):
+        return jsonify({"status": "error", "message": "feature must be 'spin', 'mining', or 'bomb_box'"}), 400
+    field = {"spin": "spin_active", "mining": "mining_active", "bomb_box": "bomb_box_active"}[feature]
     config_col.update_one(
         {"_id": "feature_config"},
         {"$set": {field: active}},
@@ -3628,15 +3824,21 @@ def start(message):
     current_coins = user.get("coins", 0)
     web_app_url   = f"https://sahdakshsanoj-byte.github.io/Earning-bot/?user_id={user_id}"
 
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("\U0001f4b0 Open Earning Hub", web_app=types.WebAppInfo(web_app_url)))
-    markup.add(types.InlineKeyboardButton("\U0001f465 Invite Friends", callback_data="invite_friends"))
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("\U0001f4b0 Open Earning Hub", web_app=types.WebAppInfo(web_app_url))
+    )
+    markup.add(
+        types.InlineKeyboardButton("\U0001f4a3 Bomb Box Challenge", callback_data=f"bb_start:{user_id}"),
+        types.InlineKeyboardButton("\U0001f465 Invite Friends",     callback_data="invite_friends"),
+    )
 
     bot.send_message(
         user_id,
         f"\U0001f44b *Hello {username}!*\n\n"
         f"\U0001f4b0 Balance: *{current_coins} \U0001fa99*\n\n"
-        f"Invite friends and earn *30 coins* for each referral!\n"
+        f"Invite friends and earn *30 coins* for each referral!\n\n"
+        f"\U0001f4a3 *New!* Try Bomb Box Challenge — pick a box & win coins!\n\n"
         f"Tap the button below to start earning! \U0001f680",
         reply_markup=markup,
         parse_mode="Markdown",
@@ -5527,6 +5729,20 @@ def run_bot() -> None:
                 bot.remove_webhook()
             except Exception as webhook_exc:
                 logger.warning("Could not remove webhook before polling: %s", webhook_exc)
+            # ── Register bot commands in Telegram menu ──
+            try:
+                bot.set_my_commands([
+                    types.BotCommand("start",      "🚀 Bot shuru karo"),
+                    types.BotCommand("balance",    "💰 Apna balance dekho"),
+                    types.BotCommand("bomb",       "💣 Bomb Box Challenge khelo"),
+                    types.BotCommand("bombboard",  "🏆 Bomb Box Leaderboard dekho"),
+                    types.BotCommand("invite",     "👥 Friends ko invite karo"),
+                    types.BotCommand("stats",      "📊 Bot stats dekho (Admin)"),
+                    types.BotCommand("monetag",    "💵 Monetag earnings dekho (Admin)"),
+                ])
+                logger.info("Bot commands registered successfully.")
+            except Exception as cmd_exc:
+                logger.warning("Could not set bot commands: %s", cmd_exc)
             bot.polling(none_stop=True, interval=1, timeout=20)
         except Exception as exc:
             error_text = str(exc)
