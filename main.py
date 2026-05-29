@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import secrets
 import time
@@ -113,6 +114,7 @@ try:
     group_code_violations_col = db["group_code_violations"]
     promo_tasks_col           = db["promo_tasks"]
     lottery_col               = db["lottery"]
+    bomb_box_col              = db["bomb_box_games"]
 
     try:
         rate_col.create_index("expires_at", expireAfterSeconds=0)
@@ -223,6 +225,25 @@ MINING_DURATION_HOURS = 1  # 1 ghante ki mining session
 MINING_REWARD         = 10 # 1 session = 10 coins
 MINING_TOKEN_TTL      = 300
 
+# --- 💣 Bomb Box Challenge ---
+BOMB_BOX_COOLDOWN_SECS = 900           # 15 minutes between games
+BOMB_BOX_REWARDS       = [5, 10, 20]   # Coins in the 3 safe boxes
+BOMB_BOX_GAME_TTL      = 300           # 5 min to pick a box or game expires
+BOMB_BOX_FUN_WIN_MSGS  = [
+    "🎉 *Lucky! Reward mil gaya!*",
+    "💰 *Coins wallet mein hain! Boom!*",
+    "⚡ *Amazing! You survived the blast!*",
+    "🔥 *Jackpot Win! Keep it up!*",
+    "😎 *Nailed it! Sabse smart player!*",
+]
+BOMB_BOX_FUN_BOMB_MSGS = [
+    "💣 *Boom! Better Luck Next Time!*",
+    "😭 *Oops! Bomb blast ho gaya!*",
+    "💥 *KABOOM! Try again in 15 min!*",
+    "🙈 *Nooo! That was the bomb!*",
+    "😤 *Itna close! Par boom ho gaya...*",
+]
+
 _feature_cfg_cache      = None
 _feature_cfg_cache_time = 0.0
 FEATURE_CFG_CACHE_TTL   = 30
@@ -230,9 +251,9 @@ FEATURE_CFG_CACHE_TTL   = 30
 
 def get_feature_config() -> dict:
     """
-    DB se spin_active + mining_active fetch karo.
-    Default: dono active.
-    Admin /togglespin aur /togglemining se control kar sakta hai.
+    DB se spin_active + mining_active + bomb_box_active fetch karo.
+    Default: sab active.
+    Admin /togglespin, /togglemining, /togglebomb se control kar sakta hai.
     """
     global _feature_cfg_cache, _feature_cfg_cache_time
     now = time.time()
@@ -241,11 +262,12 @@ def get_feature_config() -> dict:
     try:
         doc = config_col.find_one({"_id": "feature_config"}) or {}
         merged = {
-            "spin_active":   bool(doc.get("spin_active",   True)),
-            "mining_active": bool(doc.get("mining_active", True)),
+            "spin_active":      bool(doc.get("spin_active",      True)),
+            "mining_active":    bool(doc.get("mining_active",    True)),
+            "bomb_box_active":  bool(doc.get("bomb_box_active",  True)),
         }
     except Exception:
-        merged = {"spin_active": True, "mining_active": True}
+        merged = {"spin_active": True, "mining_active": True, "bomb_box_active": True}
     _feature_cfg_cache      = merged
     _feature_cfg_cache_time = now
     return merged
@@ -4374,6 +4396,385 @@ def cmd_monetag_stats(message):
     lines.append("_Use /stats for full user & coin stats_")
 
     bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
+
+
+# ============================================================
+# 💣 BOMB BOX CHALLENGE — Helper
+# ============================================================
+
+def _bomb_cooldown_remaining(user_id: int) -> int:
+    """Return seconds left on bomb box cooldown, 0 if ready."""
+    try:
+        last = bomb_box_col.find_one(
+            {"user_id": user_id, "played": True},
+            sort=[("timestamp", -1)]
+        )
+        if not last:
+            return 0
+        elapsed = time.time() - last.get("timestamp", 0)
+        remaining = BOMB_BOX_COOLDOWN_SECS - elapsed
+        return max(0, int(remaining))
+    except Exception:
+        return 0
+
+
+def _make_box_layout() -> list:
+    """Shuffle 3 rewards + 1 bomb into 4 boxes."""
+    boxes = [{"type": "reward", "value": v} for v in BOMB_BOX_REWARDS]
+    boxes.append({"type": "bomb", "value": 0})
+    random.shuffle(boxes)
+    return boxes
+
+
+def _bomb_box_markup(game_id: str) -> types.InlineKeyboardMarkup:
+    """2×2 inline keyboard for picking a box."""
+    mk = types.InlineKeyboardMarkup(row_width=2)
+    btns = [
+        types.InlineKeyboardButton(f"📦 Box {i+1}", callback_data=f"bb_pick:{game_id}:{i}")
+        for i in range(4)
+    ]
+    mk.add(*btns)
+    return mk
+
+
+# ============================================================
+# 💣 /togglebomb — Admin command (lock/unlock Bomb Box)
+# ============================================================
+
+@bot.message_handler(commands=["togglebomb"])
+def toggle_bomb_box(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        cfg = config_col.find_one({"_id": "feature_config"}) or {}
+        current = bool(cfg.get("bomb_box_active", True))
+        new_val = not current
+        config_col.update_one(
+            {"_id": "feature_config"},
+            {"$set": {"bomb_box_active": new_val}},
+            upsert=True,
+        )
+        _bust_feature_cache()
+        status = "🟢 *ACTIVE*" if new_val else "🔴 *LOCKED*"
+        bot.reply_to(
+            message,
+            f"💣 Bomb Box Challenge is now {status}\n\n"
+            f"Toggle again with /togglebomb",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logger.error("togglebomb error: %s", exc)
+        bot.reply_to(message, "⚠️ Error toggling Bomb Box. Check logs.")
+
+
+# ============================================================
+# 💣 /bomb — Start Bomb Box Challenge
+# ============================================================
+
+@bot.message_handler(commands=["bomb", "bombbox"])
+def bomb_box_start(message):
+    user_id  = message.from_user.id
+    username = message.from_user.first_name or "Player"
+
+    # ── Feature lock check ──
+    fcfg = get_feature_config()
+    if not fcfg.get("bomb_box_active", True):
+        bot.reply_to(
+            message,
+            "🔒 *Bomb Box Challenge is currently locked.*\n\n"
+            "Stay tuned — it'll be back soon! 🚀",
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── User must be registered ──
+    user = users_col.find_one({"user_id": user_id})
+    if not user:
+        bot.reply_to(message, "Please use /start to register first!")
+        return
+
+    # ── Cooldown check ──
+    remaining = _bomb_cooldown_remaining(user_id)
+    if remaining > 0:
+        mins = remaining // 60
+        secs = remaining % 60
+        bot.reply_to(
+            message,
+            f"⏳ *Cooldown Active!*\n\n"
+            f"Next game in *{mins}m {secs}s*.\n"
+            f"Come back soon! 🎯",
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── Show intro + Play button ──
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("🎮 Start Game!", callback_data=f"bb_start:{user_id}"))
+
+    rewards_text = " | ".join([f"💰 {r}" for r in BOMB_BOX_REWARDS])
+    bot.send_message(
+        user_id,
+        f"💣 *Bomb Box Challenge*\n"
+        f"{'━' * 28}\n\n"
+        f"🎯 4 boxes hain — 1 bomb 💣, 3 rewards!\n\n"
+        f"💎 *Possible Rewards:* {rewards_text} coins\n"
+        f"⏰ *Cooldown:* 15 minutes per game\n\n"
+        f"🧠 Choose wisely — ek hi chance milta hai!\n\n"
+        f"*Tap below to reveal the boxes!* 👇",
+        reply_markup=mk,
+        parse_mode="Markdown",
+    )
+
+
+# ── Callback: bb_start — Generate game & show boxes ──
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("bb_start:"))
+def bomb_box_show_boxes(call):
+    try:
+        parts   = call.data.split(":")
+        owner   = int(parts[1])
+        user_id = call.from_user.id
+
+        # Anti-cheat: only the original user can play
+        if user_id != owner:
+            bot.answer_callback_query(call.id, "❌ Ye game tumhara nahi hai!", show_alert=True)
+            return
+
+        fcfg = get_feature_config()
+        if not fcfg.get("bomb_box_active", True):
+            bot.answer_callback_query(call.id, "🔒 Game locked!", show_alert=True)
+            return
+
+        remaining = _bomb_cooldown_remaining(user_id)
+        if remaining > 0:
+            mins = remaining // 60
+            secs = remaining % 60
+            bot.answer_callback_query(
+                call.id,
+                f"⏳ Cooldown! {mins}m {secs}s baad try karo.",
+                show_alert=True,
+            )
+            return
+
+        # ── Create game in DB ──
+        game_id = f"{user_id}_{int(time.time() * 1000)}"
+        boxes   = _make_box_layout()
+        bomb_box_col.insert_one({
+            "game_id":   game_id,
+            "user_id":   user_id,
+            "boxes":     boxes,
+            "played":    False,
+            "timestamp": time.time(),
+        })
+
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=(
+                f"💣 *Bomb Box Challenge — Pick Your Box!*\n"
+                f"{'━' * 28}\n\n"
+                f"🎯 Ek box chunno — bombs se bacho!\n"
+                f"💡 Sirf *ek chance* hai — sochke chuno!\n\n"
+                f"⚠️ *Ek baar click karne ke baad change nahi hoga!*"
+            ),
+            reply_markup=_bomb_box_markup(game_id),
+            parse_mode="Markdown",
+        )
+        bot.answer_callback_query(call.id, "📦 Boxes ready! Pick wisely!")
+
+    except Exception as exc:
+        logger.error("bomb_box_show_boxes error: %s", exc)
+        bot.answer_callback_query(call.id, "⚠️ Error. Try /bomb again.", show_alert=True)
+
+
+# ── Callback: bb_pick — Process box pick ──
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("bb_pick:"))
+def bomb_box_pick(call):
+    try:
+        parts     = call.data.split(":")
+        game_id   = parts[1]
+        box_index = int(parts[2])
+        user_id   = call.from_user.id
+
+        # ── Atomic claim — only works once (anti-cheat) ──
+        game = bomb_box_col.find_one_and_update(
+            {"game_id": game_id, "user_id": user_id, "played": False},
+            {"$set": {"played": True, "pick": box_index, "result_time": time.time()}},
+            return_document=True,
+        )
+
+        if game is None:
+            bot.answer_callback_query(
+                call.id,
+                "❌ Already played or game expired! Use /bomb to start a new game.",
+                show_alert=True,
+            )
+            return
+
+        boxes     = game["boxes"]
+        chosen    = boxes[box_index]
+        box_type  = chosen["type"]
+        coins_won = chosen["value"]
+
+        # ── Build reveal grid ──
+        def box_label(i: int) -> str:
+            b = boxes[i]
+            if i == box_index:
+                return "💣" if b["type"] == "bomb" else f"✅ {b['value']}"
+            return "📦"
+
+        grid = (
+            f"{box_label(0)}  {box_label(1)}\n"
+            f"{box_label(2)}  {box_label(3)}"
+        )
+
+        if box_type == "reward":
+            # ── Add coins ──
+            users_col.update_one(
+                {"user_id": user_id},
+                {"$inc": {"coins": coins_won}},
+            )
+            # ── Update leaderboard stats ──
+            bomb_box_col.update_one(
+                {"game_id": game_id},
+                {"$set": {"coins_won": coins_won, "won": True}},
+            )
+            fun_msg = random.choice(BOMB_BOX_FUN_WIN_MSGS)
+            new_bal = (users_col.find_one({"user_id": user_id}) or {}).get("coins", 0)
+            result_text = (
+                f"💣 *Bomb Box Challenge — Result!*\n"
+                f"{'━' * 28}\n\n"
+                f"{fun_msg}\n\n"
+                f"🎁 *+{coins_won} coins* added to your wallet!\n"
+                f"💰 New Balance: *{new_bal} 🪙*\n\n"
+                f"*Box Reveal:*\n{grid}\n\n"
+                f"⏰ Next game in *15 minutes*\n"
+                f"🎮 Use /bomb to play again!"
+            )
+            bot.answer_callback_query(call.id, f"🎉 +{coins_won} coins! Lucky you!")
+
+        else:
+            # ── Bomb! No coins ──
+            bomb_box_col.update_one(
+                {"game_id": game_id},
+                {"$set": {"coins_won": 0, "won": False}},
+            )
+            fun_msg = random.choice(BOMB_BOX_FUN_BOMB_MSGS)
+            result_text = (
+                f"💣 *Bomb Box Challenge — Result!*\n"
+                f"{'━' * 28}\n\n"
+                f"{fun_msg}\n\n"
+                f"😢 *0 coins* — Bomb box chun liya!\n\n"
+                f"*Box Reveal:*\n{grid}\n\n"
+                f"⏰ Next game in *15 minutes*\n"
+                f"🎮 Use /bomb to try again!"
+            )
+            bot.answer_callback_query(call.id, "💣 BOOM! Better luck next time!")
+
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=result_text,
+            parse_mode="Markdown",
+        )
+
+    except Exception as exc:
+        logger.error("bomb_box_pick error: %s", exc)
+        bot.answer_callback_query(call.id, "⚠️ Error. Please try /bomb again.", show_alert=True)
+
+
+# ============================================================
+# 🏆 /bombboard — Bomb Box Leaderboard
+# ============================================================
+
+@bot.message_handler(commands=["bombboard"])
+def bomb_box_leaderboard(message):
+    user_id = message.from_user.id
+    get_or_create_user(user_id, message.from_user.first_name or "User")
+
+    try:
+        # ── Top winners by total coins won ──
+        top_winners = list(bomb_box_col.aggregate([
+            {"$match": {"played": True, "won": True}},
+            {"$group": {
+                "_id":        "$user_id",
+                "total_won":  {"$sum": "$coins_won"},
+                "games_won":  {"$sum": 1},
+            }},
+            {"$sort": {"total_won": -1}},
+            {"$limit": 5},
+        ]))
+
+        # ── Most games played ──
+        most_played = list(bomb_box_col.aggregate([
+            {"$match": {"played": True}},
+            {"$group": {
+                "_id":         "$user_id",
+                "total_games": {"$sum": 1},
+            }},
+            {"$sort": {"total_games": -1}},
+            {"$limit": 5},
+        ]))
+
+        def get_name(uid: int) -> str:
+            u = users_col.find_one({"user_id": uid}, {"username": 1, "first_name": 1})
+            if not u:
+                return f"User {uid}"
+            return u.get("username") or u.get("first_name") or f"User {uid}"
+
+        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+
+        # ── Build text ──
+        lines = [
+            "💣 *Bomb Box — Leaderboard*",
+            f"{'━' * 28}\n",
+            "🏆 *Top Earners (Coins Won)*",
+        ]
+        if top_winners:
+            for i, row in enumerate(top_winners):
+                name = get_name(row["_id"])
+                lines.append(
+                    f"{medals[i]} {name}: *{row['total_won']} 🪙* ({row['games_won']} wins)"
+                )
+        else:
+            lines.append("  _No winners yet — be the first!_")
+
+        lines.append(f"\n🎮 *Most Games Played*")
+        if most_played:
+            for i, row in enumerate(most_played):
+                name = get_name(row["_id"])
+                lines.append(
+                    f"{medals[i]} {name}: *{row['total_games']} games*"
+                )
+        else:
+            lines.append("  _No games played yet!_")
+
+        # ── Personal stats ──
+        my_stats = list(bomb_box_col.aggregate([
+            {"$match": {"user_id": user_id, "played": True}},
+            {"$group": {
+                "_id":       None,
+                "total":     {"$sum": 1},
+                "wins":      {"$sum": {"$cond": ["$won", 1, 0]}},
+                "coins_won": {"$sum": {"$ifNull": ["$coins_won", 0]}},
+            }}
+        ]))
+        if my_stats:
+            s = my_stats[0]
+            lines.append(
+                f"\n📊 *Your Stats*\n"
+                f"  Games: `{s['total']}` | Wins: `{s['wins']}` | "
+                f"Coins: `{s['coins_won']} 🪙`"
+            )
+
+        lines.append(f"\n🎯 Play with /bomb!")
+
+        bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
+
+    except Exception as exc:
+        logger.error("bombboard error: %s", exc)
+        bot.reply_to(message, "⚠️ Error loading leaderboard. Try again!")
 
 
 @bot.message_handler(commands=["health"])
