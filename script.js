@@ -19,11 +19,12 @@ let monetagPreloaded   = false;
 // ============================================================
 // CONSTANTS
 // ============================================================
-const MAX_ADS_PER_DAY    = 10;
-const MAX_YT_PER_DAY     = 3;
-const MAX_WEB_PER_DAY    = 3;
-const MIN_WITHDRAW_COINS = 25000;
-const ALL_TASKS_BONUS    = 10;
+const MAX_ADS_PER_DAY       = 10;
+const MAX_YT_PER_DAY        = 3;
+const MAX_WEB_PER_DAY       = 3;
+const MIN_WITHDRAW_COINS    = 25000;
+const ALL_TASKS_BONUS       = 10;
+const BOMB_BOX_COOLDOWN_SECS = 900;
 
 // ============================================================
 // MONETAG SDK
@@ -339,6 +340,7 @@ async function fetchLiveData() {
             loadLotteryStatus();
             loadSpinStatus();
             loadMiningStatus();
+            loadBombBoxStatus();
 
             if (data.pending_winner_popup) showWinnerPopup(data.pending_winner_prize || 0);
         }
@@ -1102,6 +1104,261 @@ async function collectMining() {
     } finally {
         _pendingRequests.delete('collectMining');
     }
+}
+
+// ============================================================
+// 💣 BOMB BOX CHALLENGE
+// ============================================================
+
+let _bombBoxCooldownInterval = null;
+let _activeBombGameId        = null;
+
+function _startBombBoxCooldown(seconds) {
+    if (_bombBoxCooldownInterval) clearInterval(_bombBoxCooldownInterval);
+    let cd = Math.max(0, Math.floor(seconds));
+    const fmt = n => String(n).padStart(2, '0');
+    const btn    = document.getElementById('bomb-box-ad-btn');
+    const status = document.getElementById('bomb-box-status');
+
+    const tick = () => {
+        const m = Math.floor(cd / 60), s = cd % 60;
+        if (btn)    { btn.disabled = true; btn.innerText = `⏳ Cooldown ${fmt(m)}:${fmt(s)}`; }
+        if (status) status.innerText = `⏳ Next game in ${fmt(m)}:${fmt(s)}`;
+    };
+    tick();
+
+    _bombBoxCooldownInterval = setInterval(() => {
+        cd--;
+        if (cd <= 0) {
+            clearInterval(_bombBoxCooldownInterval);
+            _bombBoxCooldownInterval = null;
+            loadBombBoxStatus();
+        } else tick();
+    }, 1000);
+}
+
+async function loadBombBoxStatus() {
+    if (!userId) return;
+    const card = document.getElementById('bomb-box-card');
+    if (!card) return;
+
+    try {
+        const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
+        const cfg    = await cfgRes.json();
+
+        if (!cfg.bomb_box_active) {
+            _applyFeatureLock(card, 'bomb-lock-overlay', '💣 Bomb Box Coming Soon!');
+            return;
+        }
+        _removeFeatureLock(card, 'bomb-lock-overlay');
+
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/bomb_box_status/${userId}`);
+        const data = await res.json();
+
+        const btn    = document.getElementById('bomb-box-ad-btn');
+        const grid   = document.getElementById('bomb-box-grid');
+        const status = document.getElementById('bomb-box-status');
+        const result = document.getElementById('bomb-box-result');
+
+        if (grid)   grid.style.display   = 'none';
+        if (result) result.style.display = 'none';
+
+        if (data.cooldown_remaining > 0) {
+            if (btn) btn.style.display = '';
+            _startBombBoxCooldown(data.cooldown_remaining);
+        } else if (data.active_game_id) {
+            _activeBombGameId = data.active_game_id;
+            if (btn)    btn.style.display  = 'none';
+            if (grid)   grid.style.display = 'grid';
+            if (status) status.innerText   = '🎯 Pick a box! One has a bomb 💣';
+            for (let i = 0; i < 4; i++) {
+                const b = document.getElementById(`bb-btn-${i}`);
+                if (b) { b.disabled = false; b.innerText = `📦 Box ${i + 1}`; b.style.background = ''; b.style.color = ''; }
+            }
+        } else {
+            _activeBombGameId = null;
+            if (_bombBoxCooldownInterval) { clearInterval(_bombBoxCooldownInterval); _bombBoxCooldownInterval = null; }
+            if (btn) {
+                btn.style.display    = '';
+                btn.disabled         = false;
+                btn.innerText        = '📺 Watch Ad to Play';
+                btn.style.background = 'linear-gradient(135deg,#ef4444,#b91c1c)';
+            }
+            if (status) status.innerText = 'Watch 1 ad → Pick a box → Win coins!';
+        }
+    } catch (e) { /* silent */ }
+}
+
+async function watchBombBoxAd() {
+    if (!userId) return showToast('User ID not found!', 'error');
+    if (_pendingRequests.has('bombBoxAd')) return;
+    _pendingRequests.add('bombBoxAd');
+
+    const btn    = document.getElementById('bomb-box-ad-btn');
+    const status = document.getElementById('bomb-box-status');
+
+    if (btn) { btn.disabled = true; btn.innerText = '📺 Loading Ad...'; }
+
+    // Step 1 — get ad token
+    let bombToken = null;
+    try {
+        const tokenRes  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/bomb_box_token/${userId}`, { method: 'POST' });
+        const tokenData = await tokenRes.json();
+        if (tokenData.status === 'cooldown') {
+            showToast(tokenData.message, 'error');
+            _pendingRequests.delete('bombBoxAd');
+            loadBombBoxStatus();
+            return;
+        }
+        if (tokenData.status !== 'success' || !tokenData.token) {
+            showToast(tokenData.message || 'Could not start game.', 'error');
+            _pendingRequests.delete('bombBoxAd');
+            if (btn) { btn.disabled = false; btn.innerText = '📺 Watch Ad to Play'; }
+            return;
+        }
+        bombToken = tokenData.token;
+    } catch (e) {
+        showToast('⚠️ Server error.', 'error');
+        _pendingRequests.delete('bombBoxAd');
+        if (btn) { btn.disabled = false; btn.innerText = '📺 Watch Ad to Play'; }
+        return;
+    }
+
+    // Step 2 — show ad
+    if (btn) btn.innerText = '📺 Watching Ad...';
+    try {
+        await requireAdWatch();
+    } catch (e) {
+        showToast('📺 Watch the full ad to play!', 'error');
+        _pendingRequests.delete('bombBoxAd');
+        if (btn) { btn.disabled = false; btn.innerText = '📺 Watch Ad to Play'; }
+        return;
+    }
+
+    // Step 2b — 10s post-ad cooldown
+    await _adCooldown(btn, '📺 Watch Ad to Play');
+
+    // Step 3 — start game
+    if (btn) { btn.disabled = true; btn.innerText = '⏳ Starting Game...'; }
+    if (status) status.innerText = 'Creating your game...';
+
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/bomb_box_start/${userId}`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ token: bombToken }),
+        });
+        const data = await res.json();
+
+        if (data.status !== 'success' || !data.game_id) {
+            showToast(data.message || 'Could not start game.', 'error');
+            _pendingRequests.delete('bombBoxAd');
+            loadBombBoxStatus();
+            return;
+        }
+
+        _activeBombGameId = data.game_id;
+
+        const grid = document.getElementById('bomb-box-grid');
+        if (btn)    btn.style.display  = 'none';
+        if (grid)   grid.style.display = 'grid';
+        if (status) status.innerText   = '🎯 Pick a box! One has a bomb 💣';
+
+        for (let i = 0; i < 4; i++) {
+            const b = document.getElementById(`bb-btn-${i}`);
+            if (b) {
+                b.disabled         = false;
+                b.innerText        = `📦 Box ${i + 1}`;
+                b.style.background = 'linear-gradient(135deg,#3b1212,#7f1d1d)';
+                b.style.color      = '#fca5a5';
+            }
+        }
+    } catch (e) {
+        showToast('⚠️ Server error.', 'error');
+        loadBombBoxStatus();
+    }
+    _pendingRequests.delete('bombBoxAd');
+}
+
+async function pickBombBox(index) {
+    if (!userId)            return showToast('User ID not found!', 'error');
+    if (!_activeBombGameId) return showToast('No active game! Click "Watch Ad to Play" first.', 'error');
+    if (_pendingRequests.has('bombPick')) return;
+    _pendingRequests.add('bombPick');
+
+    // Disable all boxes immediately
+    for (let i = 0; i < 4; i++) {
+        const b = document.getElementById(`bb-btn-${i}`);
+        if (b) { b.disabled = true; if (i === index) b.innerText = '⏳'; }
+    }
+
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/bomb_box_pick/${userId}`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ game_id: _activeBombGameId, box_index: index }),
+        });
+        const data = await res.json();
+
+        if (data.status !== 'success') {
+            showToast(data.message || 'Error!', 'error');
+            _pendingRequests.delete('bombPick');
+            loadBombBoxStatus();
+            return;
+        }
+
+        // Reveal all boxes with result
+        if (data.reveal) {
+            data.reveal.forEach(box => {
+                const b = document.getElementById(`bb-btn-${box.index}`);
+                if (!b) return;
+                const isPicked = box.index === data.picked;
+                if (box.type === 'bomb') {
+                    b.innerText          = '💣';
+                    b.style.background   = isPicked ? 'linear-gradient(135deg,#7f1d1d,#991b1b)' : 'linear-gradient(135deg,#1e293b,#334155)';
+                    b.style.color        = '#fca5a5';
+                } else {
+                    b.innerText          = `✅ ${box.value}🪙`;
+                    b.style.background   = isPicked ? 'linear-gradient(135deg,#14532d,#166534)' : 'linear-gradient(135deg,#1e293b,#334155)';
+                    b.style.color        = isPicked ? '#86efac' : '#64748b';
+                }
+            });
+        }
+
+        // Show result banner
+        const isWin    = data.result === 'reward';
+        const resultEl = document.getElementById('bomb-box-result');
+        if (resultEl) {
+            resultEl.innerHTML = isWin
+                ? `<span style="font-size:22px;">🎉</span><br><b style="color:#22c55e;">+${data.coins_won} coins!</b><br><span style="font-size:12px;color:#94a3b8;">${data.message || ''}</span>`
+                : `<span style="font-size:22px;">💣</span><br><b style="color:#ef4444;">BOOM! Better luck next time!</b><br><span style="font-size:12px;color:#94a3b8;">${data.message || ''}</span>`;
+            resultEl.style.display    = '';
+            resultEl.style.background = isWin ? 'rgba(34,197,94,0.08)'  : 'rgba(239,68,68,0.08)';
+            resultEl.style.border     = `1px solid ${isWin ? '#22c55e' : '#ef4444'}`;
+        }
+
+        const statusEl = document.getElementById('bomb-box-status');
+        if (statusEl) statusEl.innerText = isWin ? `🎉 +${data.coins_won} coins added!` : '💣 Boom! Try again in 15 minutes.';
+
+        showToast(isWin ? `🎉 +${data.coins_won} coins!` : '💣 Boom! Better luck next time!', isWin ? 'success' : 'error');
+
+        _activeBombGameId = null;
+        fetchLiveData();
+
+        // After 2s hide grid, show cooldown
+        setTimeout(() => {
+            const grid = document.getElementById('bomb-box-grid');
+            const btn  = document.getElementById('bomb-box-ad-btn');
+            if (grid) grid.style.display = 'none';
+            if (btn)  btn.style.display  = '';
+            _startBombBoxCooldown(BOMB_BOX_COOLDOWN_SECS);
+        }, 2000);
+
+    } catch (e) {
+        showToast('⚠️ Server error. Try again.', 'error');
+        loadBombBoxStatus();
+    }
+    _pendingRequests.delete('bombPick');
 }
 
 // ============================================================
