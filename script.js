@@ -1974,18 +1974,66 @@ async function checkDevice() {
 // ============================================================
 // REFERRAL DASHBOARD
 // ============================================================
-let _refDashData = null;
+let _refDashData      = null;
+let _refDashLoadedAt  = 0;
+const REF_CACHE_MS    = 2 * 60 * 1000; // 2 minutes
 
-async function loadReferralDashboard() {
+async function loadReferralDashboard(forceRefresh = false) {
     if (!userId) return;
+
+    // Serve from cache if fresh enough and not forced
+    const now = Date.now();
+    if (!forceRefresh && _refDashData && (now - _refDashLoadedAt) < REF_CACHE_MS) {
+        _renderRefDashboard(_refDashData);
+        return;
+    }
+
+    // Show subtle loading dots only on first ever load (tiles still show "—")
+    ['ref-stat-total','ref-stat-active','ref-stat-today','ref-stat-lifetime'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.textContent === '—') el.textContent = '…';
+    });
+
     try {
         const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/referral_dashboard/${userId}`);
         const json = await res.json();
-        if (json.status !== 'success') return;
-        _refDashData = json.data;
-        _renderRefDashboard(json.data);
-    } catch(e) { /* silent */ }
-    loadCommissionHistory();
+        if (json.status === 'success') {
+            _refDashData     = json.data;
+            _refDashLoadedAt = Date.now();
+            _renderRefDashboard(json.data);
+            loadCommissionHistory();
+        } else {
+            _renderRefDashboardFallback();
+        }
+    } catch(e) {
+        _renderRefDashboardFallback();
+    }
+}
+
+function _renderRefDashboardFallback() {
+    // Use existing userData when full dashboard API is unavailable
+    const total = (userData.referral_count || getRefCount(userData.referrals || ''));
+    const link  = `https://t.me/${CONFIG.BOT_USERNAME}?start=${userId}`;
+    const fallback = {
+        total_referrals:       total,
+        active_referrals:      0,
+        today_commission:      0,
+        lifetime_commission:   0,
+        daily_limit:           200,
+        daily_limit_remaining: 200,
+        commission_rate_pct:   10,
+        active_min_coins:      10,
+        referral_link:         link,
+        milestones:            [
+            {id:'ms_5',  count:5,  reward:500,  badge:null, claimed:false, claimable:false},
+            {id:'ms_10', count:10, reward:1000, badge:null, claimed:false, claimable:false},
+            {id:'ms_25', count:25, reward:2500, badge:null, claimed:false, claimable:false},
+            {id:'ms_50', count:50, reward:0,    badge:'vip',claimed:false, claimable:false},
+        ],
+        next_milestone: {id:'ms_5', count:5, reward:500, badge:null, claimable:false, progress: Math.min(total,5)},
+        recent_referrals: [],
+    };
+    _renderRefDashboard(fallback);
 }
 
 function _renderRefDashboard(d) {
