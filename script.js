@@ -1972,9 +1972,208 @@ async function checkDevice() {
 }
 
 // ============================================================
-// REFERRAL LIST
+// REFERRAL DASHBOARD
 // ============================================================
+let _refDashData = null;
+
+async function loadReferralDashboard() {
+    if (!userId) return;
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/referral_dashboard/${userId}`);
+        const json = await res.json();
+        if (json.status !== 'success') return;
+        _refDashData = json.data;
+        _renderRefDashboard(json.data);
+    } catch(e) { /* silent */ }
+    loadCommissionHistory();
+}
+
+function _renderRefDashboard(d) {
+    const $ = id => document.getElementById(id);
+
+    // Stats tiles
+    _setText('ref-stat-total',    d.total_referrals);
+    _setText('ref-stat-active',   d.active_referrals);
+    _setText('ref-stat-today',    d.today_commission + ' 🪙');
+    _setText('ref-stat-lifetime', d.lifetime_commission + ' 🪙');
+
+    // Daily limit bar
+    const dailyPct = d.daily_limit > 0 ? Math.min(100, Math.round(d.today_commission / d.daily_limit * 100)) : 0;
+    _setText('ref-daily-text', `${d.today_commission} / ${d.daily_limit}`);
+    const dailyBar = $('ref-daily-bar');
+    if (dailyBar) dailyBar.style.width = dailyPct + '%';
+    const dailyBadge = $('ref-daily-badge');
+    if (dailyBadge) {
+        dailyBadge.textContent = `${d.daily_limit_remaining} coins left`;
+        dailyBadge.style.color = d.daily_limit_remaining > 50 ? '#4ade80' : '#f87171';
+        dailyBadge.style.background = d.daily_limit_remaining > 50 ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)';
+    }
+
+    // Milestone progress bar
+    const nm = d.next_milestone;
+    if (nm) {
+        const msPct = nm.count > 0 ? Math.min(100, Math.round(nm.progress / nm.count * 100)) : 100;
+        _setText('ref-ms-label', nm.claimable ? '🎯 Milestone Ready!' : '🎯 Next Milestone');
+        _setText('ref-ms-text', `${nm.progress} / ${nm.count}`);
+        const msBar = $('ref-ms-bar');
+        if (msBar) {
+            msBar.style.width = msPct + '%';
+            msBar.style.background = nm.claimable ? 'linear-gradient(90deg,#4ade80,#22c55e)' : 'linear-gradient(90deg,#f1c40f,#e67e22)';
+        }
+        const rewardText = nm.reward > 0 ? `Next Reward: ${nm.reward} Coins 🪙` : 'Next Reward: 🏆 VIP Badge';
+        _setText('ref-ms-reward-text', rewardText);
+    } else {
+        const msBlock = $('ref-milestone-block');
+        if (msBlock) msBlock.innerHTML = '<p style="font-size:12px;color:#4ade80;text-align:center;font-weight:700;">🏆 All Milestones Completed!</p>';
+    }
+
+    // Referral link
+    const linkEl = $('display-link');
+    if (linkEl) linkEl.textContent = d.referral_link || '';
+
+    // Active count label
+    const acLabel = $('ref-active-count-label');
+    if (acLabel) acLabel.textContent = `${d.active_referrals} active`;
+
+    // Milestones list
+    _renderMilestones(d.milestones, d.active_referrals);
+
+    // Recent referrals
+    _renderRecentReferrals(d.recent_referrals);
+}
+
+function _setText(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+}
+
+function _renderMilestones(milestones, activeRefs) {
+    const list = document.getElementById('ref-milestones-list');
+    if (!list) return;
+    const sourceIcons = { task: '📝', game: '🎮', ad: '📺' };
+
+    list.innerHTML = milestones.map(ms => {
+        const pct     = ms.count > 0 ? Math.min(100, Math.round(activeRefs / ms.count * 100)) : 100;
+        const label   = ms.reward > 0 ? `+${ms.reward} Coins 🪙` : '🏆 VIP Badge';
+        const reached = activeRefs >= ms.count;
+
+        let btnHtml = '';
+        if (ms.claimed) {
+            btnHtml = `<span style="font-size:11px;color:#4ade80;font-weight:700;">✅ Claimed</span>`;
+        } else if (ms.claimable) {
+            btnHtml = `<button onclick="claimMilestone('${ms.id}')" style="font-size:11px;background:linear-gradient(90deg,#f1c40f,#e67e22);color:#000;border:none;padding:5px 12px;border-radius:20px;cursor:pointer;font-weight:800;">Claim!</button>`;
+        } else {
+            btnHtml = `<span style="font-size:11px;color:var(--text-dim);">${ms.count - activeRefs} more</span>`;
+        }
+
+        const barColor = ms.claimed ? '#4ade80' : (reached ? '#f1c40f' : '#475569');
+        return `
+        <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:12px;margin-bottom:8px;${ms.claimed ? 'opacity:0.65;' : ''}">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div>
+                    <span style="font-size:13px;font-weight:700;color:var(--text-primary);">${ms.count} Active Referrals</span>
+                    <span style="font-size:11px;color:#f1c40f;font-weight:700;margin-left:8px;">${label}</span>
+                </div>
+                ${btnHtml}
+            </div>
+            <div style="background:rgba(255,255,255,0.06);border-radius:20px;height:6px;overflow:hidden;">
+                <div style="height:100%;border-radius:20px;background:${barColor};width:${pct}%;transition:width 0.5s;"></div>
+            </div>
+            <p style="font-size:10px;color:var(--text-dim);margin:4px 0 0 0;">${activeRefs} / ${ms.count} active referrals</p>
+        </div>`;
+    }).join('');
+}
+
+function _renderRecentReferrals(refs) {
+    const list = document.getElementById('refer-list');
+    if (!list) return;
+    if (!refs || refs.length === 0) {
+        list.innerHTML = "<p style='color:#94a3b8;text-align:center;font-size:13px;'>No referrals yet. Invite your friends! 🚀</p>";
+        return;
+    }
+    list.innerHTML = refs.map((r, i) => {
+        const name   = r.username ? `@${r.username}` : `Friend ${i + 1}`;
+        const status = r.active
+            ? `<span style="font-size:10px;background:rgba(74,222,128,0.12);color:#4ade80;padding:2px 7px;border-radius:20px;font-weight:700;">✅ Active</span>`
+            : `<span style="font-size:10px;background:rgba(255,255,255,0.05);color:#64748b;padding:2px 7px;border-radius:20px;">Inactive</span>`;
+        return `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <span style="font-size:18px;">${r.active ? '🟢' : '⚪'}</span>
+            <div style="flex:1;">
+                <p style="margin:0;font-size:13px;font-weight:600;color:var(--text-primary);">${name}</p>
+                <p style="margin:0;font-size:10px;color:var(--text-dim);">Coins: ${r.coins || 0} 🪙 • Joined: ${r.joined || '—'}</p>
+            </div>
+            ${status}
+        </div>`;
+    }).join('');
+}
+
+async function loadCommissionHistory() {
+    const list = document.getElementById('commission-history-list');
+    if (!list || !userId) return;
+    list.innerHTML = "<p style='color:#94a3b8;text-align:center;font-size:12px;'>Loading...</p>";
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/referral_commission_history/${userId}`);
+        const json = await res.json();
+        if (json.status !== 'success') { list.innerHTML = "<p style='color:#94a3b8;text-align:center;font-size:12px;'>No history yet.</p>"; return; }
+        const data = json.data || [];
+        if (data.length === 0) {
+            list.innerHTML = "<p style='color:#94a3b8;text-align:center;font-size:12px;'>No commissions earned yet. Invite friends! 🚀</p>";
+            return;
+        }
+        const srcIcon = { task: '📝', game: '🎮', ad: '📺' };
+        list.innerHTML = data.map(h => `
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+                <span style="font-size:18px;">${srcIcon[h.source] || '💰'}</span>
+                <div style="flex:1;">
+                    <p style="margin:0;font-size:12px;font-weight:600;color:var(--text-primary);">+${h.commission} coins <span style="font-size:10px;color:#a78bfa;">(from ${h.earner_name || 'Unknown'})</span></p>
+                    <p style="margin:0;font-size:10px;color:var(--text-dim);">${h.source || 'earning'} • ${h.timestamp}</p>
+                </div>
+                <span style="font-size:11px;color:var(--text-dim);">${h.coins_earned}🪙 × 10%</span>
+            </div>`).join('');
+    } catch(e) {
+        list.innerHTML = "<p style='color:#94a3b8;text-align:center;font-size:12px;'>Failed to load. Try again.</p>";
+    }
+}
+
+async function claimMilestone(milestoneId) {
+    if (!userId) return showToast("User ID not found!", "error");
+    const key = `claim_ms_${milestoneId}`;
+    if (_pendingRequests.has(key)) return;
+    _pendingRequests.add(key);
+    try {
+        const res  = await fetch(`${CONFIG.API_BASE_URL}/claim_milestone/${userId}`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ milestone_id: milestoneId }),
+        });
+        const json = await res.json();
+        if (json.status === 'success') {
+            showToast(json.message || 'Milestone claimed!', 'success');
+            setTimeout(() => { loadReferralDashboard(); loadUserData(); }, 600);
+        } else {
+            showToast(json.message || 'Claim failed.', 'error');
+        }
+    } catch(e) {
+        showToast('Server error. Try again.', 'error');
+    } finally {
+        _pendingRequests.delete(key);
+    }
+}
+
+function copyReferralLink() {
+    const linkEl = document.getElementById('display-link');
+    const link   = (linkEl && linkEl.textContent.trim() !== 'Loading...')
+        ? linkEl.textContent.trim()
+        : `https://t.me/${CONFIG.BOT_USERNAME}?start=${userId}`;
+    navigator.clipboard.writeText(link)
+        .then(() => showToast('✅ Referral link copied!', 'success'))
+        .catch(() => showToast('Copy failed, try again.', 'error'));
+}
+
 function updateReferralList(referrals) {
+    // Legacy shim — actual rendering now done by loadReferralDashboard
+    if (_refDashData) return;
     const list = document.getElementById('refer-list');
     if (!list) return;
     const refCount = getRefCount(referrals);
@@ -2146,6 +2345,7 @@ function switchTab(tabId, el) {
 
     if (tabId === 'leaderboard') refreshLeaderboard();
     if (tabId === 'history')     loadHistory();
+    if (tabId === 'refer')       loadReferralDashboard();
 
     // Re-apply referral lock on tab switch (rewards aur refer dono ke liye)
     if (tabId === 'rewards' || tabId === 'refer') setTimeout(applyReferralLock, 50);
