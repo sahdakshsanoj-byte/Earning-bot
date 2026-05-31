@@ -752,23 +752,108 @@
 
     <!-- ===================== REFER TAB ===================== -->
     <div id="refer" class="tab-content" style="display:none; position:relative; overflow:hidden;">
-        <div class="card balance-card" style="text-align:center;">
-            <h4 style="color:var(--gold);">Refer & Earn 🚀</h4>
-            <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">Earn <b style="color:var(--gold);">30 Coins</b> for every friend you invite!</p>
+
+        <!-- ── Hero Header ── -->
+        <div class="card balance-card" style="text-align:center; background:linear-gradient(135deg,rgba(241,196,15,0.10) 0%,rgba(139,92,246,0.10) 100%); border:1px solid rgba(241,196,15,0.18);">
+            <div style="font-size:32px; margin-bottom:6px;">🚀</div>
+            <h3 style="color:var(--gold); margin:0 0 4px 0; font-size:17px; font-weight:800; letter-spacing:0.3px;">Refer & Earn Commission</h3>
+            <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.6;">Invite friends • Earn <b style="color:var(--gold);">30 coins</b> on join + <b style="color:#a78bfa;">10% passive commission</b> from their earnings forever!</p>
         </div>
-        <div class="card c-gold">
-            <p style="font-size:13px; color:var(--text-muted); margin-bottom:8px;">Your Referral Link:</p>
-            <div id="display-link" style="background:rgba(241,196,15,0.06); padding:12px; border-radius:12px; font-size:12px; word-break:break-all; border:1px dashed rgba(241,196,15,0.35); margin-bottom:12px; color:var(--gold);">
-                Loading...
+
+        <!-- ── Stats Grid (4 tiles) ── -->
+        <div class="card" style="padding:14px 16px;">
+            <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0 0 12px 0;">📊 Dashboard Overview</p>
+            <div id="ref-stats-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div style="background:rgba(241,196,15,0.07); border:1px solid rgba(241,196,15,0.15); border-radius:12px; padding:12px; text-align:center;">
+                    <p style="font-size:10px; color:var(--text-dim); margin:0 0 4px 0; text-transform:uppercase; letter-spacing:0.5px;">Total Referrals</p>
+                    <p id="ref-stat-total" style="font-size:22px; font-weight:800; color:var(--gold); margin:0;">—</p>
+                    <p style="font-size:10px; color:var(--text-muted); margin:2px 0 0 0;">👥 Invited</p>
+                </div>
+                <div style="background:rgba(74,222,128,0.07); border:1px solid rgba(74,222,128,0.15); border-radius:12px; padding:12px; text-align:center;">
+                    <p style="font-size:10px; color:var(--text-dim); margin:0 0 4px 0; text-transform:uppercase; letter-spacing:0.5px;">Active Referrals</p>
+                    <p id="ref-stat-active" style="font-size:22px; font-weight:800; color:#4ade80; margin:0;">—</p>
+                    <p style="font-size:10px; color:var(--text-muted); margin:2px 0 0 0;">✅ Earning</p>
+                </div>
+                <div style="background:rgba(167,139,250,0.07); border:1px solid rgba(167,139,250,0.15); border-radius:12px; padding:12px; text-align:center;">
+                    <p style="font-size:10px; color:var(--text-dim); margin:0 0 4px 0; text-transform:uppercase; letter-spacing:0.5px;">Today's Commission</p>
+                    <p id="ref-stat-today" style="font-size:22px; font-weight:800; color:#a78bfa; margin:0;">—</p>
+                    <p style="font-size:10px; color:var(--text-muted); margin:2px 0 0 0;">💰 Today</p>
+                </div>
+                <div style="background:rgba(56,189,248,0.07); border:1px solid rgba(56,189,248,0.15); border-radius:12px; padding:12px; text-align:center;">
+                    <p style="font-size:10px; color:var(--text-dim); margin:0 0 4px 0; text-transform:uppercase; letter-spacing:0.5px;">Lifetime Earned</p>
+                    <p id="ref-stat-lifetime" style="font-size:22px; font-weight:800; color:#38bdf8; margin:0;">—</p>
+                    <p style="font-size:10px; color:var(--text-muted); margin:2px 0 0 0;">📈 All Time</p>
+                </div>
             </div>
-            <button class="btn" onclick="inviteFriend()">📤 Share & Invite Friend</button>
         </div>
-        <div class="card">
-            <h4 style="font-size:14px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:8px; margin-bottom:10px; color:var(--text-primary);">My Referrals 👥</h4>
-            <div id="refer-list" style="max-height:200px; overflow-y:auto;">
-                <p style="color:var(--text-muted); text-align:center; font-size:13px;">No referrals yet.</p>
+
+        <!-- ── Daily Limit + Milestone Progress ── -->
+        <div class="card" style="padding:14px 16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">🚀 Progress Tracker</p>
+                <span id="ref-daily-badge" style="font-size:10px; background:rgba(167,139,250,0.15); color:#a78bfa; padding:3px 8px; border-radius:20px; font-weight:700;">Loading...</span>
+            </div>
+
+            <p style="font-size:12px; color:var(--text-muted); margin:0 0 6px 0; display:flex; justify-content:space-between;">
+                <span>📊 Daily Commission Limit</span>
+                <b id="ref-daily-text" style="color:var(--text-primary);">— / 200</b>
+            </p>
+            <div style="background:rgba(255,255,255,0.06); border-radius:20px; height:8px; overflow:hidden; margin-bottom:16px;">
+                <div id="ref-daily-bar" style="height:100%; border-radius:20px; background:linear-gradient(90deg,#a78bfa,#7c3aed); width:0%; transition:width 0.5s ease;"></div>
+            </div>
+
+            <div id="ref-milestone-block">
+                <p style="font-size:12px; color:var(--text-muted); margin:0 0 6px 0; display:flex; justify-content:space-between;">
+                    <span id="ref-ms-label">🎯 Next Milestone</span>
+                    <b id="ref-ms-text" style="color:var(--gold);">Loading...</b>
+                </p>
+                <div style="background:rgba(255,255,255,0.06); border-radius:20px; height:8px; overflow:hidden; margin-bottom:10px;">
+                    <div id="ref-ms-bar" style="height:100%; border-radius:20px; background:linear-gradient(90deg,#f1c40f,#e67e22); width:0%; transition:width 0.5s ease;"></div>
+                </div>
+                <p id="ref-ms-reward-text" style="font-size:11px; color:var(--text-muted); text-align:center; margin:0;">Loading next milestone...</p>
             </div>
         </div>
+
+        <!-- ── Referral Link ── -->
+        <div class="card c-gold" style="padding:14px 16px;">
+            <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0 0 10px 0;">🔗 Your Referral Link</p>
+            <div id="display-link" style="background:rgba(241,196,15,0.06); padding:10px 12px; border-radius:10px; font-size:11px; word-break:break-all; border:1px dashed rgba(241,196,15,0.30); margin-bottom:10px; color:var(--gold);">Loading...</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <button class="btn" style="font-size:13px; padding:10px;" onclick="inviteFriend()">📤 Share Link</button>
+                <button class="btn" style="font-size:13px; padding:10px; background:rgba(241,196,15,0.10); border:1px solid rgba(241,196,15,0.3); color:var(--gold);" onclick="copyReferralLink()">📋 Copy Link</button>
+            </div>
+        </div>
+
+        <!-- ── Milestones ── -->
+        <div class="card" style="padding:14px 16px;">
+            <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0 0 12px 0;">🏆 Milestone Rewards</p>
+            <div id="ref-milestones-list">
+                <p style="color:var(--text-muted); font-size:13px; text-align:center;">Loading...</p>
+            </div>
+        </div>
+
+        <!-- ── Recent Referrals ── -->
+        <div class="card" style="padding:14px 16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">👥 Recent Referrals</p>
+                <span id="ref-active-count-label" style="font-size:10px; background:rgba(74,222,128,0.12); color:#4ade80; padding:3px 8px; border-radius:20px;">0 active</span>
+            </div>
+            <div id="refer-list">
+                <p style="color:var(--text-muted); text-align:center; font-size:13px;">No referrals yet. Invite your friends! 🚀</p>
+            </div>
+        </div>
+
+        <!-- ── Commission History ── -->
+        <div class="card" style="padding:14px 16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">💰 Commission History</p>
+                <button onclick="loadCommissionHistory()" style="font-size:10px; background:rgba(167,139,250,0.15); color:#a78bfa; border:none; padding:3px 10px; border-radius:20px; cursor:pointer; font-weight:700;">Refresh</button>
+            </div>
+            <div id="commission-history-list">
+                <p style="color:var(--text-muted); text-align:center; font-size:13px;">Loading...</p>
+            </div>
+        </div>
+
     </div>
 
     <!-- ===================== HISTORY TAB ===================== -->
