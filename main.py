@@ -115,6 +115,7 @@ try:
     promo_tasks_col           = db["promo_tasks"]
     lottery_col               = db["lottery"]
     bomb_box_col              = db["bomb_box_games"]
+    referral_commissions_col  = db["referral_commissions"]
 
     try:
         rate_col.create_index("expires_at", expireAfterSeconds=0)
@@ -142,6 +143,13 @@ try:
             [("chat_id", 1), ("user_id", 1)], unique=True, **_idx_opts
         )
         promo_tasks_col.create_index("task_id", unique=True, **_idx_opts)
+        # Referral commissions indexes
+        referral_commissions_col.create_index("event_id", unique=True, **_idx_opts)
+        referral_commissions_col.create_index("sponsor_id", **_idx_opts)
+        referral_commissions_col.create_index("earner_id", **_idx_opts)
+        referral_commissions_col.create_index([("sponsor_id", 1), ("date", 1)], **_idx_opts)
+        referral_commissions_col.create_index([("sponsor_id", 1), ("earner_id", 1), ("date", 1)], **_idx_opts)
+        referral_commissions_col.create_index("timestamp", **_idx_opts)
         logger.info("MongoDB indexes ensured.")
     except Exception as idx_err:
         logger.warning("Index creation warning: %s", idx_err)
@@ -201,6 +209,24 @@ ALL_TASKS_BONUS   = 10
 MIN_WITHDRAW      = 25000
 MAX_WITHDRAW      = 100000
 WITHDRAW_COOLDOWN = 86400
+
+# ============================================================
+# 4a-2. REFERRAL COMMISSION SYSTEM
+# ============================================================
+
+COMMISSION_RATE          = 0.10   # 10% commission on eligible earnings
+COMMISSION_DAILY_LIMIT   = 200    # Max commission coins a sponsor earns per day
+COMMISSION_PER_REF_LIMIT = 50     # Max commission from a single referral per day
+ACTIVE_REF_MIN_COINS     = 10     # Referral is "active" if they've earned >= this many coins
+REFERRAL_JOIN_BONUS      = 30     # Coins sponsor earns when referral joins (existing)
+
+# Milestone rewards — claimed once per sponsor when active referral count is reached
+MILESTONES = [
+    {"id": "ms_5",  "count": 5,  "reward": 500,  "badge": None},
+    {"id": "ms_10", "count": 10, "reward": 1000, "badge": None},
+    {"id": "ms_25", "count": 25, "reward": 2500, "badge": None},
+    {"id": "ms_50", "count": 50, "reward": 0,    "badge": "vip"},
+]
 
 DEVICE_RESET_COOLDOWN_DAYS = 3
 
@@ -927,6 +953,108 @@ def get_referral_link(user_id: int) -> str:
     return f"https://t.me/{bot_username}?start={user_id}"
 
 
+# ============================================================
+# REFERRAL COMMISSION ENGINE
+# ============================================================
+
+def award_referral_commission(earner_id: int, coins_earned: int, source: str, event_id: str) -> None:
+    """
+    Earner ke sponsor ko 10% commission automatically credit karo.
+    source: "task" | "game" | "ad"
+    event_id: unique string to prevent duplicate commissions per earning event.
+    Called in a daemon thread so it never blocks the main response.
+    """
+    if coins_earned <= 0:
+        return
+    try:
+        earner = users_col.find_one(
+            {"user_id": earner_id},
+            {"referred_by": 1, "username": 1, "_id": 0},
+        )
+        if not earner or not earner.get("referred_by"):
+            return
+
+        try:
+            sponsor_id = int(earner["referred_by"])
+        except (ValueError, TypeError):
+            return
+
+        if sponsor_id == earner_id:
+            return
+
+        today      = str(date.today())
+        commission = max(1, int(coins_earned * COMMISSION_RATE))
+
+        # Idempotency: skip if event already processed
+        if referral_commissions_col.find_one({"event_id": event_id}, {"_id": 1}):
+            return
+
+        # Sponsor daily cap
+        daily_agg   = list(referral_commissions_col.aggregate([
+            {"$match": {"sponsor_id": sponsor_id, "date": today}},
+            {"$group": {"_id": None, "total": {"$sum": "$commission"}}},
+        ]))
+        total_today = daily_agg[0]["total"] if daily_agg else 0
+        if total_today >= COMMISSION_DAILY_LIMIT:
+            return
+
+        # Per-referral daily cap
+        per_ref_agg = list(referral_commissions_col.aggregate([
+            {"$match": {"sponsor_id": sponsor_id, "earner_id": earner_id, "date": today}},
+            {"$group": {"_id": None, "total": {"$sum": "$commission"}}},
+        ]))
+        ref_today = per_ref_agg[0]["total"] if per_ref_agg else 0
+        if ref_today >= COMMISSION_PER_REF_LIMIT:
+            return
+
+        # Cap to remaining headroom
+        remaining_daily   = COMMISSION_DAILY_LIMIT - total_today
+        remaining_per_ref = COMMISSION_PER_REF_LIMIT - ref_today
+        commission = min(commission, remaining_daily, remaining_per_ref)
+        if commission <= 0:
+            return
+
+        # Verify sponsor is not blocked
+        sponsor = users_col.find_one({"user_id": sponsor_id}, {"blocked": 1, "_id": 0})
+        if not sponsor or sponsor.get("blocked"):
+            return
+
+        # Atomic insert — DuplicateKeyError on event_id = already handled
+        try:
+            referral_commissions_col.insert_one({
+                "event_id":     event_id,
+                "sponsor_id":   sponsor_id,
+                "earner_id":    earner_id,
+                "earner_name":  earner.get("username", "Unknown"),
+                "coins_earned": coins_earned,
+                "commission":   commission,
+                "source":       source,
+                "date":         today,
+                "timestamp":    datetime.utcnow(),
+            })
+        except pymongo.errors.DuplicateKeyError:
+            return
+
+        users_col.update_one({"user_id": sponsor_id}, {"$inc": {"coins": commission}})
+        logger.info(
+            "Commission: sponsor=%s earner=%s coins_earned=%s commission=%s source=%s",
+            sponsor_id, earner_id, coins_earned, commission, source,
+        )
+
+    except Exception as exc:
+        logger.error("award_referral_commission error (earner=%s): %s", earner_id, exc)
+
+
+def _fire_commission(earner_id: int, coins_earned: int, source: str, event_id: str) -> None:
+    """Non-blocking wrapper — runs commission logic in a daemon thread."""
+    t = threading.Thread(
+        target=award_referral_commission,
+        args=(earner_id, coins_earned, source, event_id),
+        daemon=True,
+    )
+    t.start()
+
+
 def send_referral_link(user_id: int) -> bool:
     referral_link = get_referral_link(user_id)
     share_text    = "\U0001f4b0 Earn coins daily by watching ads & completing tasks! \U0001f680 Join now and start earning instantly!"
@@ -1605,6 +1733,8 @@ def verify_task_api():
             return jsonify({"status": "error", "message": "Task already completed."}), 400
 
         clear_task_fail_counter(user_id, task_id)
+        # Referral commission — non-blocking, 10% to sponsor
+        _fire_commission(user_id, reward, "task", f"task_{user_id}_{task_id}_{today}_{correct_code}")
         return jsonify({
             "status":  "success",
             "message": f"{reward} coins added to your balance!",
@@ -1704,8 +1834,9 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
                 "data":    {"ads_done": ads_today, "ads_total": MAX_ADS_PER_DAY, "remaining": 0},
             }, 400
 
-        done      = ads_today + 1
-        remaining = MAX_ADS_PER_DAY - done
+        done        = ads_today + 1
+        remaining   = MAX_ADS_PER_DAY - done
+        ad_event_id = f"ad_{user_id}_{today}_{done}"
         users_col.update_one(
             {"user_id": user_id},
             {
@@ -1717,6 +1848,8 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
                 },
             },
         )
+        # Referral commission — non-blocking, 10% to sponsor
+        _fire_commission(user_id, AD_COIN_REWARD, "ad", ad_event_id)
         return {
             "status":  "success",
             "message": f"{AD_COIN_REWARD} coins earned! ({done}/{MAX_ADS_PER_DAY} ads watched today)",
@@ -3168,6 +3301,9 @@ def do_spin_api(user_id: int):
 
         users_col.update_one({"user_id": user_id}, update_op)
         logger.info("User %s spun: reward=%s spins=%s/%s", user_id, reward, new_spins, SPIN_PER_DAY)
+        # Referral commission — non-blocking, 10% to sponsor (only if won)
+        if reward > 0:
+            _fire_commission(user_id, reward, "game", f"spin_{user_id}_{today}_{new_spins}")
 
         if reward == 0:
             msg = "Better luck next time! \U0001f340"
@@ -3459,6 +3595,8 @@ def collect_mining_api(user_id: int):
             },
         )
         logger.info("User %s collected mining reward: %s coins", user_id, MINING_REWARD)
+        # Referral commission — non-blocking, 10% to sponsor
+        _fire_commission(user_id, MINING_REWARD, "game", f"mining_{user_id}_{now.strftime('%Y%m%d%H%M%S')}")
         return jsonify({
             "status":  "success",
             "message": f"\u26cf\ufe0f Mining complete! *{MINING_REWARD} coins* added to your balance! \U0001fa99",
@@ -3708,6 +3846,8 @@ def bomb_box_pick_api(user_id: int):
             users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins_won}})
             bomb_box_col.update_one({"game_id": game_id}, {"$set": {"coins_won": coins_won, "won": True}})
             message = random.choice(BOMB_BOX_FUN_WIN_MSGS)
+            # Referral commission — non-blocking, 10% to sponsor
+            _fire_commission(user_id, coins_won, "game", f"bombbox_{game_id}")
         else:
             bomb_box_col.update_one({"game_id": game_id}, {"$set": {"coins_won": 0, "won": False}})
             message = random.choice(BOMB_BOX_FUN_BOMB_MSGS)
@@ -3726,6 +3866,203 @@ def bomb_box_pick_api(user_id: int):
         })
     except Exception as exc:
         logger.error("bomb_box_pick error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+# ============================================================
+# REFERRAL COMMISSION API ENDPOINTS
+# ============================================================
+
+@app.route("/referral_dashboard/<int:user_id>", methods=["GET"])
+def referral_dashboard_api(user_id: int):
+    """Complete referral stats for the dashboard card."""
+    try:
+        user = users_col.find_one(
+            {"user_id": user_id},
+            {"blocked": 1, "milestone_claims": 1, "_id": 0},
+        )
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Account suspended."}), 403
+
+        today = str(date.today())
+
+        # Total & active referral counts
+        total_refs  = users_col.count_documents({"referred_by": str(user_id)})
+        active_refs = users_col.count_documents({
+            "referred_by": str(user_id),
+            "coins":       {"$gte": ACTIVE_REF_MIN_COINS},
+        })
+
+        # Today's commission
+        daily_agg     = list(referral_commissions_col.aggregate([
+            {"$match": {"sponsor_id": user_id, "date": today}},
+            {"$group": {"_id": None, "total": {"$sum": "$commission"}}},
+        ]))
+        today_commission = daily_agg[0]["total"] if daily_agg else 0
+
+        # Lifetime commission
+        lifetime_agg = list(referral_commissions_col.aggregate([
+            {"$match": {"sponsor_id": user_id}},
+            {"$group": {"_id": None, "total": {"$sum": "$commission"}}},
+        ]))
+        lifetime_commission = lifetime_agg[0]["total"] if lifetime_agg else 0
+
+        daily_limit_remaining = max(0, COMMISSION_DAILY_LIMIT - today_commission)
+        referral_link         = get_referral_link(user_id)
+
+        # Milestone data with claim status
+        claimed_list    = user.get("milestone_claims", [])
+        milestones_data = []
+        next_milestone  = None
+        for ms in MILESTONES:
+            is_claimed = ms["id"] in claimed_list
+            claimable  = (not is_claimed) and (active_refs >= ms["count"])
+            milestones_data.append({
+                "id":        ms["id"],
+                "count":     ms["count"],
+                "reward":    ms["reward"],
+                "badge":     ms["badge"],
+                "claimed":   is_claimed,
+                "claimable": claimable,
+            })
+            if next_milestone is None and not is_claimed:
+                next_milestone = {
+                    "id":        ms["id"],
+                    "count":     ms["count"],
+                    "reward":    ms["reward"],
+                    "badge":     ms["badge"],
+                    "claimable": claimable,
+                    "progress":  min(active_refs, ms["count"]),
+                }
+
+        # Recent referrals list (last 10)
+        recent_refs = list(
+            users_col.find(
+                {"referred_by": str(user_id)},
+                {"user_id": 1, "username": 1, "coins": 1, "joined": 1, "_id": 0},
+            ).sort("joined", -1).limit(10)
+        )
+        for r in recent_refs:
+            r["active"] = r.get("coins", 0) >= ACTIVE_REF_MIN_COINS
+
+        return jsonify({
+            "status": "success",
+            "data": {
+                "total_referrals":       total_refs,
+                "active_referrals":      active_refs,
+                "today_commission":      today_commission,
+                "lifetime_commission":   lifetime_commission,
+                "daily_limit_remaining": daily_limit_remaining,
+                "daily_limit":           COMMISSION_DAILY_LIMIT,
+                "commission_rate_pct":   int(COMMISSION_RATE * 100),
+                "active_min_coins":      ACTIVE_REF_MIN_COINS,
+                "referral_link":         referral_link,
+                "milestones":            milestones_data,
+                "next_milestone":        next_milestone,
+                "recent_referrals":      recent_refs,
+            },
+        })
+    except Exception as exc:
+        logger.error("referral_dashboard_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/referral_commission_history/<int:user_id>", methods=["GET"])
+def referral_commission_history_api(user_id: int):
+    """Paginated commission history for the sponsor."""
+    try:
+        user = users_col.find_one({"user_id": user_id}, {"blocked": 1, "_id": 0})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Account suspended."}), 403
+
+        page  = max(1, int(request.args.get("page", 1)))
+        limit = 20
+        skip  = (page - 1) * limit
+
+        history = list(
+            referral_commissions_col.find(
+                {"sponsor_id": user_id},
+                {"_id": 0, "event_id": 0, "sponsor_id": 0},
+            ).sort("timestamp", -1).skip(skip).limit(limit)
+        )
+
+        for h in history:
+            if isinstance(h.get("timestamp"), datetime):
+                h["timestamp"] = h["timestamp"].strftime("%d %b %Y, %H:%M")
+
+        total = referral_commissions_col.count_documents({"sponsor_id": user_id})
+        return jsonify({"status": "success", "data": history, "page": page, "total": total})
+    except Exception as exc:
+        logger.error("referral_commission_history_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/claim_milestone/<int:user_id>", methods=["POST"])
+def claim_milestone_api(user_id: int):
+    """Claim a one-time milestone reward when active referral count is reached."""
+    data         = request.get_json(silent=True) or {}
+    milestone_id = sanitize_text(data.get("milestone_id", ""))
+
+    if not milestone_id:
+        return jsonify({"status": "error", "message": "milestone_id required."}), 400
+
+    ms = next((m for m in MILESTONES if m["id"] == milestone_id), None)
+    if not ms:
+        return jsonify({"status": "error", "message": "Invalid milestone."}), 400
+
+    if is_rate_limited(f"milestone_{user_id}", 10):
+        return jsonify({"status": "error", "message": "Please wait before claiming."}), 429
+
+    try:
+        user = users_col.find_one(
+            {"user_id": user_id},
+            {"blocked": 1, "milestone_claims": 1, "_id": 0},
+        )
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Account suspended."}), 403
+
+        if milestone_id in user.get("milestone_claims", []):
+            return jsonify({"status": "error", "message": "Milestone already claimed!"}), 400
+
+        active_refs = users_col.count_documents({
+            "referred_by": str(user_id),
+            "coins":       {"$gte": ACTIVE_REF_MIN_COINS},
+        })
+        if active_refs < ms["count"]:
+            needed = ms["count"] - active_refs
+            return jsonify({
+                "status":  "error",
+                "message": f"Need {needed} more active referral(s) for this milestone.",
+            }), 400
+
+        # Atomic claim — $ne guard prevents double-claim
+        upd = users_col.update_one(
+            {"user_id": user_id, "milestone_claims": {"$ne": milestone_id}},
+            {
+                "$inc":    {"coins": ms["reward"]},
+                "$addToSet": {"milestone_claims": milestone_id},
+            },
+        )
+        if upd.modified_count == 0:
+            return jsonify({"status": "error", "message": "Milestone already claimed!"}), 400
+
+        if ms["badge"]:
+            users_col.update_one({"user_id": user_id}, {"$set": {"badge": ms["badge"]}})
+
+        if ms["reward"] > 0:
+            msg = f"🎉 Milestone unlocked! +{ms['reward']} coins added to your wallet!"
+        else:
+            msg = "🏆 VIP Badge unlocked! You're now a VIP member!"
+
+        return jsonify({"status": "success", "message": msg, "reward": ms["reward"], "badge": ms["badge"]})
+    except Exception as exc:
+        logger.error("claim_milestone_api error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
