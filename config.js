@@ -33,7 +33,7 @@ const CONFIG = {
     //   false → Referral tab 🔒 locked dikhega (coming soon)
     //           Withdrawal mein referral condition "Not Required ✅" ho jaayegi
     // ──────────────────────────────────────────────────────────
-    REFERRAL_ACTIVE: true,
+    REFERRAL_ACTIVE: false,
 
     // ──────────────────────────────────────────────────────────
     // CLAIM AD GATE
@@ -59,7 +59,7 @@ const CONFIG = {
     //   Default: false (locked) — change to true when you have
     //   YT videos ready and want users to start earning from them.
     // ──────────────────────────────────────────────────────────
-    YT_TASKS_ACTIVE: true,
+    YT_TASKS_ACTIVE: false,
 
     // YouTube video links for Task tab (replace with your own)
     YT_LINKS: {
