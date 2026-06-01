@@ -4118,6 +4118,12 @@ def get_tournament_api():
         t["registered_count"] = reg_count
         slots_left = max(0, t.get("max_players", 0) - reg_count)
         t["slots_remaining"] = slots_left
+
+        # Room credentials — only expose when match is live
+        if t.get("status") != "match_live":
+            t.pop("room_id",       None)
+            t.pop("room_password", None)
+
         # Convert datetime to string
         for k in list(t.keys()):
             if isinstance(t[k], datetime):
@@ -4250,6 +4256,30 @@ def admin_create_tournament_api():
         return jsonify({"status": "success", "message": f"Tournament '{tid}' created/updated.", "tournament_id": tid})
     except Exception as exc:
         logger.error("admin_create_tournament_api error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/admin/tournament/room", methods=["POST"])
+def admin_tournament_room_api():
+    """Admin: Room ID aur Password set karo active tournament ke liye."""
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data = request.get_json(silent=True) or {}
+    room_id       = sanitize_text(str(data.get("room_id",       "") or "").strip(), max_length=50)
+    room_password = sanitize_text(str(data.get("room_password", "") or "").strip(), max_length=50)
+    if not room_id or not room_password:
+        return jsonify({"status": "error", "message": "room_id aur room_password dono required hain."}), 400
+    try:
+        res = tournaments_col.update_one(
+            {"active": True},
+            {"$set": {"room_id": room_id, "room_password": room_password}},
+        )
+        if res.matched_count == 0:
+            return jsonify({"status": "error", "message": "No active tournament found."}), 404
+        logger.info("Admin set room credentials: room_id=%s", room_id)
+        return jsonify({"status": "success", "message": f"Room credentials set! ID: {room_id}"})
+    except Exception as exc:
+        logger.error("admin_tournament_room_api error: %s", exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
@@ -4943,6 +4973,7 @@ def admin_panel_command(message):
         "\u2022 /createtournament `Title|Mode|Map|Date|Time|Fee|MaxP|Prize` \u2014 Create\n"
         "\u2022 /tournamentstatus `<status>` \u2014 Status change karo\n"
         "  Statuses: `coming_soon` \u2022 `registration_open` \u2022 `registration_closed` \u2022 `match_live` \u2022 `completed`\n"
+        "\u2022 /setroomid `RoomID | Password` \u2014 Room ID & Password set karo \U0001f511\n"
         "\u2022 /tournamentinfo \u2014 Active tournament ki details\n"
         "\u2022 /tournamentregs \u2014 Registered players list\n"
         "\u2022 /setwinners `Nick:Reward | Nick:Reward | Nick:Reward` \u2014 Winners set karo\n"
@@ -6307,6 +6338,57 @@ def cmd_set_winners(message):
         logger.info("Admin published winners for tournament: %s", tid)
     except Exception as exc:
         logger.error("cmd_set_winners error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["setroomid"])
+def cmd_set_room_id(message):
+    """Admin: /setroomid RoomID | Password — Match ka Room ID aur Password set karo.
+    Example:
+      /setroomid ABC123 | pass456
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    text  = message.text or ""
+    parts = text.split(None, 1)
+    if len(parts) < 2 or "|" not in parts[1]:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:*\n"
+            "`/setroomid RoomID | Password`\n\n"
+            "*Example:*\n"
+            "`/setroomid ABC123 | pass456`",
+            parse_mode="Markdown",
+        )
+    fields = [f.strip() for f in parts[1].split("|", 1)]
+    if len(fields) < 2 or not fields[0] or not fields[1]:
+        return bot.reply_to(message, "❌ Room ID aur Password dono dena zaroori hai.\nExample: `/setroomid ABC123 | pass456`", parse_mode="Markdown")
+
+    room_id       = fields[0][:50]
+    room_password = fields[1][:50]
+    try:
+        t = tournaments_col.find_one({"active": True})
+        if not t:
+            return bot.reply_to(message, "❌ Koi active tournament nahi hai. Pehle `/createtournament` karo.", parse_mode="Markdown")
+
+        tournaments_col.update_one(
+            {"active": True},
+            {"$set": {"room_id": room_id, "room_password": room_password}},
+        )
+        bot.reply_to(
+            message,
+            f"✅ *Room Credentials Set!*\n\n"
+            f"🏷 *Tournament:* {t.get('title', 'N/A')}\n"
+            f"🆔 *Room ID:* `{room_id}`\n"
+            f"🔑 *Password:* `{room_password}`\n\n"
+            f"⚠️ Room details sirf registered users ko match live hone par dikhenge.\n"
+            f"Match live karne ke liye:\n"
+            f"`/tournamentstatus match_live`",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin set room credentials for tournament %s: room_id=%s", t.get("tournament_id"), room_id)
+    except Exception as exc:
+        logger.error("cmd_set_room_id error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
