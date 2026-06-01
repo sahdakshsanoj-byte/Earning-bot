@@ -2857,12 +2857,55 @@ function _renderTournament(t, winners) {
         }
 
     } else if (t.status === 'match_live') {
+        const reg = _tournamentRegCache;
+
+        // ── Live banner
         html += `
-        <div style="text-align:center;padding:24px 16px;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.28);border-radius:14px;">
-            <span style="font-size:44px;display:block;margin-bottom:8px;" class="t-lock-icon">🔥</span>
+        <div style="text-align:center;padding:16px;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.28);border-radius:14px;margin-bottom:12px;">
+            <span style="font-size:40px;display:block;margin-bottom:6px;" class="t-lock-icon">🔥</span>
             <p style="font-size:18px;font-weight:900;color:#f87171;margin:0 0 4px;letter-spacing:0.5px;">MATCH IS LIVE!</p>
             <p style="font-size:12px;color:#94a3b8;margin:0;">The battle has begun. Good luck to all players!</p>
         </div>`;
+
+        if (reg && reg.registered) {
+            // ── Room credentials dashboard (only for registered users)
+            const roomId   = t.room_id       || null;
+            const roomPass = t.room_password || null;
+
+            html += `
+            <div style="background:linear-gradient(135deg,rgba(241,196,15,0.08),rgba(251,146,60,0.06));border:1.5px solid rgba(241,196,15,0.35);border-radius:16px;padding:16px;margin-bottom:4px;">
+                <p style="font-size:11px;font-weight:800;color:#f1c40f;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 12px;text-align:center;">🔑 Your Room Details</p>
+
+                <div style="background:rgba(0,0,0,0.30);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <p style="font-size:10px;color:#64748b;margin:0 0 3px;text-transform:uppercase;letter-spacing:0.5px;">🆔 Room ID</p>
+                        <p id="t-room-id-val" style="font-size:20px;font-weight:900;color:#e2e8f0;letter-spacing:2px;margin:0;">${roomId ? _esc(roomId) : '<span style="color:#475569;font-size:13px;font-weight:400;">Not set yet</span>'}</p>
+                    </div>
+                    ${roomId ? `<button onclick="navigator.clipboard.writeText('${_esc(roomId)}').then(()=>showToast('Room ID copied! ✅','success'))" style="background:rgba(241,196,15,0.15);border:1px solid rgba(241,196,15,0.35);border-radius:8px;padding:6px 12px;color:#f1c40f;font-size:11px;font-weight:700;cursor:pointer;">📋 Copy</button>` : ''}
+                </div>
+
+                <div style="background:rgba(0,0,0,0.30);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <p style="font-size:10px;color:#64748b;margin:0 0 3px;text-transform:uppercase;letter-spacing:0.5px;">🔑 Password</p>
+                        <p id="t-room-pass-val" style="font-size:20px;font-weight:900;color:#e2e8f0;letter-spacing:2px;margin:0;">${roomPass ? _esc(roomPass) : '<span style="color:#475569;font-size:13px;font-weight:400;">Not set yet</span>'}</p>
+                    </div>
+                    ${roomPass ? `<button onclick="navigator.clipboard.writeText('${_esc(roomPass)}').then(()=>showToast('Password copied! ✅','success'))" style="background:rgba(241,196,15,0.15);border:1px solid rgba(241,196,15,0.35);border-radius:8px;padding:6px 12px;color:#f1c40f;font-size:11px;font-weight:700;cursor:pointer;">📋 Copy</button>` : ''}
+                </div>
+
+                ${(!roomId || !roomPass) ? `
+                <p style="font-size:11px;color:#475569;text-align:center;margin:10px 0 0;">⏳ Room credentials will appear here once admin sets them. Keep refreshing!</p>
+                ` : `
+                <p style="font-size:11px;color:#4ade80;text-align:center;margin:10px 0 0;font-weight:700;">✅ All set! Join the room and good luck 🎯</p>
+                `}
+            </div>`;
+        } else {
+            // Not registered — show a message
+            html += `
+            <div style="text-align:center;padding:14px;background:rgba(239,68,68,0.05);border:1px dashed rgba(239,68,68,0.25);border-radius:12px;">
+                <p style="font-size:13px;color:#f87171;margin:0;font-weight:700;">❌ You are not registered</p>
+                <p style="font-size:11px;color:#64748b;margin:6px 0 0;">Registration was required before match start. Wait for the next tournament!</p>
+            </div>`;
+        }
 
     } else if (t.status === 'completed' && (!winners || winners.length === 0)) {
         html += `
