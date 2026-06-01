@@ -4428,33 +4428,21 @@ def start(message):
     current_coins = user.get("coins", 0)
     web_app_url   = f"https://sahdakshsanoj-byte.github.io/Earning-bot/?user_id={user_id}"
 
-    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(
         types.InlineKeyboardButton("\U0001f4b0 Open Earning Hub", web_app=types.WebAppInfo(web_app_url))
-    )
-    markup.add(
-        types.InlineKeyboardButton("\U0001f4a3 Bomb Box Challenge", callback_data=f"bb_start:{user_id}"),
-        types.InlineKeyboardButton("\U0001f465 Invite Friends",     callback_data="invite_friends"),
     )
 
     bot.send_message(
         user_id,
         f"\U0001f44b *Hello {username}!*\n\n"
         f"\U0001f4b0 Balance: *{current_coins} \U0001fa99*\n\n"
-        f"Invite friends and earn *30 coins* for each referral!\n\n"
-        f"\U0001f4a3 *New!* Try Bomb Box Challenge — pick a box & win coins!\n\n"
+        f"Earn coins daily, complete tasks, and withdraw rewards!\n\n"
         f"Tap the button below to start earning! \U0001f680",
         reply_markup=markup,
         parse_mode="Markdown",
     )
 
-
-@bot.message_handler(commands=["invite"])
-def invite_command(message):
-    user_id = message.from_user.id
-    get_or_create_user(user_id, message.from_user.first_name or "User")
-    if not send_referral_link(user_id):
-        bot.reply_to(message, "Unable to send invite right now. Please try again later.")
 
 
 @bot.callback_query_handler(func=lambda call: call.data == "invite_friends")
@@ -4949,7 +4937,16 @@ def admin_panel_command(message):
         "\U0001f524 *Word Filter (Group)*\n"
         "\u2022 /addcodefilter `<word>` \u2014 Block a word\n"
         "\u2022 /delcodefilter `<word>` \u2014 Unblock a word\n"
-        "\u2022 /listcodefilters \u2014 List blocked words\n"
+        "\u2022 /listcodefilters \u2014 List blocked words\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+        "\U0001f3c6 *Tournament*\n"
+        "\u2022 /createtournament `Title|Mode|Map|Date|Time|Fee|MaxP|Prize` \u2014 Create\n"
+        "\u2022 /tournamentstatus `<status>` \u2014 Status change karo\n"
+        "  Statuses: `coming_soon` \u2022 `registration_open` \u2022 `registration_closed` \u2022 `match_live` \u2022 `completed`\n"
+        "\u2022 /tournamentinfo \u2014 Active tournament ki details\n"
+        "\u2022 /tournamentregs \u2014 Registered players list\n"
+        "\u2022 /setwinners `Nick:Reward | Nick:Reward | Nick:Reward` \u2014 Winners set karo\n"
+        "\u2022 /canceltournament \u2014 Tournament cancel karo\n"
     )
     bot.reply_to(message, text, parse_mode="Markdown")
 
@@ -5271,316 +5268,6 @@ def toggle_bomb_box(message):
     except Exception as exc:
         logger.error("togglebomb error: %s", exc)
         bot.reply_to(message, "⚠️ Error toggling Bomb Box. Check logs.")
-
-
-# ============================================================
-# 💣 /bomb — Start Bomb Box Challenge
-# ============================================================
-
-@bot.message_handler(commands=["bomb", "bombbox"])
-def bomb_box_start(message):
-    user_id  = message.from_user.id
-    username = message.from_user.first_name or "Player"
-
-    # ── Feature lock check ──
-    fcfg = get_feature_config()
-    if not fcfg.get("bomb_box_active", True):
-        bot.reply_to(
-            message,
-            "🔒 *Bomb Box Challenge is currently locked.*\n\n"
-            "Stay tuned — it'll be back soon! 🚀",
-            parse_mode="Markdown",
-        )
-        return
-
-    # ── User must be registered ──
-    user = users_col.find_one({"user_id": user_id})
-    if not user:
-        bot.reply_to(message, "Please use /start to register first!")
-        return
-
-    # ── Cooldown check ──
-    remaining = _bomb_cooldown_remaining(user_id)
-    if remaining > 0:
-        mins = remaining // 60
-        secs = remaining % 60
-        bot.reply_to(
-            message,
-            f"⏳ *Cooldown Active!*\n\n"
-            f"Next game in *{mins}m {secs}s*.\n"
-            f"Come back soon! 🎯",
-            parse_mode="Markdown",
-        )
-        return
-
-    # ── Show intro + Play button ──
-    mk = types.InlineKeyboardMarkup()
-    mk.add(types.InlineKeyboardButton("🎮 Start Game!", callback_data=f"bb_start:{user_id}"))
-
-    rewards_text = " | ".join([f"💰 {r}" for r in BOMB_BOX_REWARDS])
-    bot.send_message(
-        user_id,
-        f"💣 *Bomb Box Challenge*\n"
-        f"{'━' * 28}\n\n"
-        f"🎯 4 boxes hain — 1 bomb 💣, 3 rewards!\n\n"
-        f"💎 *Possible Rewards:* {rewards_text} coins\n"
-        f"⏰ *Cooldown:* 15 minutes per game\n\n"
-        f"🧠 Choose wisely — ek hi chance milta hai!\n\n"
-        f"*Tap below to reveal the boxes!* 👇",
-        reply_markup=mk,
-        parse_mode="Markdown",
-    )
-
-
-# ── Callback: bb_start — Generate game & show boxes ──
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("bb_start:"))
-def bomb_box_show_boxes(call):
-    try:
-        parts   = call.data.split(":")
-        owner   = int(parts[1])
-        user_id = call.from_user.id
-
-        # Anti-cheat: only the original user can play
-        if user_id != owner:
-            bot.answer_callback_query(call.id, "❌ Ye game tumhara nahi hai!", show_alert=True)
-            return
-
-        fcfg = get_feature_config()
-        if not fcfg.get("bomb_box_active", True):
-            bot.answer_callback_query(call.id, "🔒 Game locked!", show_alert=True)
-            return
-
-        remaining = _bomb_cooldown_remaining(user_id)
-        if remaining > 0:
-            mins = remaining // 60
-            secs = remaining % 60
-            bot.answer_callback_query(
-                call.id,
-                f"⏳ Cooldown! {mins}m {secs}s baad try karo.",
-                show_alert=True,
-            )
-            return
-
-        # ── Create game in DB ──
-        game_id = f"{user_id}_{int(time.time() * 1000)}"
-        boxes   = _make_box_layout()
-        bomb_box_col.insert_one({
-            "game_id":   game_id,
-            "user_id":   user_id,
-            "boxes":     boxes,
-            "played":    False,
-            "timestamp": time.time(),
-        })
-
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=(
-                f"💣 *Bomb Box Challenge — Pick Your Box!*\n"
-                f"{'━' * 28}\n\n"
-                f"🎯 Ek box chunno — bombs se bacho!\n"
-                f"💡 Sirf *ek chance* hai — sochke chuno!\n\n"
-                f"⚠️ *Ek baar click karne ke baad change nahi hoga!*"
-            ),
-            reply_markup=_bomb_box_markup(game_id),
-            parse_mode="Markdown",
-        )
-        bot.answer_callback_query(call.id, "📦 Boxes ready! Pick wisely!")
-
-    except Exception as exc:
-        logger.error("bomb_box_show_boxes error: %s", exc)
-        bot.answer_callback_query(call.id, "⚠️ Error. Try /bomb again.", show_alert=True)
-
-
-# ── Callback: bb_pick — Process box pick ──
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("bb_pick:"))
-def bomb_box_pick(call):
-    try:
-        parts     = call.data.split(":")
-        game_id   = parts[1]
-        box_index = int(parts[2])
-        user_id   = call.from_user.id
-
-        # ── Atomic claim — only works once (anti-cheat) ──
-        game = bomb_box_col.find_one_and_update(
-            {"game_id": game_id, "user_id": user_id, "played": False},
-            {"$set": {"played": True, "pick": box_index, "result_time": time.time()}},
-            return_document=True,
-        )
-
-        if game is None:
-            bot.answer_callback_query(
-                call.id,
-                "❌ Already played or game expired! Use /bomb to start a new game.",
-                show_alert=True,
-            )
-            return
-
-        boxes     = game["boxes"]
-        chosen    = boxes[box_index]
-        box_type  = chosen["type"]
-        coins_won = chosen["value"]
-
-        # ── Build reveal grid ──
-        def box_label(i: int) -> str:
-            b = boxes[i]
-            if i == box_index:
-                return "💣" if b["type"] == "bomb" else f"✅ {b['value']}"
-            return "📦"
-
-        grid = (
-            f"{box_label(0)}  {box_label(1)}\n"
-            f"{box_label(2)}  {box_label(3)}"
-        )
-
-        if box_type == "reward":
-            # ── Add coins ──
-            users_col.update_one(
-                {"user_id": user_id},
-                {"$inc": {"coins": coins_won}},
-            )
-            # ── Update leaderboard stats ──
-            bomb_box_col.update_one(
-                {"game_id": game_id},
-                {"$set": {"coins_won": coins_won, "won": True}},
-            )
-            fun_msg = random.choice(BOMB_BOX_FUN_WIN_MSGS)
-            new_bal = (users_col.find_one({"user_id": user_id}) or {}).get("coins", 0)
-            result_text = (
-                f"💣 *Bomb Box Challenge — Result!*\n"
-                f"{'━' * 28}\n\n"
-                f"{fun_msg}\n\n"
-                f"🎁 *+{coins_won} coins* added to your wallet!\n"
-                f"💰 New Balance: *{new_bal} 🪙*\n\n"
-                f"*Box Reveal:*\n{grid}\n\n"
-                f"⏰ Next game in *15 minutes*\n"
-                f"🎮 Use /bomb to play again!"
-            )
-            bot.answer_callback_query(call.id, f"🎉 +{coins_won} coins! Lucky you!")
-
-        else:
-            # ── Bomb! No coins ──
-            bomb_box_col.update_one(
-                {"game_id": game_id},
-                {"$set": {"coins_won": 0, "won": False}},
-            )
-            fun_msg = random.choice(BOMB_BOX_FUN_BOMB_MSGS)
-            result_text = (
-                f"💣 *Bomb Box Challenge — Result!*\n"
-                f"{'━' * 28}\n\n"
-                f"{fun_msg}\n\n"
-                f"😢 *0 coins* — Bomb box chun liya!\n\n"
-                f"*Box Reveal:*\n{grid}\n\n"
-                f"⏰ Next game in *15 minutes*\n"
-                f"🎮 Use /bomb to try again!"
-            )
-            bot.answer_callback_query(call.id, "💣 BOOM! Better luck next time!")
-
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=result_text,
-            parse_mode="Markdown",
-        )
-
-    except Exception as exc:
-        logger.error("bomb_box_pick error: %s", exc)
-        bot.answer_callback_query(call.id, "⚠️ Error. Please try /bomb again.", show_alert=True)
-
-
-# ============================================================
-# 🏆 /bombboard — Bomb Box Leaderboard
-# ============================================================
-
-@bot.message_handler(commands=["bombboard"])
-def bomb_box_leaderboard(message):
-    user_id = message.from_user.id
-    get_or_create_user(user_id, message.from_user.first_name or "User")
-
-    try:
-        # ── Top winners by total coins won ──
-        top_winners = list(bomb_box_col.aggregate([
-            {"$match": {"played": True, "won": True}},
-            {"$group": {
-                "_id":        "$user_id",
-                "total_won":  {"$sum": "$coins_won"},
-                "games_won":  {"$sum": 1},
-            }},
-            {"$sort": {"total_won": -1}},
-            {"$limit": 5},
-        ]))
-
-        # ── Most games played ──
-        most_played = list(bomb_box_col.aggregate([
-            {"$match": {"played": True}},
-            {"$group": {
-                "_id":         "$user_id",
-                "total_games": {"$sum": 1},
-            }},
-            {"$sort": {"total_games": -1}},
-            {"$limit": 5},
-        ]))
-
-        def get_name(uid: int) -> str:
-            u = users_col.find_one({"user_id": uid}, {"username": 1, "first_name": 1})
-            if not u:
-                return f"User {uid}"
-            return u.get("username") or u.get("first_name") or f"User {uid}"
-
-        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-
-        # ── Build text ──
-        lines = [
-            "💣 *Bomb Box — Leaderboard*",
-            f"{'━' * 28}\n",
-            "🏆 *Top Earners (Coins Won)*",
-        ]
-        if top_winners:
-            for i, row in enumerate(top_winners):
-                name = get_name(row["_id"])
-                lines.append(
-                    f"{medals[i]} {name}: *{row['total_won']} 🪙* ({row['games_won']} wins)"
-                )
-        else:
-            lines.append("  _No winners yet — be the first!_")
-
-        lines.append(f"\n🎮 *Most Games Played*")
-        if most_played:
-            for i, row in enumerate(most_played):
-                name = get_name(row["_id"])
-                lines.append(
-                    f"{medals[i]} {name}: *{row['total_games']} games*"
-                )
-        else:
-            lines.append("  _No games played yet!_")
-
-        # ── Personal stats ──
-        my_stats = list(bomb_box_col.aggregate([
-            {"$match": {"user_id": user_id, "played": True}},
-            {"$group": {
-                "_id":       None,
-                "total":     {"$sum": 1},
-                "wins":      {"$sum": {"$cond": ["$won", 1, 0]}},
-                "coins_won": {"$sum": {"$ifNull": ["$coins_won", 0]}},
-            }}
-        ]))
-        if my_stats:
-            s = my_stats[0]
-            lines.append(
-                f"\n📊 *Your Stats*\n"
-                f"  Games: `{s['total']}` | Wins: `{s['wins']}` | "
-                f"Coins: `{s['coins_won']} 🪙`"
-            )
-
-        lines.append(f"\n🎯 Play with /bomb!")
-
-        bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
-
-    except Exception as exc:
-        logger.error("bombboard error: %s", exc)
-        bot.reply_to(message, "⚠️ Error loading leaderboard. Try again!")
 
 
 @bot.message_handler(commands=["health"])
@@ -6315,6 +6002,337 @@ def group_code_filter_handler(message):
 
 
 # ============================================================
+# TOURNAMENT BOT COMMANDS
+# ============================================================
+
+@bot.message_handler(commands=["createtournament"])
+def cmd_create_tournament(message):
+    """Admin: /createtournament — Naya tournament create karo.
+    Format:
+      /createtournament Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool
+    Example:
+      /createtournament FF Grand Finals | Squad | Bermuda | 5 June 2026 | 8:00 PM | 0 | 50 | 5000 Coins
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    text  = message.text or ""
+    parts = text.split(None, 1)
+    if len(parts) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:*\n"
+            "`/createtournament Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool`\n\n"
+            "*Example:*\n"
+            "`/createtournament FF Grand Finals | Squad | Bermuda | 5 June 2026 | 8:00 PM | 0 | 50 | 5000 Coins`\n\n"
+            "⚠️ EntryFee aur MaxPlayers number mein dena hai.",
+            parse_mode="Markdown",
+        )
+
+    fields = [f.strip() for f in parts[1].split("|")]
+    if len(fields) < 8:
+        return bot.reply_to(
+            message,
+            "❌ *8 fields chahiye, `|` se alag karo:*\n"
+            "`Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool`",
+            parse_mode="Markdown",
+        )
+
+    title, mode, map_, date, t_time, entry_fee_str, max_p_str, prize_pool = fields[:8]
+
+    try:
+        entry_fee  = int(entry_fee_str)
+        max_players = int(max_p_str)
+    except ValueError:
+        return bot.reply_to(message, "❌ EntryFee aur MaxPlayers sirf number mein dena hai. Example: `0` ya `50`.", parse_mode="Markdown")
+
+    try:
+        tid = f"t_{int(time.time())}"
+        tournaments_col.update_many({}, {"$set": {"active": False}})
+        tournaments_col.update_one(
+            {"tournament_id": tid},
+            {"$set": {
+                "tournament_id": tid,
+                "title":         sanitize_text(title, max_length=100),
+                "mode":          sanitize_text(mode, max_length=30),
+                "map":           sanitize_text(map_, max_length=30),
+                "date":          sanitize_text(date, max_length=30),
+                "time":          sanitize_text(t_time, max_length=30),
+                "entry_fee":     entry_fee,
+                "max_players":   max_players,
+                "prize_pool":    sanitize_text(prize_pool, max_length=200),
+                "prizes":        [],
+                "status":        "coming_soon",
+                "active":        True,
+                "created_at":    datetime.utcnow(),
+                "created_by":    ADMIN_ID,
+            }},
+            upsert=True,
+        )
+        bot.reply_to(
+            message,
+            f"✅ *Tournament Created!*\n\n"
+            f"🏆 *Title:* {title}\n"
+            f"🎮 *Mode:* {mode}  |  🗺 *Map:* {map_}\n"
+            f"📅 *Date:* {date}  |  ⏰ *Time:* {t_time}\n"
+            f"💰 *Entry Fee:* {entry_fee} 🪙\n"
+            f"👥 *Max Players:* {max_players}\n"
+            f"🏅 *Prize Pool:* {prize_pool}\n\n"
+            f"📌 *Status:* Coming Soon\n"
+            f"🆔 *ID:* `{tid}`\n\n"
+            f"Registration open karne ke liye:\n"
+            f"`/tournamentstatus registration_open`",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin created tournament: %s", tid)
+    except Exception as exc:
+        logger.error("cmd_create_tournament error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["tournamentstatus"])
+def cmd_tournament_status(message):
+    """Admin: /tournamentstatus <status> — Tournament ka status change karo.
+    Options:
+      coming_soon         — Announcement only, registration band
+      registration_open   — Users register kar sakte hain ✅
+      registration_closed — Registration band, match abhi baki
+      match_live          — Match chal raha hai 🔴
+      completed           — Tournament khatam 🏁
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+
+    valid = {
+        "coming_soon":         "📣 Coming Soon",
+        "registration_open":   "✅ Registration Open",
+        "registration_closed": "🔒 Registration Closed",
+        "match_live":          "🔴 Match Live",
+        "completed":           "🏁 Completed",
+    }
+    parts = message.text.split()
+    if len(parts) < 2 or parts[1] not in valid:
+        opts = "\n".join([f"  `{k}` — {v}" for k, v in valid.items()])
+        return bot.reply_to(
+            message,
+            f"📋 *Usage:* `/tournamentstatus <status>`\n\n*Valid options:*\n{opts}",
+            parse_mode="Markdown",
+        )
+
+    status = parts[1]
+    try:
+        res = tournaments_col.update_one({"active": True}, {"$set": {"status": status}})
+        if res.matched_count == 0:
+            return bot.reply_to(message, "❌ Koi active tournament nahi mila. Pehle `/createtournament` karo.", parse_mode="Markdown")
+        bot.reply_to(
+            message,
+            f"✅ *Tournament Status Updated!*\n\n"
+            f"New Status: *{valid[status]}*\n\n"
+            f"{'🎉 Users ab register kar sakte hain!' if status == 'registration_open' else ''}"
+            f"{'🔴 Match live ho gaya! All the best to players!' if status == 'match_live' else ''}"
+            f"{'🏁 Tournament complete. `/setwinners` se winners announce karo!' if status == 'completed' else ''}",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin set tournament status → %s", status)
+    except Exception as exc:
+        logger.error("cmd_tournament_status error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["tournamentinfo"])
+def cmd_tournament_info(message):
+    """Admin: /tournamentinfo — Active tournament ki full details dekho."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        t = tournaments_col.find_one({"active": True})
+        if not t:
+            return bot.reply_to(message, "❌ Koi active tournament nahi hai. `/createtournament` se banao.", parse_mode="Markdown")
+
+        status_labels = {
+            "coming_soon":         "📣 Coming Soon",
+            "registration_open":   "✅ Registration Open",
+            "registration_closed": "🔒 Registration Closed",
+            "match_live":          "🔴 Match Live",
+            "completed":           "🏁 Completed",
+        }
+        reg_count  = tournament_registrations_col.count_documents({"tournament_id": t["tournament_id"]}) \
+                     if hasattr(tournament_registrations_col, "count_documents") \
+                     else 0
+        try:
+            reg_count = tournament_registrations_col.count_documents({"tournament_id": t["tournament_id"]})
+        except Exception:
+            reg_count = 0
+
+        status_str = status_labels.get(t.get("status", ""), t.get("status", "Unknown"))
+        bot.reply_to(
+            message,
+            f"🏆 *Tournament Info*\n\n"
+            f"📌 *Status:* {status_str}\n"
+            f"🆔 *ID:* `{t.get('tournament_id', 'N/A')}`\n"
+            f"🎮 *Title:* {t.get('title', 'N/A')}\n"
+            f"⚔️ *Mode:* {t.get('mode', 'N/A')}  |  🗺 *Map:* {t.get('map', 'N/A')}\n"
+            f"📅 *Date:* {t.get('date', 'N/A')}  |  ⏰ *Time:* {t.get('time', 'N/A')}\n"
+            f"💰 *Entry Fee:* {t.get('entry_fee', 0)} 🪙\n"
+            f"👥 *Max Players:* {t.get('max_players', 'N/A')}\n"
+            f"🏅 *Prize Pool:* {t.get('prize_pool', 'N/A')}\n"
+            f"📝 *Registered:* {reg_count} players\n\n"
+            f"*Commands:*\n"
+            f"• `/tournamentstatus <status>` — Status change karo\n"
+            f"• `/tournamentregs` — Registered players dekho\n"
+            f"• `/setwinners` — Winners announce karo\n"
+            f"• `/canceltournament` — Tournament cancel karo",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logger.error("cmd_tournament_info error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["tournamentregs"])
+def cmd_tournament_regs(message):
+    """Admin: /tournamentregs — Active tournament ke registered players dekho."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        t = tournaments_col.find_one({"active": True})
+        if not t:
+            return bot.reply_to(message, "❌ Koi active tournament nahi hai.")
+
+        regs = list(tournament_registrations_col.find(
+            {"tournament_id": t["tournament_id"]},
+            {"_id": 0, "user_id": 1, "ff_uid": 1, "ff_nickname": 1, "registered_at": 1}
+        ).sort("registered_at", 1).limit(50))
+
+        if not regs:
+            return bot.reply_to(message, f"📋 *{t.get('title', 'Tournament')}*\n\nAbhi tak koi registration nahi aaya.", parse_mode="Markdown")
+
+        lines = [f"📋 *{t.get('title', 'Tournament')} — Registrations ({len(regs)})*\n"]
+        for i, r in enumerate(regs, 1):
+            reg_time = ""
+            if r.get("registered_at"):
+                try:
+                    reg_time = r["registered_at"].strftime("%d %b %H:%M")
+                except Exception:
+                    reg_time = ""
+            lines.append(
+                f"{i}. *{r.get('ff_nickname', 'N/A')}*\n"
+                f"   FF UID: `{r.get('ff_uid', 'N/A')}`  |  TG: `{r.get('user_id', 'N/A')}`"
+                + (f"  |  {reg_time}" if reg_time else "")
+            )
+
+        # Telegram message 4096 char limit ke andar rakhna
+        msg = "\n".join(lines)
+        if len(msg) > 4000:
+            msg = msg[:3980] + "\n\n_...aur bhi hain — pehle 50 dikha rahe hain._"
+
+        bot.reply_to(message, msg, parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("cmd_tournament_regs error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["setwinners"])
+def cmd_set_winners(message):
+    """Admin: /setwinners — Tournament winners announce karo aur coins do.
+    Format:
+      /setwinners Nickname:Reward | Nickname:Reward | Nickname:Reward
+    Example:
+      /setwinners ProSniper:2000 coins | TeamAlpha:1500 coins | FastKill:1000 coins
+    Note: Coins automatically users ko nahi milenge — manually /addcoins use karo.
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+
+    text  = message.text or ""
+    parts = text.split(None, 1)
+    if len(parts) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:*\n"
+            "`/setwinners Nickname:Reward | Nickname:Reward | Nickname:Reward`\n\n"
+            "*Example:*\n"
+            "`/setwinners ProSniper:2000 coins | TeamAlpha:1500 coins | FastKill:1000 coins`\n\n"
+            "⚠️ Maximum 3 winners. `|` se alag karo.",
+            parse_mode="Markdown",
+        )
+
+    try:
+        t = tournaments_col.find_one({"active": True})
+        if not t:
+            return bot.reply_to(message, "❌ Koi active tournament nahi hai.")
+
+        tid    = t["tournament_id"]
+        entries = [e.strip() for e in parts[1].split("|") if e.strip()][:3]
+
+        if not entries:
+            return bot.reply_to(message, "❌ Kam se kam 1 winner dena hai.")
+
+        winners_docs = []
+        winner_lines = []
+        rank_emojis  = ["🥇", "🥈", "🥉"]
+
+        for i, entry in enumerate(entries, 1):
+            if ":" in entry:
+                nick, reward = entry.split(":", 1)
+                nick   = nick.strip()
+                reward = reward.strip()
+            else:
+                nick   = entry.strip()
+                reward = "—"
+            winners_docs.append({
+                "tournament_id": tid,
+                "rank":          i,
+                "username":      sanitize_text(nick, max_length=60),
+                "reward":        sanitize_text(reward, max_length=200),
+                "published_at":  datetime.utcnow(),
+            })
+            winner_lines.append(f"{rank_emojis[i-1]} *#{i} {nick}* — {reward}")
+
+        tournament_winners_col.delete_many({"tournament_id": tid})
+        tournament_winners_col.insert_many(winners_docs)
+
+        # Tournament status completed karo
+        tournaments_col.update_one({"active": True}, {"$set": {"status": "completed"}})
+
+        winners_text = "\n".join(winner_lines)
+        bot.reply_to(
+            message,
+            f"🏆 *Winners Announced!*\n\n"
+            f"*{t.get('title', 'Tournament')}*\n\n"
+            f"{winners_text}\n\n"
+            f"✅ Tournament status: *Completed*\n\n"
+            f"⚠️ Coins manually dene ke liye:\n`/addcoins <user_id> <amount>`",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin published winners for tournament: %s", tid)
+    except Exception as exc:
+        logger.error("cmd_set_winners error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["canceltournament"])
+def cmd_cancel_tournament(message):
+    """Admin: /canceltournament — Active tournament ko cancel/deactivate karo."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        res = tournaments_col.update_one({"active": True}, {"$set": {"active": False, "status": "completed"}})
+        if res.matched_count == 0:
+            return bot.reply_to(message, "❌ Koi active tournament nahi mila.")
+        bot.reply_to(
+            message,
+            "🚫 *Tournament Cancelled!*\n\n"
+            "Tournament deactivate ho gaya.\n"
+            "Naya tournament banane ke liye `/createtournament` use karo.",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin cancelled active tournament.")
+    except Exception as exc:
+        logger.error("cmd_cancel_tournament error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+# ============================================================
 # BOT POLLING THREAD
 # ============================================================
 
@@ -6336,13 +6354,11 @@ def run_bot() -> None:
             # ── Register bot commands in Telegram menu ──
             try:
                 bot.set_my_commands([
-                    types.BotCommand("start",      "🚀 Bot shuru karo"),
-                    types.BotCommand("balance",    "💰 Apna balance dekho"),
-                    types.BotCommand("bomb",       "💣 Bomb Box Challenge khelo"),
-                    types.BotCommand("bombboard",  "🏆 Bomb Box Leaderboard dekho"),
-                    types.BotCommand("invite",     "👥 Friends ko invite karo"),
-                    types.BotCommand("stats",      "📊 Bot stats dekho (Admin)"),
-                    types.BotCommand("monetag",    "💵 Monetag earnings dekho (Admin)"),
+                    types.BotCommand("start",    "🚀 Bot shuru karo"),
+                    types.BotCommand("balance",  "💰 Apna balance dekho"),
+                    types.BotCommand("redeem",   "🎟 Promo code redeem karo"),
+                    types.BotCommand("stats",    "📊 Bot stats dekho (Admin)"),
+                    types.BotCommand("monetag",  "💵 Monetag earnings dekho (Admin)"),
                 ])
                 logger.info("Bot commands registered successfully.")
             except Exception as cmd_exc:
