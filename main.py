@@ -112,10 +112,13 @@ try:
     ad_reward_tokens_col      = db["ad_reward_tokens"]
     code_filter_rules_col     = db["code_filter_rules"]
     group_code_violations_col = db["group_code_violations"]
-    promo_tasks_col           = db["promo_tasks"]
-    lottery_col               = db["lottery"]
-    bomb_box_col              = db["bomb_box_games"]
-    referral_commissions_col  = db["referral_commissions"]
+    promo_tasks_col               = db["promo_tasks"]
+    lottery_col                   = db["lottery"]
+    bomb_box_col                  = db["bomb_box_games"]
+    referral_commissions_col      = db["referral_commissions"]
+    tournaments_col               = db["tournaments"]
+    tournament_registrations_col  = db["tournament_registrations"]
+    tournament_winners_col        = db["tournament_winners"]
 
     try:
         rate_col.create_index("expires_at", expireAfterSeconds=0)
@@ -143,6 +146,15 @@ try:
             [("chat_id", 1), ("user_id", 1)], unique=True, **_idx_opts
         )
         promo_tasks_col.create_index("task_id", unique=True, **_idx_opts)
+        # Tournament indexes
+        tournaments_col.create_index("active", **_idx_opts)
+        tournaments_col.create_index("status", **_idx_opts)
+        tournament_registrations_col.create_index(
+            [("tournament_id", 1), ("user_id", 1)], unique=True, **_idx_opts
+        )
+        tournament_registrations_col.create_index("user_id", **_idx_opts)
+        tournament_registrations_col.create_index("tournament_id", **_idx_opts)
+        tournament_winners_col.create_index("tournament_id", **_idx_opts)
         # Referral commissions indexes
         referral_commissions_col.create_index("event_id", unique=True, **_idx_opts)
         referral_commissions_col.create_index("sponsor_id", **_idx_opts)
@@ -176,14 +188,14 @@ TASK_CODES = {
 }
 
 TASK_REWARDS = {
-    "yt1":   10,
-    "yt2":   10,
-    "yt3":   10,
-    "web1":  10,
-    "web2":  10,
-    "web3":  10,
-    "slot3": 10,
-    "slot4": 10,
+    "yt1":   5,
+    "yt2":   5,
+    "yt3":   5,
+    "web1":  3,
+    "web2":  3,
+    "web3":  3,
+    "slot3": 4,
+    "slot4": 4,
 }
 
 ONE_TIME_TASK_IDS      = {"slot3", "slot4"}
@@ -193,8 +205,8 @@ MAX_WEB_TASKS_PER_DAY = 3
 CHANNEL_IDS                = ["official", "channel2", "channel3", "slot1", "slot2", "slot3", "slot4"]
 CHANNEL_REWARD_PER_CHANNEL = 5          # default reward for official channels
 CHANNEL_REWARDS            = {          # per-channel override (sponsor slots earn less)
-    "slot1": 10,
-    "slot2": 10,
+    "slot1": 3,
+    "slot2": 3,
 }
 CHANNEL_TOTAL_REWARD       = 15
 
@@ -213,6 +225,19 @@ WITHDRAW_COOLDOWN = 86400
 # ============================================================
 # 4a-2. REFERRAL COMMISSION SYSTEM
 # ============================================================
+
+# ============================================================
+# 4a-1. TOURNAMENT SYSTEM
+# ============================================================
+
+TOURNAMENT_STATES = ["coming_soon", "registration_open", "registration_closed", "match_live", "completed"]
+TOURNAMENT_STATE_LABELS = {
+    "coming_soon":          "Coming Soon",
+    "registration_open":    "Registration Open",
+    "registration_closed":  "Registration Closed",
+    "match_live":           "Match Live",
+    "completed":            "Completed",
+}
 
 COMMISSION_RATE          = 0.10   # 10% commission on eligible earnings
 COMMISSION_DAILY_LIMIT   = 200    # Max commission coins a sponsor earns per day
@@ -4063,6 +4088,249 @@ def claim_milestone_api(user_id: int):
         return jsonify({"status": "success", "message": msg, "reward": ms["reward"], "badge": ms["badge"]})
     except Exception as exc:
         logger.error("claim_milestone_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+# ============================================================
+# TOURNAMENT HUB API ENDPOINTS
+# ============================================================
+
+@app.route("/tournament", methods=["GET"])
+def get_tournament_api():
+    """Active tournament ka data + winners return karo."""
+    try:
+        t = tournaments_col.find_one({"active": True}, {"_id": 0})
+        if not t:
+            return jsonify({"status": "success", "tournament": None, "winners": []})
+
+        tid = t.get("tournament_id", "")
+        # Winners (only if completed)
+        winners = []
+        if t.get("status") == "completed":
+            winners = list(
+                tournament_winners_col.find(
+                    {"tournament_id": tid},
+                    {"_id": 0},
+                ).sort("rank", 1)
+            )
+
+        # Registration count
+        reg_count = tournament_registrations_col.count_documents({"tournament_id": tid})
+        t["registered_count"] = reg_count
+        slots_left = max(0, t.get("max_players", 0) - reg_count)
+        t["slots_remaining"] = slots_left
+        # Convert datetime to string
+        for k in list(t.keys()):
+            if isinstance(t[k], datetime):
+                t[k] = t[k].strftime("%d %b %Y, %H:%M UTC")
+
+        return jsonify({"status": "success", "tournament": t, "winners": winners})
+    except Exception as exc:
+        logger.error("get_tournament_api error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/tournament/register", methods=["POST"])
+def tournament_register_api():
+    """User ko tournament mein register karo."""
+    data = request.get_json(silent=True) or {}
+    try:
+        user_id = int(data.get("user_id"))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+
+    ff_uid      = sanitize_text(data.get("ff_uid", ""), max_length=30)
+    ff_nickname = sanitize_text(data.get("ff_nickname", ""), max_length=40)
+
+    if not ff_uid or not ff_nickname:
+        return jsonify({"status": "error", "message": "FF UID and Nickname are required."}), 400
+
+    if is_rate_limited(f"tourney_reg_{user_id}", 15):
+        return jsonify({"status": "error", "message": "Please wait before retrying."}), 429
+
+    try:
+        user = users_col.find_one({"user_id": user_id}, {"blocked": 1, "username": 1, "_id": 0})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Account suspended."}), 403
+
+        t = tournaments_col.find_one({"active": True})
+        if not t:
+            return jsonify({"status": "error", "message": "No active tournament found."}), 404
+
+        if t.get("status") != "registration_open":
+            state_label = TOURNAMENT_STATE_LABELS.get(t.get("status", ""), "Unavailable")
+            return jsonify({"status": "error", "message": f"Registration is not open. Status: {state_label}"}), 400
+
+        tid = t.get("tournament_id", "")
+
+        # Slot check
+        reg_count = tournament_registrations_col.count_documents({"tournament_id": tid})
+        if t.get("max_players", 0) > 0 and reg_count >= t["max_players"]:
+            return jsonify({"status": "error", "message": "Tournament is full! No slots remaining."}), 400
+
+        # Duplicate check
+        existing = tournament_registrations_col.find_one({"tournament_id": tid, "user_id": user_id})
+        if existing:
+            return jsonify({"status": "error", "message": "You are already registered for this tournament!"}), 400
+
+        tournament_registrations_col.insert_one({
+            "tournament_id":  tid,
+            "user_id":        user_id,
+            "username":       user.get("username", "Unknown"),
+            "ff_uid":         ff_uid,
+            "ff_nickname":    ff_nickname,
+            "registered_at":  datetime.utcnow(),
+            "status":         "registered",
+        })
+        logger.info("Tournament reg: user=%s ff_uid=%s tournament=%s", user_id, ff_uid, tid)
+        return jsonify({
+            "status":  "success",
+            "message": "🎉 Registration successful! Good luck in the tournament!",
+        })
+    except pymongo.errors.DuplicateKeyError:
+        return jsonify({"status": "error", "message": "You are already registered!"}), 400
+    except Exception as exc:
+        logger.error("tournament_register_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/tournament/my_registration/<int:user_id>", methods=["GET"])
+def my_tournament_registration_api(user_id: int):
+    """User ki current tournament registration check karo."""
+    try:
+        t = tournaments_col.find_one({"active": True}, {"tournament_id": 1, "_id": 0})
+        if not t:
+            return jsonify({"status": "success", "registered": False})
+        tid = t.get("tournament_id", "")
+        reg = tournament_registrations_col.find_one(
+            {"tournament_id": tid, "user_id": user_id},
+            {"_id": 0, "tournament_id": 0},
+        )
+        if not reg:
+            return jsonify({"status": "success", "registered": False})
+        if isinstance(reg.get("registered_at"), datetime):
+            reg["registered_at"] = reg["registered_at"].strftime("%d %b %Y, %H:%M")
+        return jsonify({"status": "success", "registered": True, "data": reg})
+    except Exception as exc:
+        logger.error("my_tournament_registration_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/admin/tournament", methods=["POST"])
+def admin_create_tournament_api():
+    """Admin: tournament create ya update karo."""
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data = request.get_json(silent=True) or {}
+    try:
+        tid = sanitize_text(data.get("tournament_id", f"t_{int(time.time())}"))
+        # Deactivate all other tournaments
+        tournaments_col.update_many({}, {"$set": {"active": False}})
+        tournaments_col.update_one(
+            {"tournament_id": tid},
+            {"$set": {
+                "tournament_id":  tid,
+                "title":          sanitize_text(data.get("title", "Free Fire Tournament"), max_length=100),
+                "mode":           sanitize_text(data.get("mode", "Squad"), max_length=30),
+                "map":            sanitize_text(data.get("map", "Bermuda"), max_length=30),
+                "date":           sanitize_text(data.get("date", ""), max_length=30),
+                "time":           sanitize_text(data.get("time", ""), max_length=30),
+                "entry_fee":      int(data.get("entry_fee", 0)),
+                "max_players":    int(data.get("max_players", 50)),
+                "prize_pool":     sanitize_text(data.get("prize_pool", ""), max_length=200),
+                "prizes":         data.get("prizes", []),
+                "status":         "coming_soon",
+                "active":         True,
+                "created_at":     datetime.utcnow(),
+                "created_by":     ADMIN_ID,
+            }},
+            upsert=True,
+        )
+        return jsonify({"status": "success", "message": f"Tournament '{tid}' created/updated.", "tournament_id": tid})
+    except Exception as exc:
+        logger.error("admin_create_tournament_api error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/admin/tournament/status", methods=["POST"])
+def admin_tournament_status_api():
+    """Admin: tournament ka state update karo."""
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data   = request.get_json(silent=True) or {}
+    status = (data.get("status") or "").strip()
+    if status not in TOURNAMENT_STATES:
+        return jsonify({"status": "error", "message": f"Invalid status. Must be one of: {TOURNAMENT_STATES}"}), 400
+    try:
+        res = tournaments_col.update_one({"active": True}, {"$set": {"status": status}})
+        if res.matched_count == 0:
+            return jsonify({"status": "error", "message": "No active tournament found."}), 404
+        logger.info("Admin updated tournament status to: %s", status)
+        return jsonify({"status": "success", "message": f"Tournament status updated to: {TOURNAMENT_STATE_LABELS[status]}"})
+    except Exception as exc:
+        logger.error("admin_tournament_status_api error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/admin/tournament/winners", methods=["POST"])
+def admin_publish_winners_api():
+    """Admin: tournament winners publish karo."""
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data = request.get_json(silent=True) or {}
+    try:
+        t = tournaments_col.find_one({"active": True}, {"tournament_id": 1})
+        if not t:
+            return jsonify({"status": "error", "message": "No active tournament."}), 404
+        tid     = t["tournament_id"]
+        winners = data.get("winners", [])
+        if not winners or not isinstance(winners, list):
+            return jsonify({"status": "error", "message": "winners array required."}), 400
+
+        tournament_winners_col.delete_many({"tournament_id": tid})
+        docs = []
+        for w in winners[:3]:
+            docs.append({
+                "tournament_id": tid,
+                "rank":          int(w.get("rank", 1)),
+                "username":      sanitize_text(w.get("username", "Unknown"), max_length=60),
+                "reward":        sanitize_text(w.get("reward", ""), max_length=200),
+                "published_at":  datetime.utcnow(),
+            })
+        if docs:
+            tournament_winners_col.insert_many(docs)
+        tournaments_col.update_one({"active": True}, {"$set": {"status": "completed"}})
+        logger.info("Admin published %d winners for tournament %s", len(docs), tid)
+        return jsonify({"status": "success", "message": f"{len(docs)} winner(s) published. Tournament marked completed."})
+    except Exception as exc:
+        logger.error("admin_publish_winners_api error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/admin/tournament/registrations", methods=["GET"])
+def admin_tournament_registrations_api():
+    """Admin: registered players list dekho."""
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    try:
+        t = tournaments_col.find_one({"active": True}, {"tournament_id": 1})
+        if not t:
+            return jsonify({"status": "success", "data": [], "total": 0})
+        tid  = t["tournament_id"]
+        regs = list(
+            tournament_registrations_col.find(
+                {"tournament_id": tid},
+                {"_id": 0, "tournament_id": 0},
+            ).sort("registered_at", 1)
+        )
+        for r in regs:
+            if isinstance(r.get("registered_at"), datetime):
+                r["registered_at"] = r["registered_at"].strftime("%d %b %Y, %H:%M")
+        return jsonify({"status": "success", "data": regs, "total": len(regs)})
+    except Exception as exc:
+        logger.error("admin_tournament_registrations_api error: %s", exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
