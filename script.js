@@ -2389,6 +2389,8 @@ function switchTab(tabId, el) {
         help:        'Help & Support',
         spin:        '🎡 Spin Wheel',
         mining:      '⛏️ Coin Mining',
+        tournament:  '🏆 Tournament Hub',
+        'bomb-box':  '💣 Bomb Box',
     };
     const titleEl = document.getElementById('tab-title');
     if (titleEl) titleEl.textContent = titleMap[tabId] || '';
@@ -2664,8 +2666,8 @@ async function loadTournamentData(forceRefresh) {
 
     try {
         const [tRes, regRes] = await Promise.all([
-            fetch(CONFIG.API_BASE + '/tournament'),
-            window._tgUser ? fetch(CONFIG.API_BASE + '/tournament/my_registration/' + window._tgUser.id) : Promise.resolve(null),
+            fetch(CONFIG.API_BASE_URL + '/tournament'),
+            window._tgUser ? fetch(CONFIG.API_BASE_URL + '/tournament/my_registration/' + window._tgUser.id) : Promise.resolve(null),
         ]);
 
         const tData  = await tRes.json();
@@ -2896,10 +2898,9 @@ async function registerForTournament() {
     if (msg) { msg.style.color = '#94a3b8'; msg.textContent = '⏳ Submitting registration...'; }
 
     try {
-        const userId = window._tgUser ? window._tgUser.id : null;
         if (!userId) throw new Error('User not identified.');
 
-        const res  = await fetch(CONFIG.API_BASE + '/tournament/register', {
+        const res  = await fetch(CONFIG.API_BASE_URL + '/tournament/register', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({ user_id: userId, ff_uid: uid, ff_nickname: nick }),
@@ -2934,8 +2935,8 @@ function _esc(str) {
 async function _initTournamentIndicator() {
     try {
         const [tRes, regRes] = await Promise.all([
-            fetch(CONFIG.API_BASE + '/tournament'),
-            window._tgUser ? fetch(CONFIG.API_BASE + '/tournament/my_registration/' + window._tgUser.id) : Promise.resolve(null),
+            fetch(CONFIG.API_BASE_URL + '/tournament'),
+            window._tgUser ? fetch(CONFIG.API_BASE_URL + '/tournament/my_registration/' + window._tgUser.id) : Promise.resolve(null),
         ]);
         const tData  = await tRes.json();
         const regData = regRes ? await regRes.json() : { registered: false };
