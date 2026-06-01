@@ -202,6 +202,155 @@
         .notice-green { background: rgba(34,197,94,0.07); border-left: 3px solid rgba(34,197,94,0.5); border-radius: 0 10px 10px 0; padding: 10px 14px; margin-bottom: 10px; }
         .notice-red   { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25); border-radius: 10px; padding: 12px 14px; }
 
+        /* ══════════════════════════════════════════════════════
+           TOURNAMENT HUB — Premium Esports Design
+           ══════════════════════════════════════════════════════ */
+
+        /* Modal overlay */
+        #tournament-modal {
+            display: none; position: fixed; inset: 0; z-index: 99000;
+            background: rgba(0,0,0,0.92); backdrop-filter: blur(10px);
+            overflow-y: auto; -webkit-overflow-scrolling: touch;
+        }
+        #tournament-modal.open { display: block; }
+
+        /* Slide-in animation */
+        @keyframes t-slide-in {
+            from { opacity:0; transform: translateY(40px) scale(0.96); }
+            to   { opacity:1; transform: translateY(0) scale(1); }
+        }
+        #tournament-hub-box {
+            animation: t-slide-in 0.4s cubic-bezier(.17,.67,.35,1.2) both;
+            background: linear-gradient(160deg, #0d1117 0%, #0f1923 50%, #0a0e1a 100%);
+            border: 1px solid rgba(241,196,15,0.20);
+            border-radius: 24px;
+            margin: 16px;
+            padding: 0;
+            overflow: hidden;
+            box-shadow: 0 0 60px rgba(241,196,15,0.12), 0 24px 64px rgba(0,0,0,0.8);
+        }
+
+        /* Header band */
+        .t-header-band {
+            background: linear-gradient(135deg, rgba(241,196,15,0.12), rgba(139,92,246,0.12));
+            border-bottom: 1px solid rgba(241,196,15,0.15);
+            padding: 18px 20px 14px;
+            position: relative;
+        }
+        .t-close-btn {
+            position: absolute; top: 14px; right: 16px;
+            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 50%; width: 32px; height: 32px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 16px; color: #94a3b8;
+            transition: background 0.2s;
+        }
+        .t-close-btn:active { background: rgba(255,255,255,0.16); }
+
+        /* Status badge */
+        @keyframes live-pulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.6); }
+            50%      { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+        }
+        @keyframes reg-glow {
+            0%,100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.5); }
+            50%      { box-shadow: 0 0 0 6px rgba(74,222,128,0); }
+        }
+        .t-status-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 12px; border-radius: 20px;
+            font-size: 11px; font-weight: 800; letter-spacing: 0.6px;
+            text-transform: uppercase;
+        }
+        .t-status-badge.coming-soon    { background:rgba(148,163,184,0.12); color:#94a3b8; border:1px solid rgba(148,163,184,0.20); }
+        .t-status-badge.reg-open       { background:rgba(74,222,128,0.12);  color:#4ade80; border:1px solid rgba(74,222,128,0.25); animation: reg-glow 1.8s ease infinite; }
+        .t-status-badge.reg-closed     { background:rgba(251,146,60,0.12);  color:#fb923c; border:1px solid rgba(251,146,60,0.25); }
+        .t-status-badge.match-live     { background:rgba(239,68,68,0.12);   color:#f87171; border:1px solid rgba(239,68,68,0.30); animation: live-pulse 1.4s ease infinite; }
+        .t-status-badge.completed      { background:rgba(241,196,15,0.12);  color:#f1c40f; border:1px solid rgba(241,196,15,0.25); }
+
+        /* Info stat tiles */
+        .t-stats-grid {
+            display: grid; grid-template-columns: repeat(3,1fr); gap: 8px;
+            padding: 14px 16px;
+        }
+        .t-stat-tile {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px; padding: 10px 6px; text-align: center;
+        }
+        .t-stat-tile .t-lbl { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; }
+        .t-stat-tile .t-val { font-size: 16px; font-weight: 800; color: #e2e8f0; margin: 2px 0 0; }
+
+        /* Prize cards */
+        .t-prize-card {
+            display: flex; align-items: center; gap: 12px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
+        }
+        .t-prize-medal { font-size: 26px; flex-shrink: 0; }
+        .t-prize-name  { font-size: 13px; font-weight: 700; color: #e2e8f0; margin: 0; }
+        .t-prize-reward{ font-size: 11px; color: #94a3b8; margin: 2px 0 0; }
+
+        /* Winners cards */
+        .t-winner-card {
+            display: flex; align-items: center; gap: 12px;
+            border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
+            position: relative; overflow: hidden;
+        }
+        .t-winner-card.rank-1 { background: linear-gradient(135deg,rgba(241,196,15,0.12),rgba(241,196,15,0.04)); border: 1px solid rgba(241,196,15,0.30); }
+        .t-winner-card.rank-2 { background: linear-gradient(135deg,rgba(148,163,184,0.10),rgba(148,163,184,0.03)); border: 1px solid rgba(148,163,184,0.25); }
+        .t-winner-card.rank-3 { background: linear-gradient(135deg,rgba(205,127,50,0.10),rgba(205,127,50,0.03)); border: 1px solid rgba(205,127,50,0.25); }
+
+        /* Registration form */
+        .t-input {
+            width: 100%; box-sizing: border-box;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px; padding: 11px 14px;
+            color: #e2e8f0; font-size: 13px; outline: none;
+            margin-bottom: 10px;
+        }
+        .t-input:focus { border-color: rgba(241,196,15,0.40); }
+        .t-input::placeholder { color: #475569; }
+
+        .t-reg-btn {
+            width: 100%; padding: 13px;
+            background: linear-gradient(135deg, #f1c40f, #e67e22);
+            color: #000; font-weight: 800; font-size: 14px;
+            border: none; border-radius: 12px; cursor: pointer;
+            letter-spacing: 0.3px;
+            transition: opacity 0.2s, transform 0.15s;
+        }
+        .t-reg-btn:active  { transform: scale(0.97); opacity: 0.9; }
+        .t-reg-btn:disabled { background: #1e293b; color: #475569; cursor: not-allowed; }
+
+        /* Already registered badge */
+        .t-registered-badge {
+            background: rgba(74,222,128,0.10); border: 1px solid rgba(74,222,128,0.25);
+            border-radius: 12px; padding: 14px; text-align: center; margin-bottom: 10px;
+        }
+
+        /* Lock overlay for tournament states */
+        .t-lock-overlay {
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            padding: 40px 20px; text-align: center;
+        }
+        .t-lock-icon { font-size: 48px; animation: lock-pulse 1.8s ease-in-out infinite; display: block; margin-bottom: 12px; }
+        .t-lock-title { font-size: 18px; font-weight: 800; color: #e2e8f0; margin: 0 0 6px; }
+        .t-lock-sub   { font-size: 13px; color: #64748b; margin: 0; }
+
+        /* Trophy icon pulse when tournament is live */
+        @keyframes trophy-live-pulse {
+            0%,100% { filter: drop-shadow(0 0 0px #f1c40f); }
+            50%      { filter: drop-shadow(0 0 8px #f1c40f); }
+        }
+        #tournament-trophy-btn.has-active { animation: trophy-live-pulse 2s ease-in-out infinite; }
+
+        /* Content padding area */
+        .t-body { padding: 0 16px 20px; }
+
         /* ── Task section labels ── */
         .task-section-label {
             padding: 8px 4px 4px 4px;
@@ -214,9 +363,42 @@
 
     <div class="header" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px;">
         <h3 id="tab-title">Rewards</h3>
-        <div style="display:flex; gap:15px;">
-            <div onclick="switchTab('leaderboard', this)" style="cursor:pointer; font-size:20px;">🏆</div>
+        <div style="display:flex; gap:15px; align-items:center;">
+            <div onclick="openTournamentHub()" id="tournament-trophy-btn" style="cursor:pointer; font-size:20px; position:relative;" title="Tournament Hub">
+                🏆
+                <span id="t-trophy-dot" style="display:none; position:absolute; top:-2px; right:-2px; width:7px; height:7px; background:#ef4444; border-radius:50%; border:1.5px solid #0a0e1a;"></span>
+            </div>
             <div onclick="switchTab('history', this)" style="cursor:pointer; font-size:24px; color:var(--gold);">⋮</div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         TOURNAMENT HUB MODAL
+         ═══════════════════════════════════════════ -->
+    <div id="tournament-modal">
+        <div id="tournament-hub-box">
+
+            <!-- ── Header Band ── -->
+            <div class="t-header-band">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                    <span style="font-size:26px;">🏆</span>
+                    <div>
+                        <h3 style="color:#f1c40f; margin:0; font-size:17px; font-weight:800; letter-spacing:0.3px;">Tournament Hub</h3>
+                        <p style="font-size:11px; color:#64748b; margin:0;">Free Fire Esports Arena</p>
+                    </div>
+                </div>
+                <div id="t-status-badge-wrap"></div>
+                <div class="t-close-btn" onclick="closeTournamentHub()">✕</div>
+            </div>
+
+            <!-- ── Dynamic Content ── -->
+            <div id="tournament-content">
+                <div style="padding:40px; text-align:center;">
+                    <div style="font-size:28px; margin-bottom:8px;">⏳</div>
+                    <p style="color:#64748b; font-size:13px;">Loading tournament...</p>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -622,13 +804,13 @@
         <div id="yt-tasks-section" style="position:relative;">
         <div class="task-section-label">
             <p class="tsl-title" style="color:#f87171;">📺 YouTube Tasks</p>
-            <p class="tsl-sub">+10 coins each • Max 3 per day</p>
+            <p class="tsl-sub">+5 coins each • Max 3 per day</p>
         </div>
 
         <div class="card task-item" data-task="yt1">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 1: Watch & Verify</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+10 🪙</span>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+5 🪙</span>
             </div>
             <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt1', 'yt')">▶ Watch Video 1</button>
             <div class="task-input-row">
@@ -640,7 +822,7 @@
         <div class="card task-item" data-task="yt2">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 2: Watch & Verify</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+10 🪙</span>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+5 🪙</span>
             </div>
             <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt2', 'yt')">▶ Watch Video 2</button>
             <div class="task-input-row">
@@ -652,7 +834,7 @@
         <div class="card task-item" data-task="yt3">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 3: Watch & Verify</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+10 🪙</span>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+5 🪙</span>
             </div>
             <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt3', 'yt')">▶ Watch Video 3</button>
             <div class="task-input-row">
@@ -665,13 +847,13 @@
         <!-- Website Tasks -->
         <div class="task-section-label">
             <p class="tsl-title" style="color:#60a5fa;">🌐 Website Tasks</p>
-            <p class="tsl-sub">+10 coins each • Max 3 per day</p>
+            <p class="tsl-sub">+3 coins each • Max 3 per day</p>
         </div>
 
         <div class="card task-item" data-task="web1">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 1: Visit Site</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+10 🪙</span>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+3 🪙</span>
             </div>
             <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web1', 'web')">🌐 Visit Site 1</button>
             <div class="task-input-row">
@@ -683,7 +865,7 @@
         <div class="card task-item" data-task="web2">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 2: Visit Site</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+10 🪙</span>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+3 🪙</span>
             </div>
             <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web2', 'web')">🌐 Visit Site 2</button>
             <div class="task-input-row">
@@ -695,7 +877,7 @@
         <div class="card task-item" data-task="web3">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 3: Visit Site</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+10 🪙</span>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+3 🪙</span>
             </div>
             <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web3', 'web')">🌐 Visit Site 3</button>
             <div class="task-input-row">
@@ -847,7 +1029,7 @@
         <div class="card" style="padding:14px 16px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                 <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">💰 Commission History</p>
-                <button onclick="loadCommissionHistory()" style="font-size:10px; background:rgba(167,139,250,0.15); color:#a78bfa; border:none; padding:3px 10px; border-radius:20px; cursor:pointer; font-weight:700;">Refresh</button>
+                <button onclick="loadReferralDashboard(true)" style="font-size:10px; background:rgba(167,139,250,0.15); color:#a78bfa; border:none; padding:3px 10px; border-radius:20px; cursor:pointer; font-weight:700;">↻ Refresh</button>
             </div>
             <div id="commission-history-list">
                 <p style="color:var(--text-muted); text-align:center; font-size:13px;">Loading...</p>
