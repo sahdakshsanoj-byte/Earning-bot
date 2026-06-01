@@ -3314,7 +3314,6 @@ def do_spin_api(user_id: int):
             }), 400
 
         # Weighted random spin result
-        import random
         reward = random.choices(SPIN_REWARDS, weights=SPIN_WEIGHTS, k=1)[0]
         new_spins = spins_done + 1
 
@@ -4353,7 +4352,7 @@ def admin_set_feature():
         upsert=True,
     )
     _bust_feature_cache()
-    label  = "Spin Wheel" if feature == "spin" else "Coin Mining"
+    label  = {"spin": "Spin Wheel", "mining": "Coin Mining", "bomb_box": "Bomb Box"}[feature]
     status = "UNLOCKED \u2705" if active else "LOCKED \U0001f512"
     logger.info("Admin set %s → %s", feature, status)
     return jsonify({"status": "success", "message": f"{label} is now {status}"})
