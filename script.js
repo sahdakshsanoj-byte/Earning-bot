@@ -10,6 +10,8 @@ tg.enableClosingConfirmation();
 const userId = tg.initDataUnsafe?.user?.id;
 
 window.USER_ID = userId;
+// Store full user object for tournament + other features
+window._tgUser = tg.initDataUnsafe?.user || null;
 
 let userData = {};
 const _pendingRequests = new Set();
@@ -2621,6 +2623,342 @@ function _removeWithdrawLock(withdrawTab) {
 }
 
 // ============================================================
+// TOURNAMENT HUB
+// ============================================================
+
+let _tournamentCache    = null;
+let _tournamentCacheTs  = 0;
+let _tournamentRegCache = null;   // User's own registration
+const TOURNAMENT_CACHE_TTL = 60 * 1000;  // 1 min
+
+function openTournamentHub() {
+    const modal = document.getElementById('tournament-modal');
+    if (!modal) return;
+    modal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    loadTournamentData();
+}
+
+function closeTournamentHub() {
+    const modal = document.getElementById('tournament-modal');
+    if (!modal) return;
+    modal.classList.remove('open');
+    document.body.style.overflow = '';
+}
+
+// Close modal when tapping outside the box
+document.addEventListener('click', function(e) {
+    const modal = document.getElementById('tournament-modal');
+    const box   = document.getElementById('tournament-hub-box');
+    if (modal && modal.classList.contains('open') && box && !box.contains(e.target)) {
+        closeTournamentHub();
+    }
+});
+
+async function loadTournamentData(forceRefresh) {
+    const now = Date.now();
+    if (!forceRefresh && _tournamentCache && (now - _tournamentCacheTs) < TOURNAMENT_CACHE_TTL) {
+        _renderTournament(_tournamentCache.tournament, _tournamentCache.winners);
+        return;
+    }
+
+    try {
+        const [tRes, regRes] = await Promise.all([
+            fetch(CONFIG.API_BASE + '/tournament'),
+            window._tgUser ? fetch(CONFIG.API_BASE + '/tournament/my_registration/' + window._tgUser.id) : Promise.resolve(null),
+        ]);
+
+        const tData  = await tRes.json();
+        const regData = regRes ? await regRes.json() : { registered: false };
+
+        if (tData.status === 'success') {
+            _tournamentCache    = { tournament: tData.tournament, winners: tData.winners || [] };
+            _tournamentCacheTs  = Date.now();
+        }
+
+        _tournamentRegCache = (regData && regData.status === 'success') ? regData : { registered: false };
+
+        // Update trophy dot indicator
+        const dot   = document.getElementById('t-trophy-dot');
+        const tBtn  = document.getElementById('tournament-trophy-btn');
+        const t     = tData.tournament;
+        if (dot && t) {
+            const activeSt = ['registration_open', 'match_live'];
+            if (activeSt.includes(t.status)) {
+                dot.style.display  = 'block';
+                if (tBtn) tBtn.classList.add('has-active');
+            } else {
+                dot.style.display  = 'none';
+                if (tBtn) tBtn.classList.remove('has-active');
+            }
+        } else if (dot) {
+            dot.style.display = 'none';
+        }
+
+        _renderTournament(tData.tournament, tData.winners || []);
+    } catch (err) {
+        document.getElementById('tournament-content').innerHTML =
+            '<div style="padding:30px;text-align:center;"><p style="color:#ef4444;font-size:13px;">⚠️ Could not load tournament data.</p>' +
+            '<p style="font-size:11px;color:#64748b;margin-top:4px;">Check your connection and try again.</p>' +
+            '<button onclick="loadTournamentData(true)" style="margin-top:12px;background:rgba(241,196,15,0.1);border:1px solid rgba(241,196,15,0.3);color:#f1c40f;border-radius:8px;padding:8px 20px;cursor:pointer;font-weight:700;">Retry</button></div>';
+    }
+}
+
+function _renderTournament(t, winners) {
+    const badgeWrap = document.getElementById('t-status-badge-wrap');
+    const content   = document.getElementById('tournament-content');
+    if (!badgeWrap || !content) return;
+
+    if (!t) {
+        // No active tournament
+        badgeWrap.innerHTML = '';
+        content.innerHTML =
+            '<div class="t-lock-overlay">' +
+            '<span class="t-lock-icon">🔒</span>' +
+            '<p class="t-lock-title">No Active Tournament</p>' +
+            '<p class="t-lock-sub">Stay tuned! Next tournament will be announced soon.</p>' +
+            '</div>';
+        return;
+    }
+
+    // Status badge
+    const badgeCls = { coming_soon:'coming-soon', registration_open:'reg-open', registration_closed:'reg-closed', match_live:'match-live', completed:'completed' }[t.status] || 'coming-soon';
+    const badgeEmoji = { coming_soon:'🔜', registration_open:'✅', registration_closed:'🔒', match_live:'🔴', completed:'🏆' }[t.status] || '🔜';
+    const badgeLabel = { coming_soon:'Coming Soon', registration_open:'Registration Open', registration_closed:'Registration Closed', match_live:'Match Live 🔴', completed:'Completed' }[t.status] || t.status;
+    badgeWrap.innerHTML = `<span class="t-status-badge ${badgeCls}">${badgeEmoji} ${badgeLabel}</span>`;
+
+    let html = '';
+
+    // ── Title + meta banner
+    html += `
+    <div style="padding:14px 16px 0;">
+        <h2 style="color:#e2e8f0;font-size:18px;font-weight:800;margin:0 0 2px;">${_esc(t.title || 'Free Fire Tournament')}</h2>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+            ${t.mode ? `<span style="background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);border-radius:8px;padding:3px 10px;font-size:11px;color:#a78bfa;font-weight:700;">🎮 ${_esc(t.mode)}</span>` : ''}
+            ${t.map  ? `<span style="background:rgba(56,189,248,0.10);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#38bdf8;font-weight:700;">🗺️ ${_esc(t.map)}</span>`  : ''}
+            ${t.entry_fee == 0 ? `<span style="background:rgba(74,222,128,0.10);border:1px solid rgba(74,222,128,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#4ade80;font-weight:700;">🆓 Free Entry</span>` : `<span style="background:rgba(241,196,15,0.10);border:1px solid rgba(241,196,15,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#f1c40f;font-weight:700;">💰 ${t.entry_fee} 🪙 Entry</span>`}
+        </div>
+    </div>`;
+
+    // ── Stats grid
+    html += `
+    <div class="t-stats-grid">
+        <div class="t-stat-tile">
+            <p class="t-lbl">👥 Registered</p>
+            <p class="t-val" style="color:#4ade80;">${t.registered_count || 0}</p>
+        </div>
+        <div class="t-stat-tile">
+            <p class="t-lbl">🎯 Slots Left</p>
+            <p class="t-val" style="color:${(t.slots_remaining||0) <= 5 ? '#ef4444' : '#e2e8f0'};">${t.max_players > 0 ? (t.slots_remaining || 0) : '∞'}</p>
+        </div>
+        <div class="t-stat-tile">
+            <p class="t-lbl">🏟️ Max Players</p>
+            <p class="t-val">${t.max_players || '—'}</p>
+        </div>
+        ${t.date ? `<div class="t-stat-tile"><p class="t-lbl">📅 Date</p><p class="t-val" style="font-size:12px;">${_esc(t.date)}</p></div>` : ''}
+        ${t.time ? `<div class="t-stat-tile"><p class="t-lbl">⏰ Time</p><p class="t-val" style="font-size:12px;">${_esc(t.time)}</p></div>` : ''}
+        <div class="t-stat-tile">
+            <p class="t-lbl">🏆 Prize</p>
+            <p class="t-val" style="font-size:11px;color:#f1c40f;">GP Codes</p>
+        </div>
+    </div>`;
+
+    html += '<div class="t-body">';
+
+    // ── Prize pool section
+    html += `
+    <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 8px;">🎁 Prize Rewards</p>
+    <div class="t-prize-card">
+        <span class="t-prize-medal">🥇</span>
+        <div><p class="t-prize-name">Champion</p><p class="t-prize-reward">Google Play Redeem Code ₹100</p></div>
+    </div>
+    <div class="t-prize-card">
+        <span class="t-prize-medal">🥈</span>
+        <div><p class="t-prize-name">Runner Up</p><p class="t-prize-reward">Google Play Redeem Code ₹50</p></div>
+    </div>
+    <div class="t-prize-card">
+        <span class="t-prize-medal">🥉</span>
+        <div><p class="t-prize-name">Third Place</p><p class="t-prize-reward">Google Play Redeem Code ₹20</p></div>
+    </div>`;
+
+    // ── Winners section (only if completed)
+    if (t.status === 'completed' && winners && winners.length > 0) {
+        html += `<div style="height:14px;"></div>`;
+        html += `<p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 8px;">🏆 Tournament Champions</p>`;
+        const rankEmoji = { 1:'🥇', 2:'🥈', 3:'🥉' };
+        const rankCls   = { 1:'rank-1', 2:'rank-2', 3:'rank-3' };
+        const rankName  = { 1:'Champion', 2:'Runner Up', 3:'Third Place' };
+        winners.forEach(w => {
+            html += `
+            <div class="t-winner-card ${rankCls[w.rank]||'rank-1'}">
+                <span style="font-size:30px;flex-shrink:0;">${rankEmoji[w.rank]||'🏅'}</span>
+                <div style="flex:1;min-width:0;">
+                    <p style="font-size:13px;font-weight:800;color:#e2e8f0;margin:0;">${rankName[w.rank]||'Winner'}</p>
+                    <p style="font-size:12px;color:#94a3b8;margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@${_esc(w.username)}</p>
+                    <p style="font-size:11px;color:#f1c40f;margin:2px 0 0;font-weight:700;">${_esc(w.reward)}</p>
+                </div>
+            </div>`;
+        });
+    }
+
+    // ── State-specific action area
+    html += `<div style="height:14px;"></div>`;
+
+    if (t.status === 'coming_soon') {
+        html += `
+        <div style="text-align:center;padding:24px 16px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:14px;">
+            <span class="t-lock-icon" style="font-size:38px;margin-bottom:10px;display:block;">⏳</span>
+            <p style="font-size:16px;font-weight:800;color:#e2e8f0;margin:0 0 6px;">Coming Soon!</p>
+            <p style="font-size:12px;color:#64748b;margin:0;">Registration will open soon. Stay tuned!</p>
+        </div>`;
+
+    } else if (t.status === 'registration_open') {
+        const reg = _tournamentRegCache;
+        if (reg && reg.registered) {
+            // Already registered
+            html += `
+            <div class="t-registered-badge">
+                <span style="font-size:28px;display:block;margin-bottom:6px;">✅</span>
+                <p style="font-size:15px;font-weight:800;color:#4ade80;margin:0 0 4px;">You're Registered!</p>
+                <p style="font-size:12px;color:#64748b;margin:0;">FF UID: <b style="color:#e2e8f0;">${_esc(reg.data && reg.data.ff_uid||'')}</b> &nbsp;·&nbsp; Nick: <b style="color:#e2e8f0;">${_esc(reg.data && reg.data.ff_nickname||'')}</b></p>
+                <p style="font-size:11px;color:#475569;margin-top:4px;">Registered on ${_esc(reg.data && reg.data.registered_at||'')}</p>
+            </div>
+            <p style="font-size:11px;color:#64748b;text-align:center;margin-top:8px;">Room credentials will be shared before the match. Stay alert!</p>`;
+        } else {
+            // Registration form
+            html += `
+            <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">📝 Register Now</p>
+            <div style="background:rgba(74,222,128,0.05);border:1px solid rgba(74,222,128,0.15);border-radius:12px;padding:12px;margin-bottom:12px;">
+                <p style="font-size:12px;color:#94a3b8;margin:0;">🎮 Enter your Free Fire details to join the tournament.</p>
+            </div>
+            <input class="t-input" id="t-ff-uid"      type="text" inputmode="numeric" placeholder="Free Fire UID (e.g. 123456789)" maxlength="20" />
+            <input class="t-input" id="t-ff-nickname" type="text" placeholder="In-Game Nickname" maxlength="30" />
+            <p id="t-reg-msg" style="font-size:12px;color:#94a3b8;min-height:18px;margin:0 0 10px;text-align:center;"></p>
+            <button class="t-reg-btn" id="t-reg-btn" onclick="registerForTournament()">🎯 Register for Tournament</button>`;
+        }
+
+    } else if (t.status === 'registration_closed') {
+        const reg = _tournamentRegCache;
+        html += `
+        <div style="text-align:center;padding:24px 16px;background:rgba(251,146,60,0.05);border:1px solid rgba(251,146,60,0.20);border-radius:14px;">
+            <span class="t-lock-icon" style="font-size:38px;margin-bottom:10px;display:block;">🔒</span>
+            <p style="font-size:16px;font-weight:800;color:#fb923c;margin:0 0 6px;">Registration Closed</p>
+            <p style="font-size:12px;color:#64748b;margin:0;">Registration period is over. Match starting soon!</p>
+        </div>`;
+        if (reg && reg.registered) {
+            html += `
+            <div class="t-registered-badge" style="margin-top:10px;">
+                <p style="font-size:13px;font-weight:800;color:#4ade80;margin:0 0 3px;">✅ You are registered!</p>
+                <p style="font-size:11px;color:#64748b;margin:0;">Room ID & Password will be shared before match time.</p>
+            </div>`;
+        }
+
+    } else if (t.status === 'match_live') {
+        html += `
+        <div style="text-align:center;padding:24px 16px;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.28);border-radius:14px;">
+            <span style="font-size:44px;display:block;margin-bottom:8px;" class="t-lock-icon">🔥</span>
+            <p style="font-size:18px;font-weight:900;color:#f87171;margin:0 0 4px;letter-spacing:0.5px;">MATCH IS LIVE!</p>
+            <p style="font-size:12px;color:#94a3b8;margin:0;">The battle has begun. Good luck to all players!</p>
+        </div>`;
+
+    } else if (t.status === 'completed' && (!winners || winners.length === 0)) {
+        html += `
+        <div style="text-align:center;padding:20px;background:rgba(241,196,15,0.05);border:1px solid rgba(241,196,15,0.18);border-radius:14px;">
+            <p style="font-size:15px;font-weight:800;color:#f1c40f;margin:0 0 4px;">🏆 Tournament Completed</p>
+            <p style="font-size:12px;color:#64748b;margin:0;">Winners will be announced shortly. Check back soon!</p>
+        </div>`;
+    }
+
+    html += `
+    <div style="height:14px;"></div>
+    <button onclick="loadTournamentData(true)" style="width:100%;padding:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;color:#64748b;font-size:12px;cursor:pointer;">↻ Refresh</button>
+    </div>`;  // close t-body
+
+    content.innerHTML = html;
+}
+
+async function registerForTournament() {
+    const btn  = document.getElementById('t-reg-btn');
+    const msg  = document.getElementById('t-reg-msg');
+    const uid  = (document.getElementById('t-ff-uid')?.value      || '').trim();
+    const nick = (document.getElementById('t-ff-nickname')?.value  || '').trim();
+
+    if (!uid || !nick) {
+        if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ Please fill in both FF UID and Nickname.'; }
+        return;
+    }
+    if (!/^\d{5,15}$/.test(uid)) {
+        if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ FF UID must be 5-15 digits only.'; }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Registering...'; }
+    if (msg) { msg.style.color = '#94a3b8'; msg.textContent = '⏳ Submitting registration...'; }
+
+    try {
+        const userId = window._tgUser ? window._tgUser.id : null;
+        if (!userId) throw new Error('User not identified.');
+
+        const res  = await fetch(CONFIG.API_BASE + '/tournament/register', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ user_id: userId, ff_uid: uid, ff_nickname: nick }),
+        });
+        const data = await res.json();
+
+        if (data.status === 'success') {
+            if (msg) { msg.style.color = '#4ade80'; msg.textContent = data.message || '🎉 Registered!'; }
+            _tournamentCache    = null;  // invalidate cache
+            _tournamentRegCache = null;
+            setTimeout(() => loadTournamentData(true), 800);
+        } else {
+            if (msg) { msg.style.color = '#ef4444'; msg.textContent = '❌ ' + (data.message || 'Registration failed.'); }
+            if (btn) { btn.disabled = false; btn.textContent = '🎯 Register for Tournament'; }
+        }
+    } catch (e) {
+        if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ Network error. Please try again.'; }
+        if (btn) { btn.disabled = false; btn.textContent = '🎯 Register for Tournament'; }
+    }
+}
+
+function _esc(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+// Load tournament indicator on startup (silently — no modal open)
+async function _initTournamentIndicator() {
+    try {
+        const [tRes, regRes] = await Promise.all([
+            fetch(CONFIG.API_BASE + '/tournament'),
+            window._tgUser ? fetch(CONFIG.API_BASE + '/tournament/my_registration/' + window._tgUser.id) : Promise.resolve(null),
+        ]);
+        const tData  = await tRes.json();
+        const regData = regRes ? await regRes.json() : { registered: false };
+
+        if (tData.status === 'success' && tData.tournament) {
+            _tournamentCache   = { tournament: tData.tournament, winners: tData.winners || [] };
+            _tournamentCacheTs = Date.now();
+        }
+        if (regData && regData.status === 'success') _tournamentRegCache = regData;
+
+        const dot  = document.getElementById('t-trophy-dot');
+        const tBtn = document.getElementById('tournament-trophy-btn');
+        const t    = tData.tournament;
+        if (dot && t) {
+            if (['registration_open','match_live'].includes(t.status)) {
+                dot.style.display = 'block';
+                if (tBtn) tBtn.classList.add('has-active');
+            }
+        }
+    } catch(_) { /* silent fail */ }
+}
+
+// ============================================================
 // APP INIT
 // ============================================================
 window.addEventListener('DOMContentLoaded', () => {
@@ -2641,4 +2979,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     setInterval(fetchLiveData,      300000);  // data refresh every 5 min
     setInterval(refreshLeaderboard, 600000);  // leaderboard refresh every 10 min
+
+    // Tournament: silently load status + show dot indicator
+    setTimeout(_initTournamentIndicator, 2000);
 });
