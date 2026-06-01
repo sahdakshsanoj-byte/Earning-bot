@@ -2633,7 +2633,8 @@ let _tournamentCacheTs  = 0;
 let _tournamentRegCache = null;   // User's own registration
 const TOURNAMENT_CACHE_TTL = 60 * 1000;  // 1 min
 
-function openTournamentHub() {
+function openTournamentHub(e) {
+    if (e) e.stopPropagation();
     const modal = document.getElementById('tournament-modal');
     if (!modal) return;
     modal.classList.add('open');
