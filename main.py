@@ -4180,6 +4180,24 @@ def tournament_register_api():
         if existing:
             return jsonify({"status": "error", "message": "You are already registered for this tournament!"}), 400
 
+        # ── Entry fee: check balance and deduct atomically
+        entry_fee = int(t.get("entry_fee", 0) or 0)
+        if entry_fee > 0:
+            deduct_result = users_col.find_one_and_update(
+                {"user_id": user_id, "coins": {"$gte": entry_fee}},
+                {"$inc": {"coins": -entry_fee}},
+                return_document=True,
+            )
+            if not deduct_result:
+                # User doesn't have enough coins — fetch actual balance for message
+                u_bal = users_col.find_one({"user_id": user_id}, {"coins": 1, "_id": 0}) or {}
+                bal   = u_bal.get("coins", 0)
+                return jsonify({
+                    "status":  "error",
+                    "message": f"Insufficient coins! Entry fee is {entry_fee} 🪙 but you only have {bal} 🪙.",
+                }), 400
+            logger.info("Tournament fee deducted: user=%s fee=%s tournament=%s", user_id, entry_fee, tid)
+
         tournament_registrations_col.insert_one({
             "tournament_id":  tid,
             "user_id":        user_id,
@@ -4188,11 +4206,14 @@ def tournament_register_api():
             "ff_nickname":    ff_nickname,
             "registered_at":  datetime.utcnow(),
             "status":         "registered",
+            "entry_fee_paid": entry_fee,
         })
-        logger.info("Tournament reg: user=%s ff_uid=%s tournament=%s", user_id, ff_uid, tid)
+        logger.info("Tournament reg: user=%s ff_uid=%s tournament=%s fee=%s", user_id, ff_uid, tid, entry_fee)
+
+        fee_msg = f" {entry_fee} coins deducted as entry fee." if entry_fee > 0 else ""
         return jsonify({
             "status":  "success",
-            "message": "🎉 Registration successful! Good luck in the tournament!",
+            "message": f"🎉 Registration successful!{fee_msg} Good luck in the tournament!",
         })
     except pymongo.errors.DuplicateKeyError:
         return jsonify({"status": "error", "message": "You are already registered!"}), 400
