@@ -14,6 +14,7 @@ window.USER_ID = userId;
 window._tgUser = tg.initDataUnsafe?.user || null;
 
 let userData = {};
+let _winnerPopupShown = false;   // guard: ek session mein sirf ek baar popup dikhao
 const _pendingRequests = new Set();
 let monetagSdkPromise  = null;
 let monetagPreloaded   = false;
@@ -344,7 +345,7 @@ async function fetchLiveData() {
             loadMiningStatus();
             loadBombBoxStatus();
 
-            if (data.pending_winner_popup) showWinnerPopup(data.pending_winner_prize || 0);
+            if (data.pending_winner_popup && !_winnerPopupShown) showWinnerPopup(data.pending_winner_prize || 0);
         }
     } catch (err) {
         showToast("⚠️ Connection error. Retrying...", "error");
@@ -378,6 +379,8 @@ function showWinnerPopup(prize) {
     const overlay = document.getElementById('winner-popup-overlay');
     const prizeEl = document.getElementById('winner-prize-coins');
     if (!overlay) return;
+    if (_winnerPopupShown) return;   // double-show guard
+    _winnerPopupShown = true;        // immediately lock — fetchLiveData phir trigger nahi karega
     if (prizeEl) prizeEl.innerText = `+${prize} 🪙`;
     overlay.style.display = 'flex';
     _spawnConfetti();
