@@ -1240,9 +1240,14 @@ def get_user_data_api(user_id: int):
 
 @app.route("/ack_winner_popup/<int:user_id>", methods=["POST"])
 def ack_winner_popup(user_id: int):
-    """Frontend calls this once the winner popup is shown — clears the flag."""
+    """Frontend calls this once the winner popup is shown — clears the flag.
+    Conditional update: sirf tab clear karo jab flag abhi bhi True ho.
+    Isse double-ack harmless hai — coins dobara nahi katenge.
+    """
+    if is_rate_limited(f"ack_popup_{user_id}", 5):
+        return jsonify({"status": "ok"})   # silently ignore rapid-fire calls
     users_col.update_one(
-        {"user_id": user_id},
+        {"user_id": user_id, "pending_winner_popup": True},   # ← conditional: sirf agar flag set hai
         {"$set": {"pending_winner_popup": False, "pending_winner_prize": 0}},
     )
     return jsonify({"status": "ok"})
