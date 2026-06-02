@@ -2946,6 +2946,37 @@ def _today_round_id() -> str:
     return f"round_{date.today().isoformat()}"
 
 
+def _maybe_draw_pending_rounds() -> None:
+    """
+    Lazy-draw safety net: Render free tier server so jata hai, isliye midnight
+    wala background thread miss ho sakta hai. Yeh function har lottery API call
+    pe run hota hai — agar koi PURANA round undrawn mila (participants ke saath),
+    usse turant draw karta hai background thread mein.
+    """
+    today_rid = _today_round_id()
+    try:
+        cfg = get_lottery_config()
+        if not cfg.get("active"):
+            return
+        # Find any round older than today that has participants but is NOT drawn
+        pending = lottery_col.find_one({
+            "_id":      {"$lt": today_rid},   # older round (lexicographic sort works for YYYY-MM-DD)
+            "drawn":    False,
+            "participants": {"$not": {"$size": 0}},
+        })
+        if pending:
+            rid = pending["_id"]
+            logger.info("Lazy-draw triggered for missed round: %s", rid)
+            threading.Thread(
+                target=_perform_auto_draw,
+                args=(rid,),
+                daemon=True,
+                name=f"lazy-draw-{rid}",
+            ).start()
+    except Exception as exc:
+        logger.warning("_maybe_draw_pending_rounds error: %s", exc)
+
+
 def _get_or_create_today_round() -> dict:
     rid = _today_round_id()
     cfg = get_lottery_config()
@@ -3097,6 +3128,9 @@ def admin_lottery_status():
 
 @app.route("/get_lottery_status", methods=["GET"])
 def get_lottery_status():
+    # Lazy-draw: agar koi purana round undrawn hai toh auto draw karo
+    _maybe_draw_pending_rounds()
+
     try:
         user_id = int(request.args.get("user_id", 0))
     except (ValueError, TypeError):
@@ -3131,6 +3165,9 @@ def get_lottery_status():
 
 @app.route("/buy_lottery_ticket", methods=["POST"])
 def buy_lottery_ticket():
+    # Lazy-draw: ticket kharidne se pehle bhi check karo
+    _maybe_draw_pending_rounds()
+
     data = request.json or {}
     try:
         user_id = int(data.get("user_id", 0))
