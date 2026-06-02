@@ -2829,15 +2829,24 @@ function _renderTournament(t, winners) {
             <p style="font-size:11px;color:#64748b;text-align:center;margin-top:8px;">Room credentials will be shared before the match. Stay alert!</p>`;
         } else {
             // Registration form
+            const fee = t.entry_fee || 0;
             html += `
             <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">📝 Register Now</p>
+            ${fee > 0 ? `
+            <div style="background:rgba(241,196,15,0.07);border:1px solid rgba(241,196,15,0.30);border-radius:12px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;">
+                <span style="font-size:24px;">💰</span>
+                <div>
+                    <p style="font-size:13px;font-weight:800;color:#f1c40f;margin:0;">Entry Fee: ${fee} Coins</p>
+                    <p style="font-size:11px;color:#94a3b8;margin:3px 0 0;">Yeh coins aapke balance se automatically kaat liye jayenge registration ke time.</p>
+                </div>
+            </div>` : `
             <div style="background:rgba(74,222,128,0.05);border:1px solid rgba(74,222,128,0.15);border-radius:12px;padding:12px;margin-bottom:12px;">
                 <p style="font-size:12px;color:#94a3b8;margin:0;">🎮 Enter your Free Fire details to join the tournament.</p>
-            </div>
+            </div>`}
             <input class="t-input" id="t-ff-uid"      type="text" inputmode="numeric" placeholder="Free Fire UID (e.g. 123456789)" maxlength="20" />
             <input class="t-input" id="t-ff-nickname" type="text" placeholder="In-Game Nickname" maxlength="30" />
             <p id="t-reg-msg" style="font-size:12px;color:#94a3b8;min-height:18px;margin:0 0 10px;text-align:center;"></p>
-            <button class="t-reg-btn" id="t-reg-btn" onclick="registerForTournament()">🎯 Register for Tournament</button>`;
+            <button class="t-reg-btn" id="t-reg-btn" onclick="registerForTournament()">${fee > 0 ? `🎯 Register & Pay ${fee} 🪙` : '🎯 Register for Tournament'}</button>`;
         }
 
     } else if (t.status === 'registration_closed') {
