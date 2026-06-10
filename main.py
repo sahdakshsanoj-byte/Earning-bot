@@ -32,6 +32,13 @@ from datetime import date, datetime, timedelta
 from threading import Thread
 from urllib.parse import parse_qsl, quote
 
+# BUG FIX: Timezone explicitly UTC set karo — server local timezone se date mismatch hoti thi
+os.environ.setdefault("TZ", "UTC")
+try:
+    time.tzset()
+except AttributeError:
+    pass  # Windows pe tzset nahi hota — Render (Linux) pe kaam karega
+
 import psutil
 import pymongo
 import requests as req_lib
@@ -188,12 +195,12 @@ TASK_CODES = {
 }
 
 TASK_REWARDS = {
-    "yt1":   5,
-    "yt2":   5,
-    "yt3":   5,
-    "web1":  3,
-    "web2":  3,
-    "web3":  3,
+    "yt1":   10,
+    "yt2":   10,
+    "yt3":   10,
+    "web1":  10,
+    "web2":  10,
+    "web3":  10,
     "slot3": 4,
     "slot4": 4,
 }
@@ -230,6 +237,7 @@ WITHDRAW_COOLDOWN = 86400
 # 4a-1. TOURNAMENT SYSTEM
 # ============================================================
 
+MAX_TOURNAMENTS   = 5   # Ek saath kitne tournaments active reh sakte hain
 TOURNAMENT_STATES = ["coming_soon", "registration_open", "registration_closed", "match_live", "completed"]
 TOURNAMENT_STATE_LABELS = {
     "coming_soon":          "Coming Soon",
@@ -531,6 +539,16 @@ def check_admin_login_attempt(ip: str, success: bool) -> tuple[bool, int]:
         return True, ADMIN_MAX_FAIL_ATTEMPTS - count
 
 
+def _is_admin_locked(ip: str) -> tuple[bool, int]:
+    """Sirf check karo agar IP locked hai — counter increment mat karo."""
+    now = time.time()
+    with _security_lock:
+        entry = _failed_admin_logins.get(ip, {"count": 0, "expires": 0.0})
+        if entry["expires"] > now:
+            return True, int(entry["expires"] - now)
+        return False, 0
+
+
 def _cleanup_security_caches() -> None:
     """Purane IP ban/tracking data clean karo — memory leak se bachao."""
     while True:
@@ -546,7 +564,7 @@ def _cleanup_security_caches() -> None:
                 if _ip_banned[ip] <= now:
                     del _ip_banned[ip]
             for ip in list(_failed_admin_logins.keys()):
-                if _failed_admin_logins[ip]["expires"] <= now and _failed_admin_logins[ip]["count"] == 0:
+                if _failed_admin_logins[ip]["expires"] <= now:
                     del _failed_admin_logins[ip]
             for ip in list(_suspicious_alerted.keys()):
                 if _suspicious_alerted[ip] < now - 600:
@@ -647,7 +665,7 @@ def verify_telegram_init_data(init_data: str) -> dict | None:
         if not hmac.compare_digest(computed, received_hash):
             return None
         auth_date = int(params.get("auth_date", 0))
-        if time.time() - auth_date > 600:
+        if time.time() - auth_date > 86400:
             return None
         return params
     except Exception as exc:
@@ -1118,6 +1136,7 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
                 "channel_claims":         {},
                 "promo_task_completions": [],
                 "last_claim_ts":          "",
+                "streak_day":             0,
                 "allcomplete_bonus_date": "",
                 "ads_today":              0,
                 "ads_date":               "",
@@ -1224,6 +1243,7 @@ def get_user_data_api(user_id: int):
             "completed_tasks":        completed_today,
             "verify_completions":     verify_completions,
             "last_claim":             user.get("last_claim_ts", ""),
+            "streak_day":             user.get("streak_day", 0),
             "referred_by":            user.get("referred_by", ""),
             "ads_today":              ads_today,
             "ads_date":               ads_date,
@@ -1333,7 +1353,29 @@ def daily_claim_token_api(user_id: int):
         return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
 
 
-# ── CLAIM DAILY BONUS ─────────────────────────────────────────────────────
+# ── STREAK SYSTEM ─────────────────────────────────────────────────────────
+# Days 1-10  → 10 coins/day
+# Days 11-20 → 15 coins/day
+# Days 21-30 → 20 coins/day
+# >48h gap   → streak reset (wapas Day 1)
+
+def get_streak_reward(day: int) -> int:
+    if day <= 10:
+        return 10
+    elif day <= 20:
+        return 15
+    else:
+        return 20
+
+
+def get_streak_tier(day: int) -> str:
+    if day <= 10:
+        return "🔥 Tier 1 (Days 1-10)"
+    elif day <= 20:
+        return "⚡ Tier 2 (Days 11-20)"
+    else:
+        return "💎 Tier 3 (Days 21-30)"
+
 
 @app.route("/claim_daily/<int:user_id>", methods=["POST"])
 def claim_daily_api(user_id: int):
@@ -1351,8 +1393,7 @@ def claim_daily_api(user_id: int):
 
         if claim_token_raw:
             token_hash = hashlib.sha256(claim_token_raw.encode()).hexdigest()
-            # Pehle find karo, expiry check karo, PHIR delete karo
-            token_doc = ad_reward_tokens_col.find_one({
+            token_doc  = ad_reward_tokens_col.find_one({
                 "_id":     token_hash,
                 "user_id": user_id,
                 "source":  "daily_claim",
@@ -1368,16 +1409,18 @@ def claim_daily_api(user_id: int):
                     "status":  "error",
                     "message": "Ad session expired. Please try again.",
                 }), 403
-            # Valid token — delete karo (consume)
             ad_reward_tokens_col.delete_one({"_id": token_hash})
 
-        now     = datetime.utcnow()
-        last_ts = user.get("last_claim_ts", "")
+        now        = datetime.utcnow()
+        last_ts    = user.get("last_claim_ts", "")
+        streak_day = int(user.get("streak_day", 0))
+
         if last_ts:
             try:
                 last_dt = datetime.fromisoformat(last_ts)
-                # 24-hour strict window — date nahi, exact time check
                 elapsed = (now - last_dt).total_seconds()
+
+                # Already claimed in last 24h
                 if elapsed < 86400:
                     next_claim_dt = last_dt + timedelta(hours=24)
                     remaining     = next_claim_dt - now
@@ -1391,18 +1434,41 @@ def claim_daily_api(user_id: int):
                         "data":    {
                             "remaining_seconds": total_secs,
                             "next_claim_utc":    next_claim_dt.isoformat(),
+                            "streak_day":        streak_day,
                         },
                     }), 400
+
+                # >48h gap — streak toot gayi, wapas Day 1
+                if elapsed > 172800:
+                    streak_day = 0
+
             except ValueError:
-                pass
+                streak_day = 0
+
+        # Agla din
+        streak_day = (streak_day % 30) + 1
+        reward     = get_streak_reward(streak_day)
+        tier       = get_streak_tier(streak_day)
 
         users_col.update_one(
             {"user_id": user_id},
-            {"$inc": {"coins": 10}, "$set": {"last_claim_ts": now.isoformat()}},
+            {
+                "$inc": {"coins": reward},
+                "$set": {
+                    "last_claim_ts": now.isoformat(),
+                    "streak_day":    streak_day,
+                },
+            },
         )
-        return jsonify(
-            {"status": "success", "message": "10 coins credited to your account!", "data": {"bonus": 10}}
-        )
+        return jsonify({
+            "status":  "success",
+            "message": f"Day {streak_day} streak! +{reward} coins added! {tier}",
+            "data":    {
+                "bonus":      reward,
+                "streak_day": streak_day,
+                "tier":       tier,
+            },
+        })
     except Exception as exc:
         logger.error("claim_daily error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
@@ -2434,17 +2500,20 @@ def admin_reject_withdrawal():
         uid = int(data.get("user_id", 0))
     except (ValueError, TypeError):
         return jsonify({"status": "error", "message": "Invalid user ID"}), 400
-    withdraw = withdrawals_col.find_one({"user_id": uid, "status": "Pending \u23f3"})
+    # BUG FIX: Atomic find_and_update — pehle status update karo, phir amount nikalo
+    # Isse double-refund race condition nahi hogi (do requests ek saath nahi kar sakti)
+    withdraw = withdrawals_col.find_one_and_update(
+        {"user_id": uid, "status": "Pending \u23f3"},
+        {"$set": {"status": "Rejected \u274c"}},
+        return_document=False,
+    )
     if withdraw:
-        users_col.update_one({"user_id": uid}, {"$inc": {"coins": withdraw["amount"]}})
-        withdrawals_col.update_one(
-            {"user_id": uid, "status": "Pending \u23f3"},
-            {"$set": {"status": "Rejected \u274c"}},
-        )
+        amount = int(withdraw.get("amount", withdraw.get("coins", 0)))
+        users_col.update_one({"user_id": uid}, {"$inc": {"coins": amount}})
         try:
             bot.send_message(
                 uid,
-                f"\u274c Your withdrawal was rejected. {withdraw['amount']} coins have been refunded.",
+                f"\u274c Your withdrawal was rejected. {amount} coins have been refunded.",
             )
         except Exception:
             pass
@@ -2645,11 +2714,11 @@ def admin_login():
     if not ADMIN_TOKEN:
         return jsonify({"status": "error", "message": "ADMIN_TOKEN not configured on server"}), 500
 
-    # Lockout check karo pehle
-    allowed, info = check_admin_login_attempt(ip, success=False)
-    if not allowed:
-        mins = info // 60
-        secs = info % 60
+    # Lockout check karo pehle — bina counter increment kiye (BUG FIX: pehle success=False se double increment hota tha)
+    locked, secs_left = _is_admin_locked(ip)
+    if locked:
+        mins = secs_left // 60
+        secs = secs_left % 60
         logger.warning("SECURITY: Admin login blocked for IP %s (lockout %dm %ds remaining).", ip, mins, secs)
         try:
             bot.send_message(
@@ -2672,7 +2741,7 @@ def admin_login():
         logger.info("Admin login success from IP %s", ip)
         return jsonify({"status": "success", "message": "Authenticated"})
 
-    # Wrong token — attempts count badha do
+    # Wrong token — ek baar increment karo (pehle yahan aur upar dono baar hota tha)
     _, remaining = check_admin_login_attempt(ip, success=False)
     logger.warning("SECURITY: Admin login failed from IP %s (%d attempts remaining).", ip, remaining)
     if remaining <= 2:
@@ -4099,16 +4168,55 @@ def claim_milestone_api(user_id: int):
 # TOURNAMENT HUB API ENDPOINTS
 # ============================================================
 
+def _format_tournament(t, include_registrations=True):
+    """Tournament dict ko user-friendly format mein convert karo."""
+    if not t:
+        return None
+    t = dict(t)
+    t.pop("_id", None)
+    tid = t.get("tournament_id", "")
+
+    if include_registrations:
+        reg_count = tournament_registrations_col.count_documents({"tournament_id": tid})
+        t["registered_count"] = reg_count
+        t["slots_remaining"]  = max(0, t.get("max_players", 0) - reg_count)
+
+    # Room credentials sirf match_live mein expose karo
+    if t.get("status") != "match_live":
+        t.pop("room_id",       None)
+        t.pop("room_password", None)
+
+    # datetime → string
+    for k in list(t.keys()):
+        if isinstance(t[k], datetime):
+            t[k] = t[k].strftime("%d %b %Y, %H:%M UTC")
+    return t
+
+
 @app.route("/tournament", methods=["GET"])
 def get_tournament_api():
-    """Active tournament ka data + winners return karo."""
+    """Saare active tournaments ki list return karo."""
     try:
-        t = tournaments_col.find_one({"active": True}, {"_id": 0})
-        if not t:
-            return jsonify({"status": "success", "tournament": None, "winners": []})
+        raw_list = list(
+            tournaments_col.find({"active": True}, {"_id": 0})
+            .sort("created_at", 1)
+            .limit(MAX_TOURNAMENTS)
+        )
+        tournaments = [_format_tournament(t) for t in raw_list]
+        return jsonify({"status": "success", "tournaments": tournaments})
+    except Exception as exc:
+        logger.error("get_tournament_api error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
 
-        tid = t.get("tournament_id", "")
-        # Winners (only if completed)
+
+@app.route("/tournament/<string:tid>", methods=["GET"])
+def get_single_tournament_api(tid: str):
+    """Ek specific tournament ka full data + winners return karo."""
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"_id": 0})
+        if not t:
+            return jsonify({"status": "error", "message": "Tournament not found."}), 404
+
         winners = []
         if t.get("status") == "completed":
             winners = list(
@@ -4117,41 +4225,31 @@ def get_tournament_api():
                     {"_id": 0},
                 ).sort("rank", 1)
             )
-
-        # Registration count
-        reg_count = tournament_registrations_col.count_documents({"tournament_id": tid})
-        t["registered_count"] = reg_count
-        slots_left = max(0, t.get("max_players", 0) - reg_count)
-        t["slots_remaining"] = slots_left
-
-        # Room credentials — only expose when match is live
-        if t.get("status") != "match_live":
-            t.pop("room_id",       None)
-            t.pop("room_password", None)
-
-        # Convert datetime to string
-        for k in list(t.keys()):
-            if isinstance(t[k], datetime):
-                t[k] = t[k].strftime("%d %b %Y, %H:%M UTC")
-
-        return jsonify({"status": "success", "tournament": t, "winners": winners})
+        return jsonify({
+            "status":     "success",
+            "tournament": _format_tournament(t),
+            "winners":    winners,
+        })
     except Exception as exc:
-        logger.error("get_tournament_api error: %s", exc)
+        logger.error("get_single_tournament_api error for %s: %s", tid, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
 @app.route("/tournament/register", methods=["POST"])
 def tournament_register_api():
-    """User ko tournament mein register karo."""
+    """User ko specific tournament mein register karo (tournament_id required)."""
     data = request.get_json(silent=True) or {}
     try:
         user_id = int(data.get("user_id"))
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Invalid user ID."}), 400
 
+    tid         = sanitize_text(data.get("tournament_id", ""), max_length=60)
     ff_uid      = sanitize_text(data.get("ff_uid", ""), max_length=30)
     ff_nickname = sanitize_text(data.get("ff_nickname", ""), max_length=40)
 
+    if not tid:
+        return jsonify({"status": "error", "message": "tournament_id required."}), 400
     if not ff_uid or not ff_nickname:
         return jsonify({"status": "error", "message": "FF UID and Nickname are required."}), 400
 
@@ -4165,15 +4263,13 @@ def tournament_register_api():
         if user.get("blocked"):
             return jsonify({"status": "error", "message": "Account suspended."}), 403
 
-        t = tournaments_col.find_one({"active": True})
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
         if not t:
-            return jsonify({"status": "error", "message": "No active tournament found."}), 404
+            return jsonify({"status": "error", "message": "Tournament not found."}), 404
 
         if t.get("status") != "registration_open":
             state_label = TOURNAMENT_STATE_LABELS.get(t.get("status", ""), "Unavailable")
             return jsonify({"status": "error", "message": f"Registration is not open. Status: {state_label}"}), 400
-
-        tid = t.get("tournament_id", "")
 
         # Slot check
         reg_count = tournament_registrations_col.count_documents({"tournament_id": tid})
@@ -4194,7 +4290,6 @@ def tournament_register_api():
                 return_document=True,
             )
             if not deduct_result:
-                # User doesn't have enough coins — fetch actual balance for message
                 u_bal = users_col.find_one({"user_id": user_id}, {"coins": 1, "_id": 0}) or {}
                 bal   = u_bal.get("coins", 0)
                 return jsonify({
@@ -4229,12 +4324,11 @@ def tournament_register_api():
 
 @app.route("/tournament/my_registration/<int:user_id>", methods=["GET"])
 def my_tournament_registration_api(user_id: int):
-    """User ki current tournament registration check karo."""
+    """User ki specific tournament registration check karo (?tournament_id=<tid>)."""
     try:
-        t = tournaments_col.find_one({"active": True}, {"tournament_id": 1, "_id": 0})
-        if not t:
+        tid = request.args.get("tournament_id", "").strip()
+        if not tid:
             return jsonify({"status": "success", "registered": False})
-        tid = t.get("tournament_id", "")
         reg = tournament_registrations_col.find_one(
             {"tournament_id": tid, "user_id": user_id},
             {"_id": 0, "tournament_id": 0},
@@ -4249,16 +4343,48 @@ def my_tournament_registration_api(user_id: int):
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
+@app.route("/admin/tournaments", methods=["GET"])
+def admin_list_tournaments_api():
+    """Admin: saare tournaments (active + inactive) ki list."""
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    try:
+        raw = list(tournaments_col.find({}, {"_id": 0}).sort("created_at", -1))
+        result = []
+        for t in raw:
+            tid      = t.get("tournament_id", "")
+            reg_cnt  = tournament_registrations_col.count_documents({"tournament_id": tid})
+            for k in list(t.keys()):
+                if isinstance(t[k], datetime):
+                    t[k] = t[k].strftime("%d %b %Y, %H:%M UTC")
+            t["registered_count"] = reg_cnt
+            result.append(t)
+        return jsonify({"status": "success", "data": result, "total": len(result)})
+    except Exception as exc:
+        logger.error("admin_list_tournaments_api error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
 @app.route("/admin/tournament", methods=["POST"])
 def admin_create_tournament_api():
-    """Admin: tournament create ya update karo."""
+    """Admin: tournament create ya update karo (max 5 active at once)."""
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     data = request.get_json(silent=True) or {}
     try:
         tid = sanitize_text(data.get("tournament_id", f"t_{int(time.time())}"))
-        # Deactivate all other tournaments
-        tournaments_col.update_many({}, {"$set": {"active": False}})
+
+        # Check if this is a new tournament (not already existing)
+        existing = tournaments_col.find_one({"tournament_id": tid})
+        if not existing:
+            # Count currently active tournaments
+            active_count = tournaments_col.count_documents({"active": True})
+            if active_count >= MAX_TOURNAMENTS:
+                return jsonify({
+                    "status":  "error",
+                    "message": f"Maximum {MAX_TOURNAMENTS} active tournaments allowed. Pehle kisi existing tournament ko delete/deactivate karo.",
+                }), 400
+
         tournaments_col.update_one(
             {"tournament_id": tid},
             {"$set": {
@@ -4272,38 +4398,59 @@ def admin_create_tournament_api():
                 "max_players":    int(data.get("max_players", 50)),
                 "prize_pool":     sanitize_text(data.get("prize_pool", ""), max_length=200),
                 "prizes":         data.get("prizes", []),
-                "status":         "coming_soon",
+                "status":         data.get("status", "coming_soon") if existing else "coming_soon",
                 "active":         True,
-                "created_at":     datetime.utcnow(),
+                "created_at":     existing.get("created_at", datetime.utcnow()) if existing else datetime.utcnow(),
+                "updated_at":     datetime.utcnow(),
                 "created_by":     ADMIN_ID,
             }},
             upsert=True,
         )
-        return jsonify({"status": "success", "message": f"Tournament '{tid}' created/updated.", "tournament_id": tid})
+        action = "updated" if existing else "created"
+        return jsonify({"status": "success", "message": f"Tournament '{tid}' {action}.", "tournament_id": tid})
     except Exception as exc:
         logger.error("admin_create_tournament_api error: %s", exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
+@app.route("/admin/tournament/<string:tid>", methods=["DELETE"])
+def admin_delete_tournament_api(tid: str):
+    """Admin: tournament delete karo (tournament_id se)."""
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    try:
+        res = tournaments_col.delete_one({"tournament_id": tid})
+        if res.deleted_count == 0:
+            return jsonify({"status": "error", "message": "Tournament not found."}), 404
+        logger.info("Admin deleted tournament: %s", tid)
+        return jsonify({"status": "success", "message": f"Tournament '{tid}' deleted."})
+    except Exception as exc:
+        logger.error("admin_delete_tournament_api error for %s: %s", tid, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
 @app.route("/admin/tournament/room", methods=["POST"])
 def admin_tournament_room_api():
-    """Admin: Room ID aur Password set karo active tournament ke liye."""
+    """Admin: Room ID aur Password set karo — tournament_id se target karo."""
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     data = request.get_json(silent=True) or {}
+    tid           = sanitize_text(str(data.get("tournament_id", "") or "").strip(), max_length=60)
     room_id       = sanitize_text(str(data.get("room_id",       "") or "").strip(), max_length=50)
     room_password = sanitize_text(str(data.get("room_password", "") or "").strip(), max_length=50)
+    if not tid:
+        return jsonify({"status": "error", "message": "tournament_id required."}), 400
     if not room_id or not room_password:
         return jsonify({"status": "error", "message": "room_id aur room_password dono required hain."}), 400
     try:
         res = tournaments_col.update_one(
-            {"active": True},
+            {"tournament_id": tid, "active": True},
             {"$set": {"room_id": room_id, "room_password": room_password}},
         )
         if res.matched_count == 0:
-            return jsonify({"status": "error", "message": "No active tournament found."}), 404
-        logger.info("Admin set room credentials: room_id=%s", room_id)
-        return jsonify({"status": "success", "message": f"Room credentials set! ID: {room_id}"})
+            return jsonify({"status": "error", "message": f"Tournament '{tid}' not found."}), 404
+        logger.info("Admin set room credentials for %s: room_id=%s", tid, room_id)
+        return jsonify({"status": "success", "message": f"Room credentials set for '{tid}'! ID: {room_id}"})
     except Exception as exc:
         logger.error("admin_tournament_room_api error: %s", exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
@@ -4311,19 +4458,25 @@ def admin_tournament_room_api():
 
 @app.route("/admin/tournament/status", methods=["POST"])
 def admin_tournament_status_api():
-    """Admin: tournament ka state update karo."""
+    """Admin: tournament ka state update karo — tournament_id se target karo."""
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     data   = request.get_json(silent=True) or {}
+    tid    = sanitize_text(str(data.get("tournament_id", "") or "").strip(), max_length=60)
     status = (data.get("status") or "").strip()
+    if not tid:
+        return jsonify({"status": "error", "message": "tournament_id required."}), 400
     if status not in TOURNAMENT_STATES:
         return jsonify({"status": "error", "message": f"Invalid status. Must be one of: {TOURNAMENT_STATES}"}), 400
     try:
-        res = tournaments_col.update_one({"active": True}, {"$set": {"status": status}})
+        res = tournaments_col.update_one(
+            {"tournament_id": tid, "active": True},
+            {"$set": {"status": status}},
+        )
         if res.matched_count == 0:
-            return jsonify({"status": "error", "message": "No active tournament found."}), 404
-        logger.info("Admin updated tournament status to: %s", status)
-        return jsonify({"status": "success", "message": f"Tournament status updated to: {TOURNAMENT_STATE_LABELS[status]}"})
+            return jsonify({"status": "error", "message": f"Tournament '{tid}' not found."}), 404
+        logger.info("Admin updated tournament '%s' status to: %s", tid, status)
+        return jsonify({"status": "success", "message": f"Tournament '{tid}' status: {TOURNAMENT_STATE_LABELS[status]}"})
     except Exception as exc:
         logger.error("admin_tournament_status_api error: %s", exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
@@ -4331,15 +4484,17 @@ def admin_tournament_status_api():
 
 @app.route("/admin/tournament/winners", methods=["POST"])
 def admin_publish_winners_api():
-    """Admin: tournament winners publish karo."""
+    """Admin: tournament winners publish karo — tournament_id se target karo."""
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
     data = request.get_json(silent=True) or {}
+    tid  = sanitize_text(str(data.get("tournament_id", "") or "").strip(), max_length=60)
+    if not tid:
+        return jsonify({"status": "error", "message": "tournament_id required."}), 400
     try:
-        t = tournaments_col.find_one({"active": True}, {"tournament_id": 1})
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"tournament_id": 1})
         if not t:
-            return jsonify({"status": "error", "message": "No active tournament."}), 404
-        tid     = t["tournament_id"]
+            return jsonify({"status": "error", "message": f"Tournament '{tid}' not found."}), 404
         winners = data.get("winners", [])
         if not winners or not isinstance(winners, list):
             return jsonify({"status": "error", "message": "winners array required."}), 400
@@ -4356,9 +4511,9 @@ def admin_publish_winners_api():
             })
         if docs:
             tournament_winners_col.insert_many(docs)
-        tournaments_col.update_one({"active": True}, {"$set": {"status": "completed"}})
+        tournaments_col.update_one({"tournament_id": tid}, {"$set": {"status": "completed"}})
         logger.info("Admin published %d winners for tournament %s", len(docs), tid)
-        return jsonify({"status": "success", "message": f"{len(docs)} winner(s) published. Tournament marked completed."})
+        return jsonify({"status": "success", "message": f"{len(docs)} winner(s) published for '{tid}'."})
     except Exception as exc:
         logger.error("admin_publish_winners_api error: %s", exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
@@ -4366,14 +4521,13 @@ def admin_publish_winners_api():
 
 @app.route("/admin/tournament/registrations", methods=["GET"])
 def admin_tournament_registrations_api():
-    """Admin: registered players list dekho."""
+    """Admin: registered players list — ?tournament_id=<tid> se filter karo."""
     if not check_admin_token(request):
         return jsonify({"status": "error"}), 401
+    tid = request.args.get("tournament_id", "").strip()
+    if not tid:
+        return jsonify({"status": "error", "message": "tournament_id query param required."}), 400
     try:
-        t = tournaments_col.find_one({"active": True}, {"tournament_id": 1})
-        if not t:
-            return jsonify({"status": "success", "data": [], "total": 0})
-        tid  = t["tournament_id"]
         regs = list(
             tournament_registrations_col.find(
                 {"tournament_id": tid},
@@ -4383,7 +4537,7 @@ def admin_tournament_registrations_api():
         for r in regs:
             if isinstance(r.get("registered_at"), datetime):
                 r["registered_at"] = r["registered_at"].strftime("%d %b %Y, %H:%M")
-        return jsonify({"status": "success", "data": regs, "total": len(regs)})
+        return jsonify({"status": "success", "tournament_id": tid, "data": regs, "total": len(regs)})
     except Exception as exc:
         logger.error("admin_tournament_registrations_api error: %s", exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
@@ -6103,8 +6257,17 @@ def cmd_create_tournament(message):
         return bot.reply_to(message, "❌ EntryFee aur MaxPlayers sirf number mein dena hai. Example: `0` ya `50`.", parse_mode="Markdown")
 
     try:
+        # Check MAX_TOURNAMENTS limit
+        active_count = tournaments_col.count_documents({"active": True})
+        if active_count >= MAX_TOURNAMENTS:
+            return bot.reply_to(
+                message,
+                f"❌ Maximum *{MAX_TOURNAMENTS}* active tournaments allowed!\n"
+                f"Pehle kisi tournament ko `/deletetournament <tournament_id>` se delete karo.",
+                parse_mode="Markdown",
+            )
+
         tid = f"t_{int(time.time())}"
-        tournaments_col.update_many({}, {"$set": {"active": False}})
         tournaments_col.update_one(
             {"tournament_id": tid},
             {"$set": {
