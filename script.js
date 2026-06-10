@@ -133,7 +133,9 @@ function startCountdown(seconds, updateFn, doneFn) {
 }
 
 // ============================================================
-// DAILY BONUS COUNTDOWN
+// STREAK BONUS SYSTEM
+// Days 1-10: 10 coins | Days 11-20: 15 coins | Days 21-30: 20 coins
+// >48h gap → streak reset to Day 1
 // ============================================================
 let _dailyCountdownInterval = null;
 
@@ -144,6 +146,54 @@ function parseUTCTimestamp(ts) {
         const d = new Date(str);
         return isNaN(d.getTime()) ? null : d;
     } catch (e) { return null; }
+}
+
+function _getStreakReward(day) {
+    if (day <= 10) return 10;
+    if (day <= 20) return 15;
+    return 20;
+}
+
+function _getStreakTier(day) {
+    if (day <= 10) return { label: 'Tier 1', color: '#f1c40f', emoji: '🔥' };
+    if (day <= 20) return { label: 'Tier 2', color: '#38bdf8', emoji: '⚡' };
+    return { label: 'Tier 3', color: '#a855f7', emoji: '💎' };
+}
+
+function updateStreakUI(streakDay) {
+    streakDay = Math.max(0, parseInt(streakDay) || 0);
+    const displayDay  = streakDay === 0 ? 1 : streakDay;
+    const nextDay     = (streakDay % 30) + 1;
+    const reward      = _getStreakReward(displayDay);
+    const nextReward  = _getStreakReward(nextDay);
+    const tier        = _getStreakTier(displayDay);
+
+    const dayEl    = document.getElementById('streak-day-num');
+    const rewardEl = document.getElementById('streak-reward-num');
+    const tierEl   = document.getElementById('streak-tier-label');
+    const barEl    = document.getElementById('streak-progress-bar');
+    const nextEl   = document.getElementById('streak-next-reward');
+
+    if (dayEl)    dayEl.textContent    = displayDay;
+    if (rewardEl) rewardEl.textContent = `+${reward} 🪙`;
+    if (tierEl) {
+        tierEl.textContent  = `${tier.emoji} ${tier.label}`;
+        tierEl.style.color  = tier.color;
+    }
+    if (nextEl) {
+        if (streakDay >= 30) {
+            nextEl.textContent = '🏆 Max streak reached! Restarting Day 1 next.';
+        } else {
+            nextEl.textContent = `Day ${nextDay}: +${nextReward} 🪙`;
+        }
+    }
+    // Progress bar within current tier (10-day blocks)
+    if (barEl) {
+        const block = streakDay <= 10 ? streakDay : streakDay <= 20 ? streakDay - 10 : streakDay - 20;
+        const pct   = (block / 10) * 100;
+        barEl.style.width      = pct + '%';
+        barEl.style.background = tier.color;
+    }
 }
 
 function startDailyCountdown(remainingSeconds) {
@@ -177,8 +227,8 @@ function startDailyCountdown(remainingSeconds) {
             clearInterval(_dailyCountdownInterval);
             _dailyCountdownInterval = null;
             if (timerEl) timerEl.style.display = 'none';
-            if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerText = 'Claim Now'; }
-            showToast('🎁 Daily bonus is ready! Claim your 10 coins!', 'success');
+            if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerText = '🔥 Claim Streak'; }
+            showToast('🔥 Streak bonus ready! Claim now!', 'success');
             return;
         }
         tick();
@@ -190,15 +240,15 @@ function checkDailyBonus(lastClaimTs) {
     if (!btn) return;
 
     if (!lastClaimTs) {
-        btn.disabled = false; btn.style.opacity = '1'; btn.innerText = 'Claim Now';
+        btn.disabled = false; btn.style.opacity = '1'; btn.innerText = '🔥 Claim Streak';
         const timerEl = document.getElementById('daily-timer');
         if (timerEl) timerEl.style.display = 'none';
         if (_dailyCountdownInterval) clearInterval(_dailyCountdownInterval);
         return;
     }
 
-    const lastDt   = parseUTCTimestamp(lastClaimTs);
-    if (!lastDt) { btn.disabled = false; btn.innerText = 'Claim Now'; return; }
+    const lastDt = parseUTCTimestamp(lastClaimTs);
+    if (!lastDt) { btn.disabled = false; btn.innerText = '🔥 Claim Streak'; return; }
 
     const diffSec  = (Date.now() - lastDt.getTime()) / 1000;
     const totalSec = 24 * 3600;
@@ -208,7 +258,7 @@ function checkDailyBonus(lastClaimTs) {
         if (!_dailyCountdownInterval) startDailyCountdown(remaining);
     } else {
         if (_dailyCountdownInterval) { clearInterval(_dailyCountdownInterval); _dailyCountdownInterval = null; }
-        btn.disabled = false; btn.style.opacity = '1'; btn.innerText = 'Claim Now';
+        btn.disabled = false; btn.style.opacity = '1'; btn.innerText = '🔥 Claim Streak';
         const timerEl = document.getElementById('daily-timer');
         if (timerEl) timerEl.style.display = 'none';
     }
@@ -231,14 +281,14 @@ async function claimDaily() {
                 showToast(tokenData.message || 'Could not start ad. Try again.', 'error');
                 const remSecs = tokenData.data?.remaining_seconds;
                 if (remSecs && remSecs > 0) startDailyCountdown(remSecs);
-                else if (btn) { btn.disabled = false; btn.innerText = 'Claim Now'; }
+                else if (btn) { btn.disabled = false; btn.innerText = '🔥 Claim Streak'; }
                 _pendingRequests.delete('claimDaily');
                 return;
             }
             claimToken = tokenData.token;
         } catch (e) {
             showToast('⚠️ Server error. Please retry.', 'error');
-            if (btn) { btn.disabled = false; btn.innerText = 'Claim Now'; }
+            if (btn) { btn.disabled = false; btn.innerText = '🔥 Claim Streak'; }
             _pendingRequests.delete('claimDaily');
             return;
         }
@@ -246,8 +296,8 @@ async function claimDaily() {
         try {
             await requireAdWatch();
         } catch (e) {
-            showToast('📺 Watch the full ad to claim your daily bonus!', 'error');
-            if (btn) { btn.disabled = false; btn.innerText = 'Claim Now'; }
+            showToast('📺 Watch the full ad to claim your streak bonus!', 'error');
+            if (btn) { btn.disabled = false; btn.innerText = '🔥 Claim Streak'; }
             _pendingRequests.delete('claimDaily');
             return;
         }
@@ -264,18 +314,21 @@ async function claimDaily() {
         const data = await res.json();
 
         if (data.status === 'success') {
-            showToast('🎁 10 coins added to your balance!', 'success');
+            const day    = data.data?.streak_day || 1;
+            const reward = data.data?.bonus || 10;
+            showToast(`🔥 Day ${day} Streak! +${reward} coins added!`, 'success');
+            updateStreakUI(day);
             startDailyCountdown(24 * 3600);
             fetchLiveData();
         } else {
             showToast(data.message || 'Already claimed today.', 'error');
             const remSecs = data.data?.remaining_seconds;
             if (remSecs && remSecs > 0) startDailyCountdown(remSecs);
-            else if (btn) { btn.disabled = false; btn.innerText = 'Claim Now'; }
+            else if (btn) { btn.disabled = false; btn.innerText = '🔥 Claim Streak'; }
         }
     } catch (e) {
         showToast('⚠️ Error! Please retry.', 'error');
-        if (btn) { btn.disabled = false; btn.innerText = 'Claim Now'; }
+        if (btn) { btn.disabled = false; btn.innerText = '🔥 Claim Streak'; }
     } finally {
         _pendingRequests.delete('claimDaily');
     }
@@ -333,6 +386,7 @@ async function fetchLiveData() {
             updateReferralList(data.referrals);
             applyCompletedTasks(data.completed_tasks || []);
             checkDailyBonus(data.last_claim);
+            updateStreakUI(data.streak_day || 0);
             updateAdCounter(data.ads_today || 0, data.ads_date || "");
             updateChannelButtons(data.channel_claims || {});
             renderSponsorSlots(data.channel_claims || {}, data.completed_tasks || [], data.verify_completions || {});
@@ -430,7 +484,7 @@ async function loadLotteryStatus() {
     if (staleOv) staleOv.remove();
 
     try {
-        const res  = await fetch(`${CONFIG.API_BASE_URL}/get_lottery_status?user_id=${userId}`);
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_lottery_status?user_id=${userId}`);
         const data = await res.json();
 
         if (data.status !== 'success' || !data.active) { card.style.display = 'none'; return; }
@@ -1492,8 +1546,8 @@ async function requestWithdraw() {
     if (reqAmount > totalCoins)         return showToast(`Insufficient balance. You have ${totalCoins} coins.`, "error");
 
     // Referral check — CONFIG.REFERRAL_ACTIVE: true hone par 5 referrals zaroori
+    // BUG FIX: duplicate const refCount hata diya, outer refCount use karo
     if (CONFIG.REFERRAL_ACTIVE === true) {
-        const refCount = getRefCount(userData?.referrals);
         if (refCount < 5) {
             return showToast(`You need ${5 - refCount} more referral(s) to unlock withdrawal.`, "error");
         }
@@ -2195,7 +2249,7 @@ async function claimMilestone(milestoneId) {
     if (_pendingRequests.has(key)) return;
     _pendingRequests.add(key);
     try {
-        const res  = await fetch(`${CONFIG.API_BASE_URL}/claim_milestone/${userId}`, {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_milestone/${userId}`, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({ milestone_id: milestoneId }),
@@ -2203,7 +2257,7 @@ async function claimMilestone(milestoneId) {
         const json = await res.json();
         if (json.status === 'success') {
             showToast(json.message || 'Milestone claimed!', 'success');
-            setTimeout(() => { loadReferralDashboard(); loadUserData(); }, 600);
+            setTimeout(() => { loadReferralDashboard(); fetchLiveData(); }, 600);
         } else {
             showToast(json.message || 'Claim failed.', 'error');
         }
@@ -2631,10 +2685,12 @@ function _removeWithdrawLock(withdrawTab) {
 // TOURNAMENT HUB
 // ============================================================
 
-let _tournamentCache    = null;
-let _tournamentCacheTs  = 0;
-let _tournamentRegCache = null;   // User's own registration
-const TOURNAMENT_CACHE_TTL = 60 * 1000;  // 1 min
+// Multi-tournament state
+let _allTournaments     = [];          // List of all active tournaments
+let _selectedTid        = null;        // Currently selected tournament_id
+let _tournamentCache    = {};          // { tid: { tournament, winners, ts } }
+let _tournamentRegCache = {};          // { tid: regData }
+const TOURNAMENT_CACHE_TTL = 60 * 1000;
 
 function openTournamentHub(e) {
     if (e) e.stopPropagation();
@@ -2652,7 +2708,6 @@ function closeTournamentHub() {
     document.body.style.overflow = '';
 }
 
-// Close modal when tapping outside the box
 document.addEventListener('click', function(e) {
     const modal = document.getElementById('tournament-modal');
     const box   = document.getElementById('tournament-hub-box');
@@ -2661,77 +2716,148 @@ document.addEventListener('click', function(e) {
     }
 });
 
+// Load all tournaments list, then show tabs
 async function loadTournamentData(forceRefresh) {
-    const now = Date.now();
-    if (!forceRefresh && _tournamentCache && (now - _tournamentCacheTs) < TOURNAMENT_CACHE_TTL) {
-        _renderTournament(_tournamentCache.tournament, _tournamentCache.winners);
+    const content = document.getElementById('tournament-content');
+    if (content) content.innerHTML = '<div style="padding:30px;text-align:center;color:#64748b;font-size:13px;">⏳ Loading tournaments...</div>';
+
+    try {
+        const res  = await fetchWithRetry(CONFIG.API_BASE_URL + '/tournament');
+        const data = await res.json();
+
+        if (data.status !== 'success') throw new Error('API error');
+
+        _allTournaments = data.tournaments || [];
+
+        // Update trophy dot
+        const dot  = document.getElementById('t-trophy-dot');
+        const tBtn = document.getElementById('tournament-trophy-btn');
+        const hasActive = _allTournaments.some(t => ['registration_open','match_live'].includes(t.status));
+        if (dot) dot.style.display = hasActive ? 'block' : 'none';
+        if (tBtn) tBtn.classList.toggle('has-active', hasActive);
+
+        if (_allTournaments.length === 0) {
+            const badgeWrap = document.getElementById('t-status-badge-wrap');
+            if (badgeWrap) badgeWrap.innerHTML = '';
+            if (content) content.innerHTML =
+                '<div class="t-lock-overlay">' +
+                '<span class="t-lock-icon">🔒</span>' +
+                '<p class="t-lock-title">No Active Tournament</p>' +
+                '<p class="t-lock-sub">Stay tuned! Next tournament coming soon.</p>' +
+                '</div>';
+            return;
+        }
+
+        // If previously selected tid is still in list, keep it; else pick first
+        const tidStillValid = _allTournaments.some(t => t.tournament_id === _selectedTid);
+        if (!tidStillValid) _selectedTid = _allTournaments[0].tournament_id;
+
+        _renderTournamentTabs();
+        await loadTournamentById(_selectedTid, forceRefresh);
+    } catch (err) {
+        if (content) content.innerHTML =
+            '<div style="padding:30px;text-align:center;">' +
+            '<p style="color:#ef4444;font-size:13px;">⚠️ Could not load tournaments.</p>' +
+            '<button onclick="loadTournamentData(true)" style="margin-top:12px;background:rgba(241,196,15,0.1);border:1px solid rgba(241,196,15,0.3);color:#f1c40f;border-radius:8px;padding:8px 20px;cursor:pointer;font-weight:700;">Retry</button></div>';
+    }
+}
+
+// Render horizontal tab bar for all tournaments
+function _renderTournamentTabs() {
+    const tabWrap = document.getElementById('t-status-badge-wrap');
+    if (!tabWrap) return;
+
+    if (_allTournaments.length <= 1) {
+        // Single tournament — show status badge as before
+        const t = _allTournaments[0];
+        if (!t) { tabWrap.innerHTML = ''; return; }
+        const badgeCls   = { coming_soon:'coming-soon', registration_open:'reg-open', registration_closed:'reg-closed', match_live:'match-live', completed:'completed' }[t.status] || 'coming-soon';
+        const badgeEmoji = { coming_soon:'🔜', registration_open:'✅', registration_closed:'🔒', match_live:'🔴', completed:'🏆' }[t.status] || '🔜';
+        const badgeLabel = { coming_soon:'Coming Soon', registration_open:'Registration Open', registration_closed:'Registration Closed', match_live:'Match Live 🔴', completed:'Completed' }[t.status] || t.status;
+        tabWrap.innerHTML = `<span class="t-status-badge ${badgeCls}">${badgeEmoji} ${badgeLabel}</span>`;
         return;
     }
 
+    // Multiple tournaments — render scrollable tabs
+    const statusEmoji = { coming_soon:'🔜', registration_open:'✅', registration_closed:'🔒', match_live:'🔴', completed:'🏆' };
+    let tabsHtml = '<div id="t-tabs-bar" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none;">';
+    _allTournaments.forEach(t => {
+        const isSelected = t.tournament_id === _selectedTid;
+        const emoji = statusEmoji[t.status] || '🔜';
+        tabsHtml += `<button
+            onclick="selectTournamentTab('${_esc(t.tournament_id)}')"
+            style="flex-shrink:0;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;border:1.5px solid ${isSelected ? '#f1c40f' : 'rgba(255,255,255,0.12)'};background:${isSelected ? 'rgba(241,196,15,0.15)' : 'rgba(255,255,255,0.04)'};color:${isSelected ? '#f1c40f' : '#94a3b8'};white-space:nowrap;transition:all 0.2s;"
+        >${emoji} ${_esc(t.title || t.tournament_id)}</button>`;
+    });
+    tabsHtml += '</div>';
+    tabWrap.innerHTML = tabsHtml;
+}
+
+async function selectTournamentTab(tid) {
+    _selectedTid = tid;
+    _renderTournamentTabs();
+    await loadTournamentById(tid, false);
+}
+
+// Load a specific tournament by ID
+async function loadTournamentById(tid, forceRefresh) {
+    const content = document.getElementById('tournament-content');
+
+    // Check cache
+    const cached = _tournamentCache[tid];
+    if (!forceRefresh && cached && (Date.now() - cached.ts) < TOURNAMENT_CACHE_TTL) {
+        _renderTournament(cached.tournament, cached.winners);
+        return;
+    }
+
+    if (content) content.innerHTML = '<div style="padding:20px;text-align:center;color:#64748b;font-size:12px;">⏳ Loading...</div>';
+
     try {
+        const uid = window._tgUser?.id;
         const [tRes, regRes] = await Promise.all([
-            fetch(CONFIG.API_BASE_URL + '/tournament'),
-            window._tgUser ? fetch(CONFIG.API_BASE_URL + '/tournament/my_registration/' + window._tgUser.id) : Promise.resolve(null),
+            fetchWithRetry(`${CONFIG.API_BASE_URL}/tournament/${encodeURIComponent(tid)}`),
+            uid ? fetchWithRetry(`${CONFIG.API_BASE_URL}/tournament/my_registration/${uid}?tournament_id=${encodeURIComponent(tid)}`) : Promise.resolve(null),
         ]);
 
         const tData  = await tRes.json();
         const regData = regRes ? await regRes.json() : { registered: false };
 
         if (tData.status === 'success') {
-            _tournamentCache    = { tournament: tData.tournament, winners: tData.winners || [] };
-            _tournamentCacheTs  = Date.now();
+            _tournamentCache[tid] = { tournament: tData.tournament, winners: tData.winners || [], ts: Date.now() };
         }
-
-        _tournamentRegCache = (regData && regData.status === 'success') ? regData : { registered: false };
-
-        // Update trophy dot indicator
-        const dot   = document.getElementById('t-trophy-dot');
-        const tBtn  = document.getElementById('tournament-trophy-btn');
-        const t     = tData.tournament;
-        if (dot && t) {
-            const activeSt = ['registration_open', 'match_live'];
-            if (activeSt.includes(t.status)) {
-                dot.style.display  = 'block';
-                if (tBtn) tBtn.classList.add('has-active');
-            } else {
-                dot.style.display  = 'none';
-                if (tBtn) tBtn.classList.remove('has-active');
-            }
-        } else if (dot) {
-            dot.style.display = 'none';
-        }
+        _tournamentRegCache[tid] = (regData?.status === 'success') ? regData : { registered: false };
 
         _renderTournament(tData.tournament, tData.winners || []);
     } catch (err) {
-        document.getElementById('tournament-content').innerHTML =
-            '<div style="padding:30px;text-align:center;"><p style="color:#ef4444;font-size:13px;">⚠️ Could not load tournament data.</p>' +
-            '<p style="font-size:11px;color:#64748b;margin-top:4px;">Check your connection and try again.</p>' +
-            '<button onclick="loadTournamentData(true)" style="margin-top:12px;background:rgba(241,196,15,0.1);border:1px solid rgba(241,196,15,0.3);color:#f1c40f;border-radius:8px;padding:8px 20px;cursor:pointer;font-weight:700;">Retry</button></div>';
+        if (content) content.innerHTML =
+            '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px;">⚠️ Failed to load. <button onclick="loadTournamentById(\'' + _esc(tid) + '\',true)" style="color:#f1c40f;background:none;border:none;cursor:pointer;font-weight:700;">Retry</button></div>';
     }
 }
 
 function _renderTournament(t, winners) {
-    const badgeWrap = document.getElementById('t-status-badge-wrap');
-    const content   = document.getElementById('tournament-content');
-    if (!badgeWrap || !content) return;
+    const content = document.getElementById('tournament-content');
+    if (!content) return;
 
     if (!t) {
-        // No active tournament
-        badgeWrap.innerHTML = '';
         content.innerHTML =
             '<div class="t-lock-overlay">' +
             '<span class="t-lock-icon">🔒</span>' +
-            '<p class="t-lock-title">No Active Tournament</p>' +
-            '<p class="t-lock-sub">Stay tuned! Next tournament will be announced soon.</p>' +
+            '<p class="t-lock-title">Tournament Not Found</p>' +
+            '<p class="t-lock-sub">Stay tuned! More tournaments coming soon.</p>' +
             '</div>';
         return;
     }
 
-    // Status badge
-    const badgeCls = { coming_soon:'coming-soon', registration_open:'reg-open', registration_closed:'reg-closed', match_live:'match-live', completed:'completed' }[t.status] || 'coming-soon';
-    const badgeEmoji = { coming_soon:'🔜', registration_open:'✅', registration_closed:'🔒', match_live:'🔴', completed:'🏆' }[t.status] || '🔜';
-    const badgeLabel = { coming_soon:'Coming Soon', registration_open:'Registration Open', registration_closed:'Registration Closed', match_live:'Match Live 🔴', completed:'Completed' }[t.status] || t.status;
-    badgeWrap.innerHTML = `<span class="t-status-badge ${badgeCls}">${badgeEmoji} ${badgeLabel}</span>`;
+    // If single tournament, update badge wrap to show status
+    if (_allTournaments.length <= 1) {
+        const badgeWrap = document.getElementById('t-status-badge-wrap');
+        if (badgeWrap) {
+            const badgeCls   = { coming_soon:'coming-soon', registration_open:'reg-open', registration_closed:'reg-closed', match_live:'match-live', completed:'completed' }[t.status] || 'coming-soon';
+            const badgeEmoji = { coming_soon:'🔜', registration_open:'✅', registration_closed:'🔒', match_live:'🔴', completed:'🏆' }[t.status] || '🔜';
+            const badgeLabel = { coming_soon:'Coming Soon', registration_open:'Registration Open', registration_closed:'Registration Closed', match_live:'Match Live 🔴', completed:'Completed' }[t.status] || t.status;
+            badgeWrap.innerHTML = `<span class="t-status-badge ${badgeCls}">${badgeEmoji} ${badgeLabel}</span>`;
+        }
+    }
 
     let html = '';
 
@@ -2819,7 +2945,7 @@ function _renderTournament(t, winners) {
         </div>`;
 
     } else if (t.status === 'registration_open') {
-        const reg = _tournamentRegCache;
+        const reg = _tournamentRegCache[_selectedTid] || { registered: false };
         if (reg && reg.registered) {
             // Already registered
             html += `
@@ -2853,7 +2979,7 @@ function _renderTournament(t, winners) {
         }
 
     } else if (t.status === 'registration_closed') {
-        const reg = _tournamentRegCache;
+        const reg = _tournamentRegCache[_selectedTid] || { registered: false };
         html += `
         <div style="text-align:center;padding:24px 16px;background:rgba(251,146,60,0.05);border:1px solid rgba(251,146,60,0.20);border-radius:14px;">
             <span class="t-lock-icon" style="font-size:38px;margin-bottom:10px;display:block;">🔒</span>
@@ -2869,7 +2995,7 @@ function _renderTournament(t, winners) {
         }
 
     } else if (t.status === 'match_live') {
-        const reg = _tournamentRegCache;
+        const reg = _tournamentRegCache[_selectedTid] || { registered: false };
 
         // ── Live banner
         html += `
@@ -2929,7 +3055,7 @@ function _renderTournament(t, winners) {
 
     html += `
     <div style="height:14px;"></div>
-    <button onclick="loadTournamentData(true)" style="width:100%;padding:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;color:#64748b;font-size:12px;cursor:pointer;">↻ Refresh</button>
+    <button onclick="loadTournamentById('${_esc(_selectedTid)}', true)" style="width:100%;padding:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;color:#64748b;font-size:12px;cursor:pointer;">↻ Refresh</button>
     </div>`;  // close t-body
 
     content.innerHTML = html;
@@ -2949,6 +3075,10 @@ async function registerForTournament() {
         if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ FF UID must be 5-15 digits only.'; }
         return;
     }
+    if (!_selectedTid) {
+        if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ No tournament selected.'; }
+        return;
+    }
 
     if (btn) { btn.disabled = true; btn.textContent = 'Registering...'; }
     if (msg) { msg.style.color = '#94a3b8'; msg.textContent = '⏳ Submitting registration...'; }
@@ -2956,18 +3086,19 @@ async function registerForTournament() {
     try {
         if (!userId) throw new Error('User not identified.');
 
-        const res  = await fetch(CONFIG.API_BASE_URL + '/tournament/register', {
+        const res  = await fetchWithRetry(CONFIG.API_BASE_URL + '/tournament/register', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ user_id: userId, ff_uid: uid, ff_nickname: nick }),
+            body:    JSON.stringify({ user_id: userId, tournament_id: _selectedTid, ff_uid: uid, ff_nickname: nick }),
         });
         const data = await res.json();
 
         if (data.status === 'success') {
             if (msg) { msg.style.color = '#4ade80'; msg.textContent = data.message || '🎉 Registered!'; }
-            _tournamentCache    = null;  // invalidate cache
-            _tournamentRegCache = null;
-            setTimeout(() => loadTournamentData(true), 800);
+            // Invalidate cache for this tournament only
+            delete _tournamentCache[_selectedTid];
+            delete _tournamentRegCache[_selectedTid];
+            setTimeout(() => loadTournamentById(_selectedTid, true), 800);
         } else {
             if (msg) { msg.style.color = '#ef4444'; msg.textContent = '❌ ' + (data.message || 'Registration failed.'); }
             if (btn) { btn.disabled = false; btn.textContent = '🎯 Register for Tournament'; }
@@ -2990,27 +3121,21 @@ function _esc(str) {
 // Load tournament indicator on startup (silently — no modal open)
 async function _initTournamentIndicator() {
     try {
-        const [tRes, regRes] = await Promise.all([
-            fetch(CONFIG.API_BASE_URL + '/tournament'),
-            window._tgUser ? fetch(CONFIG.API_BASE_URL + '/tournament/my_registration/' + window._tgUser.id) : Promise.resolve(null),
-        ]);
-        const tData  = await tRes.json();
-        const regData = regRes ? await regRes.json() : { registered: false };
+        const res  = await fetchWithRetry(CONFIG.API_BASE_URL + '/tournament');
+        const data = await res.json();
 
-        if (tData.status === 'success' && tData.tournament) {
-            _tournamentCache   = { tournament: tData.tournament, winners: tData.winners || [] };
-            _tournamentCacheTs = Date.now();
-        }
-        if (regData && regData.status === 'success') _tournamentRegCache = regData;
+        if (data.status !== 'success') return;
+        _allTournaments = data.tournaments || [];
 
+        const hasActive = _allTournaments.some(t => ['registration_open','match_live'].includes(t.status));
         const dot  = document.getElementById('t-trophy-dot');
         const tBtn = document.getElementById('tournament-trophy-btn');
-        const t    = tData.tournament;
-        if (dot && t) {
-            if (['registration_open','match_live'].includes(t.status)) {
-                dot.style.display = 'block';
-                if (tBtn) tBtn.classList.add('has-active');
-            }
+        if (dot) dot.style.display = hasActive ? 'block' : 'none';
+        if (tBtn) tBtn.classList.toggle('has-active', hasActive);
+
+        // Pre-select first tournament for faster modal open
+        if (_allTournaments.length > 0 && !_selectedTid) {
+            _selectedTid = _allTournaments[0].tournament_id;
         }
     } catch(_) { /* silent fail */ }
 }
