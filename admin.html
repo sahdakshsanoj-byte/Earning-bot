@@ -8,7 +8,6 @@
     * { margin:0; padding:0; box-sizing:border-box; }
     body { background:#0f172a; color:#e2e8f0; font-family:'Segoe UI',sans-serif; min-height:100vh; }
 
-    /* ── Login ── */
     #login-screen {
         display:flex; flex-direction:column; align-items:center; justify-content:center;
         min-height:100vh; padding:20px;
@@ -28,7 +27,6 @@
     }
     #login-err { color:#e74c3c; font-size:13px; margin-top:10px; display:none; }
 
-    /* ── Dashboard ── */
     #dashboard { display:none; padding-bottom:80px; }
     .top-bar {
         background:#1e293b; padding:14px 20px;
@@ -41,7 +39,6 @@
         padding:6px 14px; border-radius:8px; cursor:pointer; font-size:12px;
     }
 
-    /* ── Tabs ── */
     .tabs {
         display:flex; background:#1e293b;
         border-bottom:1px solid #334155;
@@ -54,7 +51,6 @@
     }
     .tab-btn.active { color:#f1c40f; border-bottom-color:#f1c40f; }
 
-    /* ── Cards ── */
     .section { display:none; padding:16px; }
     .section.active { display:block; }
     .card {
@@ -63,7 +59,6 @@
     }
     .card h4 { color:#38bdf8; font-size:14px; margin-bottom:14px; border-bottom:1px solid #334155; padding-bottom:8px; }
 
-    /* ── Code Rows ── */
     .code-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
     .code-label { font-size:12px; color:#94a3b8; width:90px; flex-shrink:0; }
     .code-input {
@@ -73,7 +68,6 @@
     }
     .code-input:focus { outline:none; border-color:#f1c40f; }
 
-    /* ── Buttons ── */
     .btn-save {
         width:100%; padding:12px;
         background:#2ecc71; color:#000; font-weight:700;
@@ -93,8 +87,15 @@
         padding:7px 14px; background:#f39c12; color:#000;
         border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700;
     }
+    .btn-purple {
+        padding:7px 14px; background:#a855f7; color:#fff;
+        border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700;
+    }
+    .btn-blue {
+        padding:7px 14px; background:#38bdf8; color:#000;
+        border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700;
+    }
 
-    /* ── Withdrawal Cards ── */
     .wd-card {
         background:#0f172a; border:1px solid #334155; border-radius:10px;
         padding:14px; margin-bottom:10px;
@@ -102,9 +103,8 @@
     .wd-row { display:flex; justify-content:space-between; gap:10px; margin-bottom:6px; align-items:flex-start; }
     .wd-label { font-size:11px; color:#64748b; flex-shrink:0; }
     .wd-value { font-size:12px; color:#e2e8f0; font-weight:600; word-break:break-all; text-align:right; }
-    .wd-actions { display:flex; gap:8px; margin-top:10px; }
+    .wd-actions { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
 
-    /* ── Stats ── */
     .stats-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
     .stat-box {
         background:#0f172a; border:1px solid #334155; border-radius:10px;
@@ -113,7 +113,6 @@
     .stat-num { font-size:24px; font-weight:700; color:#f1c40f; }
     .stat-lbl { font-size:11px; color:#64748b; margin-top:4px; }
 
-    /* ── Ban List Cards ── */
     .ban-card {
         background:#0f172a; border:1px solid #7f1d1d; border-radius:10px;
         padding:12px 14px; margin-bottom:8px;
@@ -125,7 +124,6 @@
     .ban-id     { font-size:11px; color:#64748b; margin-top:2px; }
     .ban-coins  { font-size:11px; color:#f1c40f; margin-top:1px; }
 
-    /* ── Toast ── */
     #toast {
         position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
         background:#1e293b; color:#e2e8f0; padding:10px 20px;
@@ -136,10 +134,8 @@
     #toast.ok  { border-color:#2ecc71; color:#2ecc71; }
     #toast.err { border-color:#e74c3c; color:#e74c3c; }
 
-    /* ── Empty State ── */
     .empty { text-align:center; color:#475569; padding:30px 0; font-size:13px; }
 
-    /* ── Broadcast ── */
     #bcast-msg {
         width:100%; min-height:100px; padding:12px;
         background:#0f172a; border:1px solid #334155; border-radius:10px;
@@ -148,13 +144,69 @@
     #bcast-msg:focus { outline:none; border-color:#38bdf8; }
     #bcast-result { font-size:12px; color:#64748b; margin-top:8px; text-align:center; }
 
-    /* ── DM textarea ── */
     #dm-msg {
         width:100%; min-height:110px; padding:12px;
         background:#0f172a; border:1px solid #334155; border-radius:10px;
         color:#e2e8f0; font-size:14px; resize:vertical; margin-bottom:12px;
     }
     #dm-msg:focus { outline:none; border-color:#38bdf8; }
+
+    /* ── Tournament specific ── */
+    .t-form-row { display:flex; flex-direction:column; gap:5px; margin-bottom:10px; }
+    .t-form-row label { font-size:11px; color:#94a3b8; }
+    .t-form-input {
+        width:100%; padding:9px 12px;
+        background:#0f172a; border:1px solid #334155; border-radius:8px;
+        color:#e2e8f0; font-size:13px;
+    }
+    .t-form-input:focus { outline:none; border-color:#f1c40f; }
+    .t-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+
+    .t-card {
+        background:#0f172a; border:1px solid #334155; border-radius:12px;
+        padding:14px; margin-bottom:12px; position:relative;
+    }
+    .t-card-header {
+        display:flex; justify-content:space-between; align-items:flex-start;
+        margin-bottom:10px; gap:8px;
+    }
+    .t-card-title { font-size:14px; font-weight:700; color:#e2e8f0; }
+    .t-card-tid   { font-size:10px; color:#64748b; font-family:monospace; margin-top:2px; }
+    .t-status-badge {
+        font-size:10px; font-weight:700; padding:3px 8px; border-radius:20px; white-space:nowrap; flex-shrink:0;
+    }
+    .t-status-coming_soon       { background:rgba(100,116,139,0.2); color:#94a3b8; border:1px solid #475569; }
+    .t-status-registration_open { background:rgba(74,222,128,0.15); color:#4ade80; border:1px solid rgba(74,222,128,0.3); }
+    .t-status-registration_closed { background:rgba(251,146,60,0.15); color:#fb923c; border:1px solid rgba(251,146,60,0.3); }
+    .t-status-match_live        { background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); }
+    .t-status-completed         { background:rgba(241,196,15,0.12); color:#f1c40f; border:1px solid rgba(241,196,15,0.25); }
+
+    .t-meta-row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+    .t-meta-pill {
+        font-size:10px; padding:2px 8px; border-radius:20px;
+        background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);
+        color:#94a3b8;
+    }
+
+    .t-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+
+    .t-sub-panel {
+        background:#0f172a; border:1px solid #334155; border-radius:10px;
+        padding:12px; margin-top:10px; display:none;
+    }
+    .t-sub-panel.open { display:block; }
+    .t-sub-panel label { font-size:11px; color:#94a3b8; display:block; margin-bottom:4px; }
+    .t-sub-input {
+        width:100%; padding:8px 10px; margin-bottom:8px;
+        background:#1e293b; border:1px solid #334155; border-radius:8px;
+        color:#e2e8f0; font-size:12px;
+    }
+    .t-sub-input:focus { outline:none; border-color:#f1c40f; }
+
+    .reg-table { width:100%; border-collapse:collapse; font-size:11px; }
+    .reg-table th { background:#1e293b; color:#64748b; padding:6px 8px; text-align:left; font-weight:600; }
+    .reg-table td { padding:6px 8px; border-bottom:1px solid rgba(255,255,255,0.04); color:#e2e8f0; }
+    .reg-table tr:last-child td { border-bottom:none; }
 </style>
 </head>
 <body>
@@ -182,6 +234,7 @@
         <button class="tab-btn" onclick="switchTab('users',this)">👤 Users</button>
         <button class="tab-btn" onclick="switchTab('ban',this)">🚫 Ban/Unban</button>
         <button class="tab-btn" onclick="switchTab('stats',this)">📊 Stats</button>
+        <button class="tab-btn" onclick="switchTab('tournament',this)">🏆 Tournament</button>
         <button class="tab-btn" onclick="switchTab('broadcast',this)">📢 Broadcast</button>
         <button class="tab-btn" onclick="switchTab('dm',this)">💬 DM</button>
     </div>
@@ -221,7 +274,6 @@
             </div>
         </div>
 
-        <!-- ── Sponsor Slot 3 Verify Code ── -->
         <div class="card" style="border-color:#a855f7;">
             <h4 style="color:#a855f7;">🌟 Sponsor Slot 3 — Verify Code</h4>
             <p style="font-size:11px; color:#64748b; margin-top:-8px; margin-bottom:14px;">
@@ -234,7 +286,6 @@
             </div>
         </div>
 
-        <!-- ── Sponsor Slot 4 Verify Code ── -->
         <div class="card" style="border-color:#3498db;">
             <h4 style="color:#3498db;">🔐 Sponsor Slot 4 — Verify Code</h4>
             <p style="font-size:11px; color:#64748b; margin-top:-8px; margin-bottom:14px;">
@@ -247,7 +298,6 @@
             </div>
         </div>
 
-        <!-- ── Notify checkbox ── -->
         <label style="display:flex; align-items:center; gap:10px; padding:10px 14px;
                       background:#1e293b; border:1px solid #334155; border-radius:10px;
                       margin-bottom:10px; cursor:pointer; font-size:13px; color:#94a3b8;">
@@ -286,7 +336,6 @@
     <!-- ── BAN / UNBAN TAB ── -->
     <div id="tab-ban" class="section" style="padding:16px;">
 
-        <!-- Quick Ban by ID -->
         <div class="card">
             <h4>🚫 Ban / Unban User</h4>
             <div class="code-row" style="margin-bottom:14px;">
@@ -299,7 +348,6 @@
             <p id="ban-result" style="font-size:12px; color:#64748b; margin-top:10px; text-align:center;"></p>
         </div>
 
-        <!-- Banned Users List -->
         <div class="card">
             <h4 style="display:flex; justify-content:space-between; align-items:center;">
                 <span>⛔ Currently Banned Users</span>
@@ -332,7 +380,6 @@
         </div>
         <button class="btn-save" style="background:#38bdf8;" onclick="loadStats()">🔄 Refresh Stats</button>
 
-        <!-- Server Health -->
         <div class="card" style="margin-top:16px; border-color:#22c55e;">
             <h4 style="color:#22c55e; display:flex; justify-content:space-between; align-items:center;">
                 <span>🖥️ Server Health</span>
@@ -343,7 +390,6 @@
             </div>
         </div>
 
-        <!-- Sponsor Click Counter -->
         <div class="card" style="margin-top:16px; border-color:#38bdf8;">
             <h4 style="color:#38bdf8;">🤝 Sponsor Link Clicks</h4>
             <p style="font-size:11px; color:#64748b; margin-bottom:12px; margin-top:-8px;">
@@ -353,6 +399,69 @@
                 <p class="empty">Click Refresh Stats to load.</p>
             </div>
         </div>
+    </div>
+
+    <!-- ── TOURNAMENT TAB ── -->
+    <div id="tab-tournament" class="section" style="padding:16px;">
+
+        <!-- Create / Edit Tournament -->
+        <div class="card" style="border-color:#f1c40f;">
+            <h4 style="color:#f1c40f; display:flex; justify-content:space-between; align-items:center;">
+                <span>🏆 Create Tournament</span>
+                <span id="t-count-badge" style="font-size:11px; background:rgba(241,196,15,0.1); border:1px solid rgba(241,196,15,0.25); border-radius:20px; padding:2px 8px; color:#f1c40f;">0 / 5</span>
+            </h4>
+
+            <div class="t-form-row">
+                <label>Tournament ID <span style="color:#64748b;">(custom ya auto — e.g. ff_july, t1)</span></label>
+                <input class="t-form-input" id="t-id" placeholder="Leave blank for auto ID">
+            </div>
+            <div class="t-form-row">
+                <label>Title *</label>
+                <input class="t-form-input" id="t-title" placeholder="Free Fire Grand Finals — July 2026">
+            </div>
+            <div class="t-form-grid">
+                <div class="t-form-row">
+                    <label>Mode</label>
+                    <input class="t-form-input" id="t-mode" placeholder="Squad" value="Squad">
+                </div>
+                <div class="t-form-row">
+                    <label>Map</label>
+                    <input class="t-form-input" id="t-map" placeholder="Bermuda" value="Bermuda">
+                </div>
+                <div class="t-form-row">
+                    <label>Date</label>
+                    <input class="t-form-input" id="t-date" placeholder="20 July 2026">
+                </div>
+                <div class="t-form-row">
+                    <label>Time</label>
+                    <input class="t-form-input" id="t-time" placeholder="8:00 PM IST">
+                </div>
+                <div class="t-form-row">
+                    <label>Entry Fee (coins)</label>
+                    <input class="t-form-input" id="t-fee" type="number" placeholder="0" value="0">
+                </div>
+                <div class="t-form-row">
+                    <label>Max Players</label>
+                    <input class="t-form-input" id="t-maxp" type="number" placeholder="50" value="50">
+                </div>
+            </div>
+            <div class="t-form-row">
+                <label>Prize Pool Description</label>
+                <input class="t-form-input" id="t-prize" placeholder="1st: 500 coins | 2nd: 300 coins | 3rd: 200 coins">
+            </div>
+            <p id="t-create-msg" style="font-size:12px; min-height:18px; margin:8px 0 4px; text-align:center;"></p>
+            <button class="btn-save" onclick="createTournament()">➕ Create Tournament</button>
+        </div>
+
+        <!-- Existing Tournaments -->
+        <div class="card">
+            <h4 style="display:flex; justify-content:space-between; align-items:center;">
+                <span>📋 All Tournaments</span>
+                <button class="btn-warn" style="padding:5px 10px; font-size:11px;" onclick="loadTournamentSection()">🔄 Refresh</button>
+            </h4>
+            <div id="t-list"><p class="empty">Loading...</p></div>
+        </div>
+
     </div>
 
     <!-- ── BROADCAST TAB ── -->
@@ -392,26 +501,24 @@
 
 </div>
 
-<!-- Toast -->
 <div id="toast"></div>
 
 <script>
-// ── Backend URL config ──
-// ⚠️ IMPORTANT: If admin.html is hosted SEPARATELY from the bot backend
-// (e.g. on GitHub Pages while bot runs on Render), set BACKEND_URL to
-// your Render service URL — for example:
-//   const BACKEND_URL = 'https://your-bot.onrender.com';
-// If admin.html is served by Flask itself (same-origin), leave it empty.
 const BACKEND_URL = '';
 const API = BACKEND_URL || window.location.origin;
 
-// ── State ──
 let adminToken = sessionStorage.getItem('admin_token') || '';
 
-// ── All task code keys (must match TASK_CODES in main.py) ──
 const CODE_KEYS = ['yt1','yt2','yt3','web1','web2','web3','slot3','slot4'];
 
-// ── Toast ──
+const T_STATUSES = [
+    { val:'coming_soon',          label:'🔜 Coming Soon' },
+    { val:'registration_open',    label:'✅ Registration Open' },
+    { val:'registration_closed',  label:'🔒 Registration Closed' },
+    { val:'match_live',           label:'🔴 Match Live' },
+    { val:'completed',            label:'🏆 Completed' },
+];
+
 function toast(msg, type='ok') {
     const t = document.getElementById('toast');
     t.textContent = msg;
@@ -457,7 +564,6 @@ function showDashboard() {
     loadWithdrawals();
 }
 
-// ── Auto-login if token saved ──
 if (adminToken) {
     fetch(`${API}/admin/login`, {
         method: 'POST',
@@ -469,7 +575,6 @@ if (adminToken) {
     }).catch(() => {});
 }
 
-// ── Token Enter key ──
 document.getElementById('token-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') doLogin();
 });
@@ -481,11 +586,11 @@ function switchTab(name, el) {
     document.getElementById('tab-' + name).classList.add('active');
     el.classList.add('active');
     if (name === 'withdrawals') loadWithdrawals();
-    if (name === 'stats') loadStats();
-    if (name === 'ban') loadBannedUsers();
+    if (name === 'stats')       loadStats();
+    if (name === 'ban')         loadBannedUsers();
+    if (name === 'tournament')  loadTournamentSection();
 }
 
-// ── Headers ──
 function authHeaders() {
     return { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken };
 }
@@ -595,7 +700,6 @@ async function loadStats() {
             fetch(`${API}/admin/stats`,          { headers: authHeaders() }),
             fetch(`${API}/admin/sponsor_clicks`, { headers: authHeaders() })
         ]);
-
         const statsData  = await statsRes.json();
         const clicksData = await clicksRes.json();
 
@@ -607,7 +711,6 @@ async function loadStats() {
                 ? statsData.total_coins.toLocaleString('en-IN') : '—';
         }
 
-        // Sponsor click counts — all 4 slots
         const clickEl = document.getElementById('sponsor-clicks-list');
         if (clickEl) {
             if (clicksData.status === 'success') {
@@ -623,9 +726,8 @@ async function loadStats() {
                     slot1: '#38bdf8', slot2: '#38bdf8',
                     slot3: '#a855f7', slot4: '#3498db'
                 };
-
                 const rows = slots.map(slot => {
-                    const info = clicks[slot];
+                    const info      = clicks[slot];
                     const count     = info ? info.count    : 0;
                     const link      = info ? info.link_url : '—';
                     const shortLink = link.length > 40 ? link.substring(0, 40) + '...' : link;
@@ -642,7 +744,6 @@ async function loadStats() {
                             </div>
                         </div>`;
                 }).join('');
-
                 clickEl.innerHTML = rows || '<p class="empty">No sponsor links active.</p>';
             } else {
                 clickEl.innerHTML = '<p class="empty">Could not load click data.</p>';
@@ -651,7 +752,6 @@ async function loadStats() {
     } catch(e) {
         console.error('loadStats error:', e);
     }
-    // Also refresh health when stats tab is refreshed
     loadHealth();
 }
 
@@ -661,20 +761,15 @@ async function loadHealth() {
     if (!el) return;
     el.innerHTML = '<p class="empty" style="font-size:12px;">Loading...</p>';
     try {
-        const res  = await fetch(`${API}/admin/health`, { headers: authHeaders() });
-        const d    = await res.json();
-        if (d.status !== 'ok') {
-            el.innerHTML = '<p class="empty">❌ Health check failed.</p>';
-            return;
-        }
+        const res = await fetch(`${API}/admin/health`, { headers: authHeaders() });
+        const d   = await res.json();
+        if (d.status !== 'ok') { el.innerHTML = '<p class="empty">❌ Health check failed.</p>'; return; }
         function bar(pct) {
             const filled = Math.round(pct / 100 * 12);
             const color  = pct < 60 ? '#22c55e' : pct < 85 ? '#f1c40f' : '#e74c3c';
             return `<span style="font-family:monospace; color:${color};">${'█'.repeat(filled)}${'░'.repeat(12-filled)}</span>`;
         }
-        function dot(pct) {
-            return pct < 60 ? '🟢' : pct < 85 ? '🟡' : '🔴';
-        }
+        function dot(pct) { return pct < 60 ? '🟢' : pct < 85 ? '🟡' : '🔴'; }
         el.innerHTML = `
             <div style="font-size:12px; color:#64748b; margin-bottom:12px;">
                 ⏱️ Uptime: <span style="color:#e2e8f0; font-weight:600;">${d.uptime}</span>
@@ -712,7 +807,6 @@ async function loadHealth() {
 async function searchUser(mode) {
     const result = document.getElementById('user-result');
     let url;
-
     if (mode === 'username') {
         const uname = document.getElementById('search-uname').value.trim().replace(/^@/, '');
         if (!uname) return toast('❌ Enter a username', 'err');
@@ -722,13 +816,12 @@ async function searchUser(mode) {
         if (!uid) return toast('❌ Enter a User ID', 'err');
         url = `${API}/admin/search_user?user_id=${uid}`;
     }
-
     result.innerHTML = '<p class="empty">Searching...</p>';
     try {
         const res  = await fetch(url, { headers: authHeaders() });
         const data = await res.json();
         if (data.status === 'success') {
-            const u = data.user;
+            const u      = data.user;
             const banned = u.blocked ? true : false;
             const refCount = u.referral_count !== undefined
                 ? u.referral_count
@@ -772,7 +865,6 @@ async function banAction(userId, action) {
         const data = await res.json();
         if (data.status === 'success') {
             toast(`✅ User ${label}ned!`, 'ok');
-            // Re-run search using whichever field still has a value
             const hasName = document.getElementById('search-uname').value.trim();
             const hasId   = document.getElementById('search-uid').value.trim();
             searchUser(hasName && !hasId ? 'username' : 'id');
@@ -782,17 +874,16 @@ async function banAction(userId, action) {
     } catch(e) { toast('❌ Network error', 'err'); }
 }
 
-// ── Enter key on search ──
 document.addEventListener('DOMContentLoaded', () => {
-    const s = document.getElementById('search-uid');
-    if (s) s.addEventListener('keydown', e => { if (e.key === 'Enter') searchUser('id'); });
+    const s  = document.getElementById('search-uid');
+    if (s)  s.addEventListener('keydown',  e => { if (e.key === 'Enter') searchUser('id'); });
     const su = document.getElementById('search-uname');
     if (su) su.addEventListener('keydown', e => { if (e.key === 'Enter') searchUser('username'); });
-    const b = document.getElementById('ban-uid');
-    if (b) b.addEventListener('keydown', e => { if (e.key === 'Enter') quickBan(); });
+    const b  = document.getElementById('ban-uid');
+    if (b)  b.addEventListener('keydown',  e => { if (e.key === 'Enter') quickBan(); });
 });
 
-// ── Quick Ban / Unban (from Ban tab) ──
+// ── Quick Ban / Unban ──
 async function quickBan() {
     const uid = document.getElementById('ban-uid').value.trim();
     if (!uid) return toast('❌ Enter a User ID', 'err');
@@ -845,7 +936,7 @@ async function quickUnban() {
     } catch(e) { toast('❌ Network error', 'err'); }
 }
 
-// ── Load Banned Users List ──
+// ── Load Banned Users ──
 async function loadBannedUsers() {
     const list = document.getElementById('ban-list');
     list.innerHTML = '<p class="empty">Loading...</p>';
@@ -854,10 +945,7 @@ async function loadBannedUsers() {
         const data = await res.json();
         if (data.status === 'success') {
             const users = data.banned_users || [];
-            if (!users.length) {
-                list.innerHTML = '<p class="empty">✅ No banned users found.</p>';
-                return;
-            }
+            if (!users.length) { list.innerHTML = '<p class="empty">✅ No banned users found.</p>'; return; }
             const total = data.total || users.length;
             list.innerHTML = `<p style="font-size:11px; color:#64748b; margin-bottom:10px;">Showing ${users.length} of ${total} banned user(s). Tap Unban to restore.</p>`
                 + users.map(u => {
@@ -914,6 +1002,329 @@ async function inlineUnban(userId, btn) {
     }
 }
 
+// ============================================================
+// TOURNAMENT MANAGEMENT
+// ============================================================
+
+// Load all tournaments list
+async function loadTournamentSection() {
+    const list = document.getElementById('t-list');
+    const badge = document.getElementById('t-count-badge');
+    list.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        const res  = await fetch(`${API}/admin/tournaments`, { headers: authHeaders() });
+        const data = await res.json();
+        if (data.status !== 'success') throw new Error(data.message || 'Failed');
+
+        const tournaments = data.data || [];
+        const total       = tournaments.length;
+        if (badge) badge.textContent = `${total} / 5`;
+
+        if (!tournaments.length) {
+            list.innerHTML = '<p class="empty">Koi tournament nahi hai. Upar form se banao!</p>';
+            return;
+        }
+
+        list.innerHTML = tournaments.map(t => _renderTournamentCard(t)).join('');
+    } catch(e) {
+        list.innerHTML = `<p class="empty">❌ ${e.message || 'Network error'}</p>`;
+    }
+}
+
+function _esc(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _statusBadge(status) {
+    const map = {
+        coming_soon:          { label:'🔜 Coming Soon',          cls:'coming_soon' },
+        registration_open:    { label:'✅ Registration Open',    cls:'registration_open' },
+        registration_closed:  { label:'🔒 Registration Closed',  cls:'registration_closed' },
+        match_live:           { label:'🔴 Match Live',           cls:'match_live' },
+        completed:            { label:'🏆 Completed',            cls:'completed' },
+    };
+    const s = map[status] || { label: status, cls: 'coming_soon' };
+    return `<span class="t-status-badge t-status-${s.cls}">${s.label}</span>`;
+}
+
+function _renderTournamentCard(t) {
+    const tid    = _esc(t.tournament_id);
+    const tidRaw = t.tournament_id;
+    const regCnt = t.registered_count || 0;
+    const maxP   = t.max_players || 0;
+    const fee    = t.entry_fee || 0;
+
+    return `
+    <div class="t-card" id="tcard-${tid}">
+        <div class="t-card-header">
+            <div>
+                <div class="t-card-title">🏆 ${_esc(t.title || 'Untitled')}</div>
+                <div class="t-card-tid">ID: ${tid}</div>
+            </div>
+            ${_statusBadge(t.status)}
+        </div>
+
+        <div class="t-meta-row">
+            ${t.mode  ? `<span class="t-meta-pill">🎮 ${_esc(t.mode)}</span>` : ''}
+            ${t.map   ? `<span class="t-meta-pill">🗺️ ${_esc(t.map)}</span>`  : ''}
+            ${t.date  ? `<span class="t-meta-pill">📅 ${_esc(t.date)}</span>` : ''}
+            ${t.time  ? `<span class="t-meta-pill">⏰ ${_esc(t.time)}</span>` : ''}
+            <span class="t-meta-pill" style="color:${fee>0?'#f1c40f':'#4ade80'};">${fee > 0 ? `💰 ${fee} coins` : '🆓 Free'}</span>
+            <span class="t-meta-pill">👥 ${regCnt}${maxP>0?' / '+maxP:''} registered</span>
+        </div>
+
+        ${t.prize_pool ? `<div style="font-size:11px; color:#64748b; margin-bottom:8px;">🏅 ${_esc(t.prize_pool)}</div>` : ''}
+
+        <div class="t-actions">
+            <button class="btn-warn"    onclick="toggleSubPanel('${tidRaw}','status')">📋 Status</button>
+            <button class="btn-blue"    onclick="toggleSubPanel('${tidRaw}','room')">🔑 Room</button>
+            <button class="btn-purple"  onclick="toggleSubPanel('${tidRaw}','winners')">🏆 Winners</button>
+            <button class="btn-success" onclick="toggleSubPanel('${tidRaw}','regs')">👥 Registrations</button>
+            <button class="btn-danger"  onclick="deleteTournament('${tidRaw}')">🗑️ Delete</button>
+        </div>
+
+        <!-- Status Panel -->
+        <div class="t-sub-panel" id="tpanel-${tid}-status">
+            <label>Tournament Status Change karo:</label>
+            <select class="t-sub-input" id="tsel-${tid}-status" style="color:#e2e8f0; background:#1e293b;">
+                ${T_STATUSES.map(s => `<option value="${s.val}" ${t.status===s.val?'selected':''}>${s.label}</option>`).join('')}
+            </select>
+            <button class="btn-save" style="padding:8px;" onclick="setTournamentStatus('${tidRaw}')">✅ Update Status</button>
+        </div>
+
+        <!-- Room Panel -->
+        <div class="t-sub-panel" id="tpanel-${tid}-room">
+            <label>Room ID</label>
+            <input class="t-sub-input" id="tinp-${tid}-room-id" placeholder="e.g. 123456" value="${_esc(t.room_id||'')}">
+            <label>Room Password</label>
+            <input class="t-sub-input" id="tinp-${tid}-room-pass" placeholder="e.g. abc123" value="${_esc(t.room_password||'')}">
+            <button class="btn-save" style="padding:8px;" onclick="setRoomCredentials('${tidRaw}')">🔑 Save Room Details</button>
+        </div>
+
+        <!-- Winners Panel -->
+        <div class="t-sub-panel" id="tpanel-${tid}-winners">
+            <p style="font-size:11px; color:#64748b; margin-bottom:8px;">Top 3 winners — status automatically "Completed" ho jayega.</p>
+            ${[1,2,3].map(rank => `
+            <div style="background:#1e293b; border-radius:8px; padding:8px; margin-bottom:6px;">
+                <div style="font-size:11px; font-weight:700; color:#f1c40f; margin-bottom:6px;">${['🥇','🥈','🥉'][rank-1]} Rank ${rank}</div>
+                <input class="t-sub-input" id="twin-${tid}-name-${rank}" placeholder="Username / FF Nick">
+                <input class="t-sub-input" id="twin-${tid}-reward-${rank}" placeholder="Prize (e.g. 500 coins)">
+            </div>`).join('')}
+            <button class="btn-save" style="padding:8px;" onclick="publishWinners('${tidRaw}')">🏆 Publish Winners</button>
+        </div>
+
+        <!-- Registrations Panel -->
+        <div class="t-sub-panel" id="tpanel-${tid}-regs">
+            <div id="tregs-${tid}"><p class="empty" style="padding:10px 0;">Click button to load...</p></div>
+            <button class="btn-save" style="padding:8px; margin-top:6px; background:#38bdf8;" onclick="loadRegistrations('${tidRaw}')">👥 Load Registrations</button>
+        </div>
+    </div>`;
+}
+
+// Toggle sub-panel open/close
+function toggleSubPanel(tid, panel) {
+    const panelId  = `tpanel-${tid}-${panel}`;
+    const panelEl  = document.getElementById(panelId);
+    if (!panelEl) return;
+
+    // Close all panels of this card first
+    const card = document.getElementById(`tcard-${tid}`);
+    if (card) card.querySelectorAll('.t-sub-panel').forEach(p => {
+        if (p.id !== panelId) p.classList.remove('open');
+    });
+
+    panelEl.classList.toggle('open');
+
+    // Auto-load registrations when opened
+    if (panel === 'regs' && panelEl.classList.contains('open')) {
+        loadRegistrations(tid);
+    }
+}
+
+// Change tournament status
+async function setTournamentStatus(tid) {
+    const statusEl = document.getElementById(`tsel-${tid}-status`);
+    if (!statusEl) return;
+    const status = statusEl.value;
+    try {
+        const res  = await fetch(`${API}/admin/tournament/status`, {
+            method:  'POST',
+            headers: authHeaders(),
+            body:    JSON.stringify({ tournament_id: tid, status })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            toast(`✅ Status updated!`, 'ok');
+            loadTournamentSection();
+        } else {
+            toast('❌ ' + (data.message || 'Failed'), 'err');
+        }
+    } catch(e) { toast('❌ Network error', 'err'); }
+}
+
+// Set room credentials
+async function setRoomCredentials(tid) {
+    const roomId   = document.getElementById(`tinp-${tid}-room-id`)?.value.trim();
+    const roomPass = document.getElementById(`tinp-${tid}-room-pass`)?.value.trim();
+    if (!roomId || !roomPass) return toast('❌ Room ID aur Password dono bharo', 'err');
+    try {
+        const res  = await fetch(`${API}/admin/tournament/room`, {
+            method:  'POST',
+            headers: authHeaders(),
+            body:    JSON.stringify({ tournament_id: tid, room_id: roomId, room_password: roomPass })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            toast('✅ Room details saved!', 'ok');
+        } else {
+            toast('❌ ' + (data.message || 'Failed'), 'err');
+        }
+    } catch(e) { toast('❌ Network error', 'err'); }
+}
+
+// Publish winners
+async function publishWinners(tid) {
+    const winners = [];
+    for (let rank = 1; rank <= 3; rank++) {
+        const name   = document.getElementById(`twin-${tid}-name-${rank}`)?.value.trim();
+        const reward = document.getElementById(`twin-${tid}-reward-${rank}`)?.value.trim();
+        if (name) winners.push({ rank, username: name, reward: reward || '' });
+    }
+    if (!winners.length) return toast('❌ At least 1 winner ka naam bharo', 'err');
+    if (!confirm(`${winners.length} winner(s) publish karein? Tournament "Completed" ho jayega.`)) return;
+    try {
+        const res  = await fetch(`${API}/admin/tournament/winners`, {
+            method:  'POST',
+            headers: authHeaders(),
+            body:    JSON.stringify({ tournament_id: tid, winners })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            toast('🏆 Winners published!', 'ok');
+            loadTournamentSection();
+        } else {
+            toast('❌ ' + (data.message || 'Failed'), 'err');
+        }
+    } catch(e) { toast('❌ Network error', 'err'); }
+}
+
+// Load registrations
+async function loadRegistrations(tid) {
+    const el = document.getElementById(`tregs-${tid}`);
+    if (!el) return;
+    el.innerHTML = '<p class="empty" style="padding:8px 0;">Loading...</p>';
+    try {
+        const res  = await fetch(`${API}/admin/tournament/registrations?tournament_id=${encodeURIComponent(tid)}`, { headers: authHeaders() });
+        const data = await res.json();
+        if (data.status !== 'success') throw new Error(data.message || 'Failed');
+        const regs = data.data || [];
+        if (!regs.length) {
+            el.innerHTML = '<p class="empty" style="padding:8px 0;">Koi registration nahi hai.</p>';
+            return;
+        }
+        el.innerHTML = `
+            <p style="font-size:11px; color:#64748b; margin-bottom:6px;">Total: <b style="color:#e2e8f0;">${data.total}</b> registered</p>
+            <div style="overflow-x:auto;">
+            <table class="reg-table">
+                <thead><tr>
+                    <th>#</th><th>User ID</th><th>Username</th><th>FF UID</th><th>FF Nick</th><th>Fee</th><th>Date</th>
+                </tr></thead>
+                <tbody>
+                ${regs.map((r, i) => `
+                    <tr>
+                        <td>${i+1}</td>
+                        <td>${r.user_id}</td>
+                        <td>${r.username ? '@'+_esc(r.username) : '—'}</td>
+                        <td style="font-family:monospace; color:#f1c40f;">${_esc(r.ff_uid||'')}</td>
+                        <td>${_esc(r.ff_nickname||'')}</td>
+                        <td>${r.entry_fee_paid > 0 ? r.entry_fee_paid+' 🪙' : 'Free'}</td>
+                        <td style="color:#64748b;">${r.registered_at||'—'}</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+            </div>`;
+    } catch(e) {
+        el.innerHTML = `<p class="empty" style="padding:8px 0; color:#e74c3c;">❌ ${e.message}</p>`;
+    }
+}
+
+// Delete tournament
+async function deleteTournament(tid) {
+    if (!confirm(`Tournament "${tid}" permanently delete karein?\n\nYeh action undo nahi ho sakti!`)) return;
+    try {
+        const res  = await fetch(`${API}/admin/tournament/${encodeURIComponent(tid)}`, {
+            method:  'DELETE',
+            headers: authHeaders(),
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            toast(`🗑️ Tournament "${tid}" deleted!`, 'ok');
+            loadTournamentSection();
+        } else {
+            toast('❌ ' + (data.message || 'Failed'), 'err');
+        }
+    } catch(e) { toast('❌ Network error', 'err'); }
+}
+
+// Create new tournament
+async function createTournament() {
+    const msgEl = document.getElementById('t-create-msg');
+    const title = document.getElementById('t-title').value.trim();
+    if (!title) {
+        msgEl.style.color = '#e74c3c';
+        msgEl.textContent = '❌ Title required hai.';
+        return;
+    }
+
+    const tid       = document.getElementById('t-id').value.trim() || '';
+    const mode      = document.getElementById('t-mode').value.trim() || 'Squad';
+    const map_      = document.getElementById('t-map').value.trim()  || 'Bermuda';
+    const date      = document.getElementById('t-date').value.trim();
+    const time      = document.getElementById('t-time').value.trim();
+    const entry_fee = parseInt(document.getElementById('t-fee').value)  || 0;
+    const max_p     = parseInt(document.getElementById('t-maxp').value) || 50;
+    const prize     = document.getElementById('t-prize').value.trim();
+
+    msgEl.style.color   = '#94a3b8';
+    msgEl.textContent   = '⏳ Creating...';
+
+    const body = { title, mode, map: map_, date, time, entry_fee, max_players: max_p, prize_pool: prize };
+    if (tid) body.tournament_id = tid;
+
+    try {
+        const res  = await fetch(`${API}/admin/tournament`, {
+            method:  'POST',
+            headers: authHeaders(),
+            body:    JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            msgEl.style.color = '#4ade80';
+            msgEl.textContent = `✅ Tournament "${data.tournament_id}" created!`;
+            toast('✅ Tournament created!', 'ok');
+            // Clear form
+            ['t-id','t-title','t-date','t-time','t-prize'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            document.getElementById('t-fee').value  = '0';
+            document.getElementById('t-maxp').value = '50';
+            loadTournamentSection();
+        } else {
+            msgEl.style.color = '#e74c3c';
+            msgEl.textContent = '❌ ' + (data.message || 'Failed to create');
+            toast('❌ ' + (data.message || 'Failed'), 'err');
+        }
+    } catch(e) {
+        msgEl.style.color = '#e74c3c';
+        msgEl.textContent = '❌ Network error';
+        toast('❌ Network error', 'err');
+    }
+}
+
 // ── Broadcast ──
 async function sendBroadcast() {
     const msg = document.getElementById('bcast-msg').value.trim();
@@ -940,16 +1351,13 @@ async function sendBroadcast() {
 
 // ── Direct Message ──
 async function sendDM() {
-    const uid = document.getElementById('dm-uid').value.trim();
-    const msg = document.getElementById('dm-msg').value.trim();
+    const uid      = document.getElementById('dm-uid').value.trim();
+    const msg      = document.getElementById('dm-msg').value.trim();
     const resultEl = document.getElementById('dm-result');
-
     if (!uid) return toast('❌ User ID daalo', 'err');
     if (!msg) return toast('❌ Message khaali hai!', 'err');
-
     resultEl.style.color = '#94a3b8';
     resultEl.textContent = '⏳ Message bheja ja raha hai...';
-
     try {
         const res  = await fetch(`${API}/admin/send_dm`, {
             method:  'POST',
@@ -957,7 +1365,6 @@ async function sendDM() {
             body:    JSON.stringify({ user_id: parseInt(uid), message: msg })
         });
         const data = await res.json();
-
         if (data.status === 'success') {
             resultEl.style.color = '#4ade80';
             resultEl.textContent = '✅ ' + data.message;
