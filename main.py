@@ -396,6 +396,72 @@ def _cleanup_rate_cache() -> None:
 
 
 # ============================================================
+# 5a-2. TASK IDEMPOTENCY LOCK
+# ── Ek hi task submit request ek waqt mein process ho —
+# ── double-tap / network retry se duplicate reward nahi milega
+# ============================================================
+
+_task_idem_locks: dict[str, float] = {}   # key → acquired_at timestamp
+_task_idem_lock  = threading.Lock()
+_TASK_IDEM_TTL   = 6.0  # seconds — itne time ke baad auto-expire
+
+def _acquire_task_lock(key: str) -> bool:
+    """True = lock mila (proceed karo), False = already processing (reject karo)."""
+    now = time.time()
+    with _task_idem_lock:
+        expired = [k for k, ts in _task_idem_locks.items() if now - ts > _TASK_IDEM_TTL]
+        for k in expired:
+            del _task_idem_locks[k]
+        if key in _task_idem_locks:
+            return False
+        _task_idem_locks[key] = now
+        return True
+
+def _release_task_lock(key: str) -> None:
+    with _task_idem_lock:
+        _task_idem_locks.pop(key, None)
+
+
+# ============================================================
+# 5a-3. SUSPICIOUS ACTIVITY FLAG
+# ── Baar baar already-completed task claim karne ki koshish
+# ── silently MongoDB mein flag — admin ko dikhta hai, user ko nahi
+# ============================================================
+
+_SUSPICIOUS_ALREADY_DONE_THRESHOLD = 5  # itni baar try karne par flag
+_susp_attempt_cache: dict[str, int] = {}  # f"{user_id}_{task_id}" → count
+_susp_attempt_lock  = threading.Lock()
+
+def _record_suspicious_attempt(user_id: int, reason: str) -> None:
+    """User ko MongoDB mein silently flag karo — background thread mein."""
+    def _do_flag():
+        try:
+            users_col.update_one(
+                {"user_id": user_id},
+                {"$set":  {"suspicious_activity": True},
+                 "$push": {"suspicious_reasons": {
+                     "reason": reason,
+                     "at":     datetime.utcnow(),
+                 }}},
+            )
+            logger.warning("Suspicious activity flagged: user=%s reason=%s", user_id, reason)
+        except Exception as exc:
+            logger.error("_record_suspicious_attempt error: %s", exc)
+    Thread(target=_do_flag, daemon=True).start()
+
+def _check_and_flag_already_done(user_id: int, task_id: str) -> None:
+    """Already-complete task par baar baar try karne par flag karo."""
+    key = f"{user_id}_{task_id}"
+    with _susp_attempt_lock:
+        _susp_attempt_cache[key] = _susp_attempt_cache.get(key, 0) + 1
+        count = _susp_attempt_cache[key]
+    if count >= _SUSPICIOUS_ALREADY_DONE_THRESHOLD:
+        _record_suspicious_attempt(user_id, f"repeated_task_claim:{task_id}:{count}x")
+        with _susp_attempt_lock:
+            _susp_attempt_cache[key] = 0  # counter reset
+
+
+# ============================================================
 # 5b. SECURITY — IP RATE LIMIT + SUSPICIOUS ACTIVITY + ADMIN LOCKOUT
 # ============================================================
 
@@ -1633,6 +1699,14 @@ def withdraw_api():
                 "message": f"You need {5 - ref_count} more referral(s) to unlock withdrawal.",
             }), 400
 
+    # ── Withdrawal Duplicate Guard — ek pending request hote hue doosra nahi jayega ──
+    _existing_pending = withdrawals_col.find_one({"user_id": user_id, "status": "Pending \u23f3"})
+    if _existing_pending:
+        return jsonify({
+            "status":  "error",
+            "message": "Aapki ek withdrawal request already pending hai. Pehle approve/reject hone ka wait karo.",
+        }), 400
+
     result = users_col.find_one_and_update(
         {"user_id": user_id, "coins": {"$gte": requested_amount}, "blocked": {"$ne": True}},
         {"$inc": {"coins": -requested_amount}},
@@ -1748,6 +1822,11 @@ def verify_task_api():
     if is_rate_limited(f"task_{user_id}_{task_id}", 10):
         return jsonify({"status": "error", "message": "Please wait 10 seconds before trying again."}), 429
 
+    # ── Idempotency Lock — double-tap / network retry se duplicate reward nahi milega ──
+    _idem_key = f"task_{user_id}_{task_id}"
+    if not _acquire_task_lock(_idem_key):
+        return jsonify({"status": "error", "message": "Request already being processed. Please wait."}), 429
+
     reward = TASK_REWARDS.get(task_id)
     if reward is None:
         return jsonify({"status": "error", "message": "Invalid task ID."}), 400
@@ -1755,13 +1834,16 @@ def verify_task_api():
     correct_code = get_live_task_codes().get(task_id, "").upper()
     if user_code != correct_code:
         record_task_fail(user_id, task_id)
+        _release_task_lock(_idem_key)
         return jsonify({"status": "error", "message": "Incorrect code! Please try again."}), 400
 
     try:
         user = users_col.find_one({"user_id": user_id})
         if not user:
+            _release_task_lock(_idem_key)
             return jsonify({"status": "error", "message": "User not found."}), 404
         if user.get("blocked"):
+            _release_task_lock(_idem_key)
             return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
 
         today            = str(date.today())
@@ -1771,6 +1853,8 @@ def verify_task_api():
 
         if task_id in ONE_TIME_TASK_IDS:
             if isinstance(existing, dict) and existing.get("code") == correct_code:
+                _check_and_flag_already_done(user_id, task_id)
+                _release_task_lock(_idem_key)
                 return jsonify({"status": "error", "message": "You have already completed this task!"}), 400
         else:
             if (
@@ -1778,6 +1862,8 @@ def verify_task_api():
                 and existing.get("date") == today
                 and existing.get("code") == correct_code
             ):
+                _check_and_flag_already_done(user_id, task_id)
+                _release_task_lock(_idem_key)
                 return jsonify({
                     "status":  "error",
                     "message": "Task already completed today! Come back tomorrow.",
@@ -1786,6 +1872,7 @@ def verify_task_api():
         if task_id.startswith("yt"):
             done_today = count_task_type_completions_today(task_completions, "yt", today, live_codes)
             if done_today >= MAX_YT_TASKS_PER_DAY:
+                _release_task_lock(_idem_key)
                 return jsonify({
                     "status":  "error",
                     "message": f"Daily YouTube task limit reached ({MAX_YT_TASKS_PER_DAY}/{MAX_YT_TASKS_PER_DAY}). Come back tomorrow!",
@@ -1793,6 +1880,7 @@ def verify_task_api():
         elif task_id.startswith("web"):
             done_today = count_task_type_completions_today(task_completions, "web", today, live_codes)
             if done_today >= MAX_WEB_TASKS_PER_DAY:
+                _release_task_lock(_idem_key)
                 return jsonify({
                     "status":  "error",
                     "message": f"Daily website task limit reached ({MAX_WEB_TASKS_PER_DAY}/{MAX_WEB_TASKS_PER_DAY}). Come back tomorrow!",
@@ -1826,8 +1914,11 @@ def verify_task_api():
             {"$inc": {"coins": reward}, "$set": {completion_field: completion_record}},
         )
         if upd.modified_count == 0:
+            _check_and_flag_already_done(user_id, task_id)
+            _release_task_lock(_idem_key)
             return jsonify({"status": "error", "message": "Task already completed."}), 400
 
+        _release_task_lock(_idem_key)
         clear_task_fail_counter(user_id, task_id)
         # Referral commission — non-blocking, 10% to sponsor
         _fire_commission(user_id, reward, "task", f"task_{user_id}_{task_id}_{today}_{correct_code}")
@@ -6311,13 +6402,8 @@ def cmd_create_tournament(message):
 
 @bot.message_handler(commands=["tournamentstatus"])
 def cmd_tournament_status(message):
-    """Admin: /tournamentstatus <status> — Tournament ka status change karo.
-    Options:
-      coming_soon         — Announcement only, registration band
-      registration_open   — Users register kar sakte hain ✅
-      registration_closed — Registration band, match abhi baki
-      match_live          — Match chal raha hai 🔴
-      completed           — Tournament khatam 🏁
+    """Admin: /tournamentstatus <tournament_id> <status>
+    Example: /tournamentstatus t_123456 registration_open
     """
     if int(message.from_user.id) != ADMIN_ID:
         return
@@ -6330,29 +6416,41 @@ def cmd_tournament_status(message):
         "completed":           "🏁 Completed",
     }
     parts = message.text.split()
-    if len(parts) < 2 or parts[1] not in valid:
-        opts = "\n".join([f"  `{k}` — {v}" for k, v in valid.items()])
+    if len(parts) < 3 or parts[2] not in valid:
+        opts = "\n".join([f"  `{k}`" for k in valid])
         return bot.reply_to(
             message,
-            f"📋 *Usage:* `/tournamentstatus <status>`\n\n*Valid options:*\n{opts}",
+            "📋 *Usage:*\n"
+            "`/tournamentstatus <tournament_id> <status>`\n\n"
+            f"*Valid statuses:*\n{opts}\n\n"
+            "Tournament IDs dekhne ke liye: `/listtournaments`",
             parse_mode="Markdown",
         )
 
-    status = parts[1]
+    tid    = parts[1].strip()
+    status = parts[2].strip()
     try:
-        res = tournaments_col.update_one({"active": True}, {"$set": {"status": status}})
+        res = tournaments_col.update_one(
+            {"tournament_id": tid, "active": True},
+            {"$set": {"status": status}},
+        )
         if res.matched_count == 0:
-            return bot.reply_to(message, "❌ Koi active tournament nahi mila. Pehle `/createtournament` karo.", parse_mode="Markdown")
+            return bot.reply_to(
+                message,
+                f"❌ Tournament `{tid}` nahi mila.\nIDs dekhne ke liye: `/listtournaments`",
+                parse_mode="Markdown",
+            )
         bot.reply_to(
             message,
-            f"✅ *Tournament Status Updated!*\n\n"
+            f"✅ *Status Updated!*\n\n"
+            f"🆔 Tournament: `{tid}`\n"
             f"New Status: *{valid[status]}*\n\n"
             f"{'🎉 Users ab register kar sakte hain!' if status == 'registration_open' else ''}"
             f"{'🔴 Match live ho gaya! All the best to players!' if status == 'match_live' else ''}"
-            f"{'🏁 Tournament complete. `/setwinners` se winners announce karo!' if status == 'completed' else ''}",
+            f"{'🏁 Complete. `/setwinners {tid}` se winners announce karo!' if status == 'completed' else ''}",
             parse_mode="Markdown",
         )
-        logger.info("Admin set tournament status → %s", status)
+        logger.info("Admin set tournament %s status → %s", tid, status)
     except Exception as exc:
         logger.error("cmd_tournament_status error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
@@ -6360,13 +6458,28 @@ def cmd_tournament_status(message):
 
 @bot.message_handler(commands=["tournamentinfo"])
 def cmd_tournament_info(message):
-    """Admin: /tournamentinfo — Active tournament ki full details dekho."""
+    """Admin: /tournamentinfo <tournament_id> — Tournament ki full details dekho.
+    IDs dekhne ke liye: /listtournaments
+    """
     if int(message.from_user.id) != ADMIN_ID:
         return
+    parts = message.text.split()
+    if len(parts) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/tournamentinfo <tournament_id>`\n\n"
+            "Tournament IDs dekhne ke liye: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
     try:
-        t = tournaments_col.find_one({"active": True})
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
         if not t:
-            return bot.reply_to(message, "❌ Koi active tournament nahi hai. `/createtournament` se banao.", parse_mode="Markdown")
+            return bot.reply_to(
+                message,
+                f"❌ Tournament `{tid}` nahi mila.\n`/listtournaments` se IDs dekho.",
+                parse_mode="Markdown",
+            )
 
         status_labels = {
             "coming_soon":         "📣 Coming Soon",
@@ -6375,11 +6488,8 @@ def cmd_tournament_info(message):
             "match_live":          "🔴 Match Live",
             "completed":           "🏁 Completed",
         }
-        reg_count  = tournament_registrations_col.count_documents({"tournament_id": t["tournament_id"]}) \
-                     if hasattr(tournament_registrations_col, "count_documents") \
-                     else 0
         try:
-            reg_count = tournament_registrations_col.count_documents({"tournament_id": t["tournament_id"]})
+            reg_count = tournament_registrations_col.count_documents({"tournament_id": tid})
         except Exception:
             reg_count = 0
 
@@ -6388,7 +6498,7 @@ def cmd_tournament_info(message):
             message,
             f"🏆 *Tournament Info*\n\n"
             f"📌 *Status:* {status_str}\n"
-            f"🆔 *ID:* `{t.get('tournament_id', 'N/A')}`\n"
+            f"🆔 *ID:* `{tid}`\n"
             f"🎮 *Title:* {t.get('title', 'N/A')}\n"
             f"⚔️ *Mode:* {t.get('mode', 'N/A')}  |  🗺 *Map:* {t.get('map', 'N/A')}\n"
             f"📅 *Date:* {t.get('date', 'N/A')}  |  ⏰ *Time:* {t.get('time', 'N/A')}\n"
@@ -6396,11 +6506,12 @@ def cmd_tournament_info(message):
             f"👥 *Max Players:* {t.get('max_players', 'N/A')}\n"
             f"🏅 *Prize Pool:* {t.get('prize_pool', 'N/A')}\n"
             f"📝 *Registered:* {reg_count} players\n\n"
-            f"*Commands:*\n"
-            f"• `/tournamentstatus <status>` — Status change karo\n"
-            f"• `/tournamentregs` — Registered players dekho\n"
-            f"• `/setwinners` — Winners announce karo\n"
-            f"• `/canceltournament` — Tournament cancel karo",
+            f"*Commands for this tournament:*\n"
+            f"• `/tournamentstatus {tid} <status>`\n"
+            f"• `/tournamentregs {tid}`\n"
+            f"• `/setwinners {tid} Nick:Reward | ...`\n"
+            f"• `/setroomid {tid} RoomID | Password`\n"
+            f"• `/canceltournament {tid}`",
             parse_mode="Markdown",
         )
     except Exception as exc:
@@ -6413,20 +6524,28 @@ def cmd_tournament_regs(message):
     """Admin: /tournamentregs — Active tournament ke registered players dekho."""
     if int(message.from_user.id) != ADMIN_ID:
         return
+    parts = message.text.split()
+    if len(parts) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/tournamentregs <tournament_id>`\n\nIDs dekhne ke liye: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
     try:
-        t = tournaments_col.find_one({"active": True})
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
         if not t:
-            return bot.reply_to(message, "❌ Koi active tournament nahi hai.")
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.\n`/listtournaments` se IDs dekho.", parse_mode="Markdown")
 
         regs = list(tournament_registrations_col.find(
-            {"tournament_id": t["tournament_id"]},
+            {"tournament_id": tid},
             {"_id": 0, "user_id": 1, "ff_uid": 1, "ff_nickname": 1, "registered_at": 1}
         ).sort("registered_at", 1).limit(50))
 
         if not regs:
-            return bot.reply_to(message, f"📋 *{t.get('title', 'Tournament')}*\n\nAbhi tak koi registration nahi aaya.", parse_mode="Markdown")
+            return bot.reply_to(message, f"📋 *{t.get('title', 'Tournament')}* `[{tid}]`\n\nAbhi tak koi registration nahi aaya.", parse_mode="Markdown")
 
-        lines = [f"📋 *{t.get('title', 'Tournament')} — Registrations ({len(regs)})*\n"]
+        lines = [f"📋 *{t.get('title', 'Tournament')} — Registrations ({len(regs)})*\n🆔 `{tid}`\n"]
         for i, r in enumerate(regs, 1):
             reg_time = ""
             if r.get("registered_at"):
@@ -6440,7 +6559,6 @@ def cmd_tournament_regs(message):
                 + (f"  |  {reg_time}" if reg_time else "")
             )
 
-        # Telegram message 4096 char limit ke andar rakhna
         msg = "\n".join(lines)
         if len(msg) > 4000:
             msg = msg[:3980] + "\n\n_...aur bhi hain — pehle 50 dikha rahe hain._"
@@ -6453,37 +6571,39 @@ def cmd_tournament_regs(message):
 
 @bot.message_handler(commands=["setwinners"])
 def cmd_set_winners(message):
-    """Admin: /setwinners — Tournament winners announce karo aur coins do.
-    Format:
-      /setwinners Nickname:Reward | Nickname:Reward | Nickname:Reward
+    """Admin: /setwinners <tournament_id> Nick:Reward | Nick:Reward | Nick:Reward
     Example:
-      /setwinners ProSniper:2000 coins | TeamAlpha:1500 coins | FastKill:1000 coins
-    Note: Coins automatically users ko nahi milenge — manually /addcoins use karo.
+      /setwinners t_123456 ProSniper:2000 coins | TeamAlpha:1500 coins | FastKill:1000 coins
     """
     if int(message.from_user.id) != ADMIN_ID:
         return
 
     text  = message.text or ""
-    parts = text.split(None, 1)
-    if len(parts) < 2:
+    parts = text.split(None, 2)
+    if len(parts) < 3:
         return bot.reply_to(
             message,
             "📋 *Usage:*\n"
-            "`/setwinners Nickname:Reward | Nickname:Reward | Nickname:Reward`\n\n"
+            "`/setwinners <tournament_id> Nick:Reward | Nick:Reward | Nick:Reward`\n\n"
             "*Example:*\n"
-            "`/setwinners ProSniper:2000 coins | TeamAlpha:1500 coins | FastKill:1000 coins`\n\n"
-            "⚠️ Maximum 3 winners. `|` se alag karo.",
+            "`/setwinners t_123456 ProSniper:2000 coins | TeamAlpha:1500 coins`\n\n"
+            "IDs dekhne ke liye: `/listtournaments`",
             parse_mode="Markdown",
         )
 
+    tid         = parts[1].strip()
+    winners_raw = parts[2]
+
     try:
-        t = tournaments_col.find_one({"active": True})
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
         if not t:
-            return bot.reply_to(message, "❌ Koi active tournament nahi hai.")
+            return bot.reply_to(
+                message,
+                f"❌ Tournament `{tid}` nahi mila.\n`/listtournaments` se IDs dekho.",
+                parse_mode="Markdown",
+            )
 
-        tid    = t["tournament_id"]
-        entries = [e.strip() for e in parts[1].split("|") if e.strip()][:3]
-
+        entries = [e.strip() for e in winners_raw.split("|") if e.strip()][:3]
         if not entries:
             return bot.reply_to(message, "❌ Kam se kam 1 winner dena hai.")
 
@@ -6511,14 +6631,13 @@ def cmd_set_winners(message):
         tournament_winners_col.delete_many({"tournament_id": tid})
         tournament_winners_col.insert_many(winners_docs)
 
-        # Tournament status completed karo
-        tournaments_col.update_one({"active": True}, {"$set": {"status": "completed"}})
+        tournaments_col.update_one({"tournament_id": tid}, {"$set": {"status": "completed"}})
 
         winners_text = "\n".join(winner_lines)
         bot.reply_to(
             message,
             f"🏆 *Winners Announced!*\n\n"
-            f"*{t.get('title', 'Tournament')}*\n\n"
+            f"*{t.get('title', 'Tournament')}* `[{tid}]`\n\n"
             f"{winners_text}\n\n"
             f"✅ Tournament status: *Completed*\n\n"
             f"⚠️ Coins manually dene ke liye:\n`/addcoins <user_id> <amount>`",
@@ -6532,50 +6651,56 @@ def cmd_set_winners(message):
 
 @bot.message_handler(commands=["setroomid"])
 def cmd_set_room_id(message):
-    """Admin: /setroomid RoomID | Password — Match ka Room ID aur Password set karo.
+    """Admin: /setroomid <tournament_id> RoomID | Password
     Example:
-      /setroomid ABC123 | pass456
+      /setroomid t_123456 ABC123 | pass456
     """
     if int(message.from_user.id) != ADMIN_ID:
         return
     text  = message.text or ""
-    parts = text.split(None, 1)
-    if len(parts) < 2 or "|" not in parts[1]:
+    parts = text.split(None, 2)
+    if len(parts) < 3 or "|" not in parts[2]:
         return bot.reply_to(
             message,
             "📋 *Usage:*\n"
-            "`/setroomid RoomID | Password`\n\n"
+            "`/setroomid <tournament_id> RoomID | Password`\n\n"
             "*Example:*\n"
-            "`/setroomid ABC123 | pass456`",
+            "`/setroomid t_123456 ABC123 | pass456`\n\n"
+            "IDs dekhne ke liye: `/listtournaments`",
             parse_mode="Markdown",
         )
-    fields = [f.strip() for f in parts[1].split("|", 1)]
+    tid    = parts[1].strip()
+    fields = [f.strip() for f in parts[2].split("|", 1)]
     if len(fields) < 2 or not fields[0] or not fields[1]:
-        return bot.reply_to(message, "❌ Room ID aur Password dono dena zaroori hai.\nExample: `/setroomid ABC123 | pass456`", parse_mode="Markdown")
+        return bot.reply_to(message, "❌ RoomID aur Password dono chahiye.\nExample: `/setroomid t_123456 ABC123 | pass456`", parse_mode="Markdown")
 
     room_id       = fields[0][:50]
     room_password = fields[1][:50]
     try:
-        t = tournaments_col.find_one({"active": True})
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
         if not t:
-            return bot.reply_to(message, "❌ Koi active tournament nahi hai. Pehle `/createtournament` karo.", parse_mode="Markdown")
+            return bot.reply_to(
+                message,
+                f"❌ Tournament `{tid}` nahi mila.\n`/listtournaments` se IDs dekho.",
+                parse_mode="Markdown",
+            )
 
         tournaments_col.update_one(
-            {"active": True},
+            {"tournament_id": tid},
             {"$set": {"room_id": room_id, "room_password": room_password}},
         )
         bot.reply_to(
             message,
             f"✅ *Room Credentials Set!*\n\n"
-            f"🏷 *Tournament:* {t.get('title', 'N/A')}\n"
+            f"🏷 *Tournament:* {t.get('title', 'N/A')} `[{tid}]`\n"
             f"🆔 *Room ID:* `{room_id}`\n"
             f"🔑 *Password:* `{room_password}`\n\n"
             f"⚠️ Room details sirf registered users ko match live hone par dikhenge.\n"
             f"Match live karne ke liye:\n"
-            f"`/tournamentstatus match_live`",
+            f"`/tournamentstatus {tid} match_live`",
             parse_mode="Markdown",
         )
-        logger.info("Admin set room credentials for tournament %s: room_id=%s", t.get("tournament_id"), room_id)
+        logger.info("Admin set room credentials for tournament %s: room_id=%s", tid, room_id)
     except Exception as exc:
         logger.error("cmd_set_room_id error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
@@ -6583,23 +6708,89 @@ def cmd_set_room_id(message):
 
 @bot.message_handler(commands=["canceltournament"])
 def cmd_cancel_tournament(message):
-    """Admin: /canceltournament — Active tournament ko cancel/deactivate karo."""
+    """Admin: /canceltournament <tournament_id> — Tournament ko cancel/deactivate karo."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/canceltournament <tournament_id>`\n\nIDs dekhne ke liye: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    try:
+        res = tournaments_col.update_one(
+            {"tournament_id": tid, "active": True},
+            {"$set": {"active": False, "status": "completed"}},
+        )
+        if res.matched_count == 0:
+            return bot.reply_to(
+                message,
+                f"❌ Tournament `{tid}` nahi mila ya already inactive hai.\n`/listtournaments` se check karo.",
+                parse_mode="Markdown",
+            )
+        bot.reply_to(
+            message,
+            f"🚫 *Tournament Cancelled!*\n\n"
+            f"🆔 `{tid}` deactivate ho gaya.\n"
+            f"Naya tournament banane ke liye `/createtournament` use karo.",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin cancelled tournament: %s", tid)
+    except Exception as exc:
+        logger.error("cmd_cancel_tournament error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["listtournaments"])
+def cmd_list_tournaments(message):
+    """Admin: /listtournaments — Saare active tournaments aur unke IDs dekho."""
     if int(message.from_user.id) != ADMIN_ID:
         return
     try:
-        res = tournaments_col.update_one({"active": True}, {"$set": {"active": False, "status": "completed"}})
-        if res.matched_count == 0:
-            return bot.reply_to(message, "❌ Koi active tournament nahi mila.")
-        bot.reply_to(
-            message,
-            "🚫 *Tournament Cancelled!*\n\n"
-            "Tournament deactivate ho gaya.\n"
-            "Naya tournament banane ke liye `/createtournament` use karo.",
-            parse_mode="Markdown",
+        all_t = list(tournaments_col.find({"active": True}, {"_id": 0}).sort("created_at", -1))
+        if not all_t:
+            return bot.reply_to(
+                message,
+                "📋 Koi active tournament nahi hai.\nNaya banane ke liye `/createtournament` use karo.",
+                parse_mode="Markdown",
+            )
+
+        status_labels = {
+            "coming_soon":         "🔜 Coming Soon",
+            "registration_open":   "✅ Open",
+            "registration_closed": "🔒 Closed",
+            "match_live":          "🔴 Live",
+            "completed":           "🏆 Done",
+        }
+        lines = [f"📋 *Active Tournaments ({len(all_t)}/{MAX_TOURNAMENTS})*\n"]
+        for t in all_t:
+            tid    = t.get("tournament_id", "?")
+            title  = t.get("title", "Untitled")
+            status = status_labels.get(t.get("status", ""), t.get("status", ""))
+            try:
+                reg_cnt = tournament_registrations_col.count_documents({"tournament_id": tid})
+            except Exception:
+                reg_cnt = 0
+            lines.append(
+                f"🏆 *{title}*\n"
+                f"   ID: `{tid}`\n"
+                f"   Status: {status}  |  👥 {reg_cnt} registered"
+            )
+
+        lines.append(
+            "\n*Commands:*\n"
+            "• `/tournamentinfo <id>` — Full details\n"
+            "• `/tournamentstatus <id> <status>` — Status change\n"
+            "• `/setroomid <id> RoomID | Pass` — Room set\n"
+            "• `/setwinners <id> Nick:Reward | ...` — Winners\n"
+            "• `/tournamentregs <id>` — Registered players\n"
+            "• `/canceltournament <id>` — Cancel"
         )
-        logger.info("Admin cancelled active tournament.")
+        bot.reply_to(message, "\n\n".join(lines), parse_mode="Markdown")
     except Exception as exc:
-        logger.error("cmd_cancel_tournament error: %s", exc)
+        logger.error("cmd_list_tournaments error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
