@@ -2785,7 +2785,7 @@ function _renderTournamentTabs() {
         const isSelected = t.tournament_id === _selectedTid;
         const emoji = statusEmoji[t.status] || '🔜';
         tabsHtml += `<button
-            onclick="selectTournamentTab('${_esc(t.tournament_id)}')"
+            onclick="event.stopPropagation(); selectTournamentTab('${_esc(t.tournament_id)}')"
             style="flex-shrink:0;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;border:1.5px solid ${isSelected ? '#f1c40f' : 'rgba(255,255,255,0.12)'};background:${isSelected ? 'rgba(241,196,15,0.15)' : 'rgba(255,255,255,0.04)'};color:${isSelected ? '#f1c40f' : '#94a3b8'};white-space:nowrap;transition:all 0.2s;"
         >${emoji} ${_esc(t.title || t.tournament_id)}</button>`;
     });
