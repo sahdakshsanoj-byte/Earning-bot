@@ -422,7 +422,11 @@
             <div class="t-form-grid">
                 <div class="t-form-row">
                     <label>Mode</label>
-                    <input class="t-form-input" id="t-mode" placeholder="Squad" value="Squad">
+                    <select class="t-form-input" id="t-mode">
+                        <option value="Solo">Solo</option>
+                        <option value="Duo">Duo</option>
+                        <option value="Squad" selected>Squad</option>
+                    </select>
                 </div>
                 <div class="t-form-row">
                     <label>Map</label>
@@ -446,8 +450,23 @@
                 </div>
             </div>
             <div class="t-form-row">
-                <label>Prize Pool Description</label>
-                <input class="t-form-input" id="t-prize" placeholder="1st: 500 coins | 2nd: 300 coins | 3rd: 200 coins">
+                <label>Prize Pool (General Description)</label>
+                <input class="t-form-input" id="t-prize" placeholder="e.g. Total 15000 Coins">
+            </div>
+            <div style="margin-top:8px;">
+                <label style="font-size:12px;font-weight:700;color:#94a3b8;display:block;margin-bottom:6px;">🏅 Individual Prizes (optional — users ko dikhega)</label>
+                <div style="display:flex;gap:6px;margin-bottom:6px;">
+                    <span style="font-size:18px;line-height:32px;">🥇</span>
+                    <input class="t-form-input" id="t-prize-1st" placeholder="1st Place Prize (e.g. 5000 Coins)" style="margin:0;">
+                </div>
+                <div style="display:flex;gap:6px;margin-bottom:6px;">
+                    <span style="font-size:18px;line-height:32px;">🥈</span>
+                    <input class="t-form-input" id="t-prize-2nd" placeholder="2nd Place Prize (e.g. 3000 Coins)" style="margin:0;">
+                </div>
+                <div style="display:flex;gap:6px;">
+                    <span style="font-size:18px;line-height:32px;">🥉</span>
+                    <input class="t-form-input" id="t-prize-3rd" placeholder="3rd Place Prize (e.g. 1000 Coins)" style="margin:0;">
+                </div>
             </div>
             <p id="t-create-msg" style="font-size:12px; min-height:18px; margin:8px 0 4px; text-align:center;"></p>
             <button class="btn-save" onclick="createTournament()">➕ Create Tournament</button>
@@ -1286,12 +1305,21 @@ async function createTournament() {
     const time      = document.getElementById('t-time').value.trim();
     const entry_fee = parseInt(document.getElementById('t-fee').value)  || 0;
     const max_p     = parseInt(document.getElementById('t-maxp').value) || 50;
-    const prize     = document.getElementById('t-prize').value.trim();
+    const prize      = document.getElementById('t-prize').value.trim();
+    const prize1st   = document.getElementById('t-prize-1st')?.value.trim() || '';
+    const prize2nd   = document.getElementById('t-prize-2nd')?.value.trim() || '';
+    const prize3rd   = document.getElementById('t-prize-3rd')?.value.trim() || '';
+
+    // Build prizes array from filled fields
+    const prizesArr = [];
+    if (prize1st) prizesArr.push({ rank: 1, label: '1st Place', prize: prize1st });
+    if (prize2nd) prizesArr.push({ rank: 2, label: '2nd Place', prize: prize2nd });
+    if (prize3rd) prizesArr.push({ rank: 3, label: '3rd Place', prize: prize3rd });
 
     msgEl.style.color   = '#94a3b8';
     msgEl.textContent   = '⏳ Creating...';
 
-    const body = { title, mode, map: map_, date, time, entry_fee, max_players: max_p, prize_pool: prize };
+    const body = { title, mode, map: map_, date, time, entry_fee, max_players: max_p, prize_pool: prize, prizes: prizesArr };
     if (tid) body.tournament_id = tid;
 
     try {
@@ -1306,7 +1334,7 @@ async function createTournament() {
             msgEl.textContent = `✅ Tournament "${data.tournament_id}" created!`;
             toast('✅ Tournament created!', 'ok');
             // Clear form
-            ['t-id','t-title','t-date','t-time','t-prize'].forEach(id => {
+            ['t-id','t-title','t-date','t-time','t-prize','t-prize-1st','t-prize-2nd','t-prize-3rd'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.value = '';
             });
