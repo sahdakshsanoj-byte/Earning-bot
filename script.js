@@ -2897,21 +2897,32 @@ function _renderTournament(t, winners) {
 
     html += '<div class="t-body">';
 
-    // ── Prize pool section
-    html += `
-    <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 8px;">🎁 Prize Rewards</p>
-    <div class="t-prize-card">
-        <span class="t-prize-medal">🥇</span>
-        <div><p class="t-prize-name">Champion</p><p class="t-prize-reward">Google Play Redeem Code ₹100</p></div>
-    </div>
-    <div class="t-prize-card">
-        <span class="t-prize-medal">🥈</span>
-        <div><p class="t-prize-name">Runner Up</p><p class="t-prize-reward">Google Play Redeem Code ₹50</p></div>
-    </div>
-    <div class="t-prize-card">
-        <span class="t-prize-medal">🥉</span>
-        <div><p class="t-prize-name">Third Place</p><p class="t-prize-reward">Google Play Redeem Code ₹20</p></div>
-    </div>`;
+    // ── Prize pool section (dynamic)
+    const _prizes    = t.prizes || [];
+    const _rankEmoji = { 1: '🥇', 2: '🥈', 3: '🥉' };
+    const _rankName  = { 1: 'Champion', 2: 'Runner Up', 3: 'Third Place' };
+
+    if (_prizes.length > 0) {
+        html += `<p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 8px;">🎁 Prize Rewards</p>`;
+        _prizes.forEach(p => {
+            const rank = p.rank || 1;
+            html += `
+            <div class="t-prize-card">
+                <span class="t-prize-medal">${_rankEmoji[rank] || '🏅'}</span>
+                <div>
+                    <p class="t-prize-name">${_esc(_rankName[rank] || p.label || 'Winner')}</p>
+                    <p class="t-prize-reward">${_esc(p.prize || '—')}</p>
+                </div>
+            </div>`;
+        });
+    } else if (t.prize_pool) {
+        html += `
+        <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 8px;">🎁 Prize Pool</p>
+        <div style="background:linear-gradient(135deg,rgba(241,196,15,0.08),rgba(251,146,60,0.05));border:1px solid rgba(241,196,15,0.25);border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:10px;">
+            <span style="font-size:26px;">🏆</span>
+            <p style="font-size:15px;font-weight:800;color:#f1c40f;margin:0;">${_esc(t.prize_pool)}</p>
+        </div>`;
+    }
 
     // ── Winners section (only if completed)
     if (t.status === 'completed' && winners && winners.length > 0) {
@@ -2945,37 +2956,116 @@ function _renderTournament(t, winners) {
         </div>`;
 
     } else if (t.status === 'registration_open') {
-        const reg = _tournamentRegCache[_selectedTid] || { registered: false };
+        const reg      = _tournamentRegCache[_selectedTid] || { registered: false };
+        const _tmode   = (t.mode || 'Solo').toLowerCase();
+        const isSquad  = _tmode === 'squad';
+        const isDuo    = _tmode === 'duo';
+        const isTeam   = isSquad || isDuo;
+
         if (reg && reg.registered) {
-            // Already registered
+            // ── Already registered ──
+            const rd = reg.data || {};
+            let regDetails = '';
+            if (rd.registration_type === 'squad' || rd.registration_type === 'duo' || isTeam) {
+                const members = rd.members || [];
+                const memberRows = members.map((m, i) =>
+                    `<p style="font-size:11px;color:#94a3b8;margin:2px 0;">
+                        <span style="color:#64748b;">M${i+1}:</span>
+                        <b style="color:#e2e8f0;">${_esc(m.ff_nickname||'')}</b>
+                        <span style="color:#475569;"> · ${_esc(m.ff_uid||'')}</span>
+                    </p>`
+                ).join('');
+                regDetails = `
+                    <p style="font-size:13px;font-weight:800;color:#f1c40f;margin:4px 0 6px;">🛡️ Team: ${_esc(rd.team_name||'')}</p>
+                    <div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:8px 10px;margin-bottom:4px;">${memberRows}</div>`;
+            } else {
+                regDetails = `<p style="font-size:12px;color:#64748b;margin:4px 0 0;">FF UID: <b style="color:#e2e8f0;">${_esc(rd.ff_uid||'')}</b> &nbsp;·&nbsp; Nick: <b style="color:#e2e8f0;">${_esc(rd.ff_nickname||'')}</b></p>`;
+            }
             html += `
             <div class="t-registered-badge">
                 <span style="font-size:28px;display:block;margin-bottom:6px;">✅</span>
-                <p style="font-size:15px;font-weight:800;color:#4ade80;margin:0 0 4px;">You're Registered!</p>
-                <p style="font-size:12px;color:#64748b;margin:0;">FF UID: <b style="color:#e2e8f0;">${_esc(reg.data && reg.data.ff_uid||'')}</b> &nbsp;·&nbsp; Nick: <b style="color:#e2e8f0;">${_esc(reg.data && reg.data.ff_nickname||'')}</b></p>
-                <p style="font-size:11px;color:#475569;margin-top:4px;">Registered on ${_esc(reg.data && reg.data.registered_at||'')}</p>
+                <p style="font-size:15px;font-weight:800;color:#4ade80;margin:0 0 2px;">You're Registered!</p>
+                ${regDetails}
+                <p style="font-size:11px;color:#475569;margin-top:6px;">Registered on ${_esc(rd.registered_at||'')}</p>
             </div>
             <p style="font-size:11px;color:#64748b;text-align:center;margin-top:8px;">Room credentials will be shared before the match. Stay alert!</p>`;
+
         } else {
-            // Registration form
+            // ── Registration form ──
             const fee = t.entry_fee || 0;
-            html += `
-            <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">📝 Register Now</p>
-            ${fee > 0 ? `
-            <div style="background:rgba(241,196,15,0.07);border:1px solid rgba(241,196,15,0.30);border-radius:12px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;">
-                <span style="font-size:24px;">💰</span>
-                <div>
-                    <p style="font-size:13px;font-weight:800;color:#f1c40f;margin:0;">Entry Fee: ${fee} Coins</p>
-                    <p style="font-size:11px;color:#94a3b8;margin:3px 0 0;">Yeh coins aapke balance se automatically kaat liye jayenge registration ke time.</p>
-                </div>
-            </div>` : `
-            <div style="background:rgba(74,222,128,0.05);border:1px solid rgba(74,222,128,0.15);border-radius:12px;padding:12px;margin-bottom:12px;">
-                <p style="font-size:12px;color:#94a3b8;margin:0;">🎮 Enter your Free Fire details to join the tournament.</p>
-            </div>`}
-            <input class="t-input" id="t-ff-uid"      type="text" inputmode="numeric" placeholder="Free Fire UID (e.g. 123456789)" maxlength="20" />
-            <input class="t-input" id="t-ff-nickname" type="text" placeholder="In-Game Nickname" maxlength="30" />
-            <p id="t-reg-msg" style="font-size:12px;color:#94a3b8;min-height:18px;margin:0 0 10px;text-align:center;"></p>
-            <button class="t-reg-btn" id="t-reg-btn" onclick="registerForTournament()">${fee > 0 ? `🎯 Register & Pay ${fee} 🪙` : '🎯 Register for Tournament'}</button>`;
+            const feeBox = fee > 0
+                ? `<div style="background:rgba(241,196,15,0.07);border:1px solid rgba(241,196,15,0.30);border-radius:12px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;">
+                    <span style="font-size:24px;">💰</span>
+                    <div>
+                        <p style="font-size:13px;font-weight:800;color:#f1c40f;margin:0;">Entry Fee: ${fee} Coins</p>
+                        <p style="font-size:11px;color:#94a3b8;margin:3px 0 0;">Yeh coins aapke balance se automatically kaat liye jayenge registration ke time.</p>
+                    </div>
+                  </div>`
+                : `<div style="background:rgba(74,222,128,0.05);border:1px solid rgba(74,222,128,0.15);border-radius:12px;padding:12px;margin-bottom:12px;">
+                    <p style="font-size:12px;color:#94a3b8;margin:0;">🎮 Enter your Free Fire details to join the tournament.</p>
+                   </div>`;
+
+            const btnLabel = fee > 0
+                ? (isDuo ? `🤝 Register Duo & Pay ${fee} 🪙` : isSquad ? `🛡️ Register Squad & Pay ${fee} 🪙` : `🎯 Register & Pay ${fee} 🪙`)
+                : (isDuo ? '🤝 Register Duo' : isSquad ? '🛡️ Register Squad' : '🎯 Register for Tournament');
+
+            if (isDuo) {
+                // ── Duo form: Team Name + exactly 2 members ──
+                const duoFields = [1,2].map(i => `
+                <div style="margin-bottom:10px;">
+                    <p style="font-size:11px;font-weight:700;color:#64748b;margin:0 0 5px;">
+                        ${i === 1 ? '👑 Player 1 — You (Leader)' : '👤 Player 2 — Partner'}
+                    </p>
+                    <div style="display:flex;gap:6px;">
+                        <input class="t-input" id="t-m${i}-uid"  type="text" inputmode="numeric"
+                               placeholder="FF UID" style="flex:1;margin:0;" maxlength="15" />
+                        <input class="t-input" id="t-m${i}-nick" type="text"
+                               placeholder="FF Name" style="flex:1.4;margin:0;" maxlength="30" />
+                    </div>
+                </div>`).join('');
+
+                html += `
+                <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">🤝 Register Duo</p>
+                ${feeBox}
+                <input class="t-input" id="t-team-name" type="text" placeholder="Team Name (e.g. DeathDuo)" maxlength="30" />
+                <p style="font-size:11px;font-weight:700;color:#64748b;margin:8px 0 6px;border-top:1px solid rgba(255,255,255,0.05);padding-top:8px;">👥 Both Players</p>
+                ${duoFields}
+                <p id="t-reg-msg" style="font-size:12px;color:#94a3b8;min-height:18px;margin:0 0 10px;text-align:center;"></p>
+                <button class="t-reg-btn" id="t-reg-btn" onclick="registerForTournament()">${btnLabel}</button>`;
+
+            } else if (isSquad) {
+                // ── Squad form: Team Name + 4 members (2 required, 2 optional) ──
+                const memberFields = [1,2,3,4].map(i => `
+                <div style="margin-bottom:10px;">
+                    <p style="font-size:11px;font-weight:700;color:#64748b;margin:0 0 5px;">
+                        ${i === 1 ? '👑 Member 1 — You (Leader)' : `👤 Member ${i}${i > 2 ? ' <span style="color:#475569;">(Optional)</span>' : ''}`}
+                    </p>
+                    <div style="display:flex;gap:6px;">
+                        <input class="t-input" id="t-m${i}-uid"  type="text" inputmode="numeric"
+                               placeholder="FF UID" style="flex:1;margin:0;" maxlength="15" />
+                        <input class="t-input" id="t-m${i}-nick" type="text"
+                               placeholder="FF Name" style="flex:1.4;margin:0;" maxlength="30" />
+                    </div>
+                </div>`).join('');
+
+                html += `
+                <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">🛡️ Register Squad</p>
+                ${feeBox}
+                <input class="t-input" id="t-team-name" type="text" placeholder="Team Name (e.g. Alpha Squad)" maxlength="30" />
+                <p style="font-size:11px;font-weight:700;color:#64748b;margin:8px 0 6px;border-top:1px solid rgba(255,255,255,0.05);padding-top:8px;">👥 Squad Members (2–4)</p>
+                ${memberFields}
+                <p id="t-reg-msg" style="font-size:12px;color:#94a3b8;min-height:18px;margin:0 0 10px;text-align:center;"></p>
+                <button class="t-reg-btn" id="t-reg-btn" onclick="registerForTournament()">${btnLabel}</button>`;
+            } else {
+                // ── Solo form ──
+                html += `
+                <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">📝 Register Now</p>
+                ${feeBox}
+                <input class="t-input" id="t-ff-uid"      type="text" inputmode="numeric" placeholder="Free Fire UID (e.g. 123456789)" maxlength="20" />
+                <input class="t-input" id="t-ff-nickname" type="text" placeholder="FF Name" maxlength="30" />
+                <p id="t-reg-msg" style="font-size:12px;color:#94a3b8;min-height:18px;margin:0 0 10px;text-align:center;"></p>
+                <button class="t-reg-btn" id="t-reg-btn" onclick="registerForTournament()">${btnLabel}</button>`;
+            }
         }
 
     } else if (t.status === 'registration_closed') {
@@ -3062,50 +3152,101 @@ function _renderTournament(t, winners) {
 }
 
 async function registerForTournament() {
-    const btn  = document.getElementById('t-reg-btn');
-    const msg  = document.getElementById('t-reg-msg');
-    const uid  = (document.getElementById('t-ff-uid')?.value      || '').trim();
-    const nick = (document.getElementById('t-ff-nickname')?.value  || '').trim();
+    const btn     = document.getElementById('t-reg-btn');
+    const msg     = document.getElementById('t-reg-msg');
+    // Detect mode from which form is rendered
+    const _hasTeamForm = !!document.getElementById('t-team-name');
+    const _hasDuoP2    = !!document.getElementById('t-m2-uid') && !document.getElementById('t-m3-uid');
+    const isTeamForm   = _hasTeamForm;
+    const isDuoForm    = _hasTeamForm && _hasDuoP2;
 
-    if (!uid || !nick) {
-        if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ Please fill in both FF UID and Nickname.'; }
-        return;
-    }
-    if (!/^\d{5,15}$/.test(uid)) {
-        if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ FF UID must be 5-15 digits only.'; }
-        return;
-    }
     if (!_selectedTid) {
         if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ No tournament selected.'; }
         return;
     }
+    if (!userId) {
+        if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ User not identified.'; }
+        return;
+    }
 
-    if (btn) { btn.disabled = true; btn.textContent = 'Registering...'; }
+    let payload;
+
+    if (isTeamForm) {
+        // ── Duo / Squad validation ──
+        const teamName = (document.getElementById('t-team-name')?.value || '').trim();
+        if (!teamName) {
+            if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ Team name required.'; }
+            return;
+        }
+
+        const maxSlots = isDuoForm ? 2 : 4;
+        const members  = [];
+        for (let i = 1; i <= maxSlots; i++) {
+            const mUid  = (document.getElementById(`t-m${i}-uid`)?.value  || '').trim();
+            const mNick = (document.getElementById(`t-m${i}-nick`)?.value || '').trim();
+            // For squad: M3/M4 are optional — skip if both empty
+            if (!isDuoForm && i > 2 && !mUid && !mNick) continue;
+            if (!mUid || !mNick) {
+                const label = isDuoForm ? `Player ${i}` : `Member ${i}`;
+                if (msg) { msg.style.color = '#ef4444'; msg.textContent = `⚠️ ${label}: FF UID aur FF Name dono bharein.`; }
+                return;
+            }
+            if (!/^\d{5,15}$/.test(mUid)) {
+                const label = isDuoForm ? `Player ${i}` : `Member ${i}`;
+                if (msg) { msg.style.color = '#ef4444'; msg.textContent = `⚠️ ${label}: FF UID sirf 5–15 digits hona chahiye.`; }
+                return;
+            }
+            members.push({ ff_uid: mUid, ff_nickname: mNick });
+        }
+        const minNeeded = isDuoForm ? 2 : 2;
+        if (members.length < minNeeded) {
+            if (msg) { msg.style.color = '#ef4444'; msg.textContent = `⚠️ Kam se kam ${minNeeded} players chahiye.`; }
+            return;
+        }
+
+        payload = { user_id: userId, tournament_id: _selectedTid, team_name: teamName, members };
+
+    } else {
+        // ── Solo validation ──
+        const uid  = (document.getElementById('t-ff-uid')?.value      || '').trim();
+        const nick = (document.getElementById('t-ff-nickname')?.value  || '').trim();
+        if (!uid || !nick) {
+            if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ FF UID aur FF Name dono chahiye.'; }
+            return;
+        }
+        if (!/^\d{5,15}$/.test(uid)) {
+            if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ FF UID must be 5-15 digits only.'; }
+            return;
+        }
+        payload = { user_id: userId, tournament_id: _selectedTid, ff_uid: uid, ff_nickname: nick };
+    }
+
+    const loadingTxt = isDuoForm ? '⏳ Registering Duo...' : isTeamForm ? '⏳ Registering Squad...' : '⏳ Registering...';
+    const resetTxt   = isDuoForm ? '🤝 Register Duo'       : isTeamForm ? '🛡️ Register Squad'       : '🎯 Register for Tournament';
+
+    if (btn) { btn.disabled = true; btn.textContent = loadingTxt; }
     if (msg) { msg.style.color = '#94a3b8'; msg.textContent = '⏳ Submitting registration...'; }
 
     try {
-        if (!userId) throw new Error('User not identified.');
-
         const res  = await fetchWithRetry(CONFIG.API_BASE_URL + '/tournament/register', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ user_id: userId, tournament_id: _selectedTid, ff_uid: uid, ff_nickname: nick }),
+            body:    JSON.stringify(payload),
         });
         const data = await res.json();
 
         if (data.status === 'success') {
             if (msg) { msg.style.color = '#4ade80'; msg.textContent = data.message || '🎉 Registered!'; }
-            // Invalidate cache for this tournament only
             delete _tournamentCache[_selectedTid];
             delete _tournamentRegCache[_selectedTid];
             setTimeout(() => loadTournamentById(_selectedTid, true), 800);
         } else {
             if (msg) { msg.style.color = '#ef4444'; msg.textContent = '❌ ' + (data.message || 'Registration failed.'); }
-            if (btn) { btn.disabled = false; btn.textContent = '🎯 Register for Tournament'; }
+            if (btn) { btn.disabled = false; btn.textContent = resetTxt; }
         }
     } catch (e) {
         if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ Network error. Please try again.'; }
-        if (btn) { btn.disabled = false; btn.textContent = '🎯 Register for Tournament'; }
+        if (btn) { btn.disabled = false; btn.textContent = resetTxt; }
     }
 }
 
