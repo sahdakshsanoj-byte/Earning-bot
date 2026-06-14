@@ -4328,21 +4328,19 @@ def get_single_tournament_api(tid: str):
 
 @app.route("/tournament/register", methods=["POST"])
 def tournament_register_api():
-    """User ko specific tournament mein register karo (tournament_id required)."""
+    """User ko specific tournament mein register karo (tournament_id required).
+    Solo mode:  { user_id, tournament_id, ff_uid, ff_nickname }
+    Squad mode: { user_id, tournament_id, team_name, members: [{ff_uid, ff_nickname}, ...] }
+    """
     data = request.get_json(silent=True) or {}
     try:
         user_id = int(data.get("user_id"))
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Invalid user ID."}), 400
 
-    tid         = sanitize_text(data.get("tournament_id", ""), max_length=60)
-    ff_uid      = sanitize_text(data.get("ff_uid", ""), max_length=30)
-    ff_nickname = sanitize_text(data.get("ff_nickname", ""), max_length=40)
-
+    tid = sanitize_text(data.get("tournament_id", ""), max_length=60)
     if not tid:
         return jsonify({"status": "error", "message": "tournament_id required."}), 400
-    if not ff_uid or not ff_nickname:
-        return jsonify({"status": "error", "message": "FF UID and Nickname are required."}), 400
 
     if is_rate_limited(f"tourney_reg_{user_id}", 15):
         return jsonify({"status": "error", "message": "Please wait before retrying."}), 429
@@ -4367,12 +4365,78 @@ def tournament_register_api():
         if t.get("max_players", 0) > 0 and reg_count >= t["max_players"]:
             return jsonify({"status": "error", "message": "Tournament is full! No slots remaining."}), 400
 
-        # Duplicate check
+        # Duplicate check (same user_id = same leader)
         existing = tournament_registrations_col.find_one({"tournament_id": tid, "user_id": user_id})
         if existing:
             return jsonify({"status": "error", "message": "You are already registered for this tournament!"}), 400
 
-        # ── Entry fee: check balance and deduct atomically
+        # ── Determine mode: Solo / Duo / Squad ──
+        mode     = (t.get("mode", "Solo") or "Solo").strip().lower()
+        is_duo   = (mode == "duo")
+        is_squad = (mode == "squad")
+        is_team  = is_duo or is_squad
+
+        if is_team:
+            # ── Duo / Squad registration ──
+            team_name   = sanitize_text(data.get("team_name", ""), max_length=40).strip()
+            raw_members = data.get("members", [])
+
+            if not team_name:
+                return jsonify({"status": "error", "message": "Team name required."}), 400
+
+            # Member count limits per mode
+            min_m = 2
+            max_m = 2 if is_duo else 4
+
+            if not isinstance(raw_members, list) or len(raw_members) < min_m:
+                return jsonify({"status": "error", "message": f"{'Duo' if is_duo else 'Squad'} ke liye exactly {min_m} members chahiye."}), 400
+            if len(raw_members) > max_m:
+                return jsonify({"status": "error", "message": f"{'Duo' if is_duo else 'Squad'} mein maximum {max_m} members allowed hain."}), 400
+
+            members = []
+            for i, m in enumerate(raw_members, 1):
+                m_uid  = sanitize_text(str(m.get("ff_uid",  "") or ""), max_length=30).strip()
+                m_nick = sanitize_text(str(m.get("ff_nickname", "") or ""), max_length=40).strip()
+                if not m_uid or not m_nick:
+                    return jsonify({"status": "error", "message": f"Member {i}: FF UID aur FF Name dono chahiye."}), 400
+                if not re.match(r"^\d{5,15}$", m_uid):
+                    return jsonify({"status": "error", "message": f"Member {i}: FF UID sirf 5-15 digits hona chahiye."}), 400
+                members.append({"ff_uid": m_uid, "ff_nickname": m_nick})
+
+            reg_type = "duo" if is_duo else "squad"
+            reg_doc  = {
+                "tournament_id":     tid,
+                "user_id":           user_id,
+                "username":          user.get("username", "Unknown"),
+                "registration_type": reg_type,
+                "team_name":         team_name,
+                "members":           members,
+                "registered_at":     datetime.utcnow(),
+                "status":            "registered",
+                "entry_fee_paid":    0,
+            }
+        else:
+            # ── Solo registration ──
+            ff_uid      = sanitize_text(data.get("ff_uid", ""), max_length=30).strip()
+            ff_nickname = sanitize_text(data.get("ff_nickname", ""), max_length=40).strip()
+            if not ff_uid or not ff_nickname:
+                return jsonify({"status": "error", "message": "FF UID and Nickname are required."}), 400
+            if not re.match(r"^\d{5,15}$", ff_uid):
+                return jsonify({"status": "error", "message": "FF UID must be 5-15 digits only."}), 400
+
+            reg_doc = {
+                "tournament_id":     tid,
+                "user_id":           user_id,
+                "username":          user.get("username", "Unknown"),
+                "registration_type": "solo",
+                "ff_uid":            ff_uid,
+                "ff_nickname":       ff_nickname,
+                "registered_at":     datetime.utcnow(),
+                "status":            "registered",
+                "entry_fee_paid":    0,
+            }
+
+        # ── Entry fee: check balance and deduct atomically ──
         entry_fee = int(t.get("entry_fee", 0) or 0)
         if entry_fee > 0:
             deduct_result = users_col.find_one_and_update(
@@ -4389,22 +4453,15 @@ def tournament_register_api():
                 }), 400
             logger.info("Tournament fee deducted: user=%s fee=%s tournament=%s", user_id, entry_fee, tid)
 
-        tournament_registrations_col.insert_one({
-            "tournament_id":  tid,
-            "user_id":        user_id,
-            "username":       user.get("username", "Unknown"),
-            "ff_uid":         ff_uid,
-            "ff_nickname":    ff_nickname,
-            "registered_at":  datetime.utcnow(),
-            "status":         "registered",
-            "entry_fee_paid": entry_fee,
-        })
-        logger.info("Tournament reg: user=%s ff_uid=%s tournament=%s fee=%s", user_id, ff_uid, tid, entry_fee)
+        reg_doc["entry_fee_paid"] = entry_fee
+        tournament_registrations_col.insert_one(reg_doc)
+        logger.info("Tournament reg: user=%s type=%s tournament=%s fee=%s", user_id, "squad" if is_squad else "solo", tid, entry_fee)
 
-        fee_msg = f" {entry_fee} coins deducted as entry fee." if entry_fee > 0 else ""
+        fee_msg  = f" {entry_fee} coins deducted as entry fee." if entry_fee > 0 else ""
+        type_msg = "🎉 Duo registered!" if is_duo else "🎉 Squad registered!" if is_squad else "🎉 Registration successful!"
         return jsonify({
             "status":  "success",
-            "message": f"🎉 Registration successful!{fee_msg} Good luck in the tournament!",
+            "message": f"{type_msg}{fee_msg} Good luck in the tournament!",
         })
     except pymongo.errors.DuplicateKeyError:
         return jsonify({"status": "error", "message": "You are already registered!"}), 400
@@ -6312,7 +6369,12 @@ def cmd_create_tournament(message):
     """Admin: /createtournament — Naya tournament create karo.
     Format:
       /createtournament Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool
-    Example:
+    Mode: Solo / Duo / Squad
+    Example (Solo):
+      /createtournament FF Solo Cup | Solo | Kalahari | 20 June 2026 | 7:00 PM | 0 | 100 | 5000 Coins
+    Example (Duo):
+      /createtournament FF Duo War | Duo | Bermuda | 21 June 2026 | 8:00 PM | 50 | 50 | 8000 Coins
+    Example (Squad):
       /createtournament FF Grand Finals | Squad | Bermuda | 5 June 2026 | 8:00 PM | 0 | 50 | 5000 Coins
     """
     if int(message.from_user.id) != ADMIN_ID:
@@ -6324,9 +6386,13 @@ def cmd_create_tournament(message):
             message,
             "📋 *Usage:*\n"
             "`/createtournament Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool`\n\n"
-            "*Example:*\n"
-            "`/createtournament FF Grand Finals | Squad | Bermuda | 5 June 2026 | 8:00 PM | 0 | 50 | 5000 Coins`\n\n"
-            "⚠️ EntryFee aur MaxPlayers number mein dena hai.",
+            "*Mode options:* `Solo` / `Duo` / `Squad`\n\n"
+            "*Examples:*\n"
+            "Solo: `/createtournament FF Solo Cup | Solo | Kalahari | 20 Jun 2026 | 7:00 PM | 0 | 100 | 5000 Coins`\n"
+            "Duo:  `/createtournament FF Duo War | Duo | Bermuda | 21 Jun 2026 | 8:00 PM | 50 | 50 | 8000 Coins`\n"
+            "Squad: `/createtournament FF Grand Finals | Squad | Bermuda | 5 Jun 2026 | 8:00 PM | 0 | 50 | 5000 Coins`\n\n"
+            "⚠️ EntryFee aur MaxPlayers number mein dena hai.\n"
+            "💡 Individual prizes baad mein set karo: `/setprizes <tid> 1st:5000 Coins | 2nd:3000 Coins | 3rd:1000 Coins`",
             parse_mode="Markdown",
         )
 
@@ -6335,11 +6401,22 @@ def cmd_create_tournament(message):
         return bot.reply_to(
             message,
             "❌ *8 fields chahiye, `|` se alag karo:*\n"
-            "`Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool`",
+            "`Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool`\n\n"
+            "*Mode:* `Solo` / `Duo` / `Squad`",
             parse_mode="Markdown",
         )
 
     title, mode, map_, date, t_time, entry_fee_str, max_p_str, prize_pool = fields[:8]
+
+    # Validate mode
+    mode_clean = mode.strip().capitalize()
+    if mode_clean not in ("Solo", "Duo", "Squad"):
+        return bot.reply_to(
+            message,
+            f"❌ Mode `{mode}` invalid hai. Sirf `Solo`, `Duo`, ya `Squad` allowed hai.",
+            parse_mode="Markdown",
+        )
+    mode = mode_clean
 
     try:
         entry_fee  = int(entry_fee_str)
@@ -6379,19 +6456,21 @@ def cmd_create_tournament(message):
             }},
             upsert=True,
         )
+        mode_emoji = {"Solo": "🎯", "Duo": "🤝", "Squad": "🛡️"}.get(mode, "🎮")
         bot.reply_to(
             message,
             f"✅ *Tournament Created!*\n\n"
             f"🏆 *Title:* {title}\n"
-            f"🎮 *Mode:* {mode}  |  🗺 *Map:* {map_}\n"
+            f"{mode_emoji} *Mode:* {mode}  |  🗺 *Map:* {map_}\n"
             f"📅 *Date:* {date}  |  ⏰ *Time:* {t_time}\n"
             f"💰 *Entry Fee:* {entry_fee} 🪙\n"
             f"👥 *Max Players:* {max_players}\n"
             f"🏅 *Prize Pool:* {prize_pool}\n\n"
             f"📌 *Status:* Coming Soon\n"
             f"🆔 *ID:* `{tid}`\n\n"
-            f"Registration open karne ke liye:\n"
-            f"`/tournamentstatus registration_open`",
+            f"*Next steps:*\n"
+            f"• Individual prizes: `/setprizes {tid} 1st:5000 Coins | 2nd:3000 Coins | 3rd:1000 Coins`\n"
+            f"• Registration open karo: `/tournamentstatus {tid} registration_open`",
             parse_mode="Markdown",
         )
         logger.info("Admin created tournament: %s", tid)
@@ -6539,13 +6618,20 @@ def cmd_tournament_regs(message):
 
         regs = list(tournament_registrations_col.find(
             {"tournament_id": tid},
-            {"_id": 0, "user_id": 1, "ff_uid": 1, "ff_nickname": 1, "registered_at": 1}
+            {"_id": 0, "user_id": 1, "registration_type": 1,
+             "ff_uid": 1, "ff_nickname": 1,
+             "team_name": 1, "members": 1,
+             "registered_at": 1}
         ).sort("registered_at", 1).limit(50))
 
         if not regs:
             return bot.reply_to(message, f"📋 *{t.get('title', 'Tournament')}* `[{tid}]`\n\nAbhi tak koi registration nahi aaya.", parse_mode="Markdown")
 
-        lines = [f"📋 *{t.get('title', 'Tournament')} — Registrations ({len(regs)})*\n🆔 `{tid}`\n"]
+        mode     = (t.get("mode", "Solo") or "Solo").strip().lower()
+        is_team  = mode in ("squad", "duo")
+        mode_emoji = {"squad": "🛡️", "duo": "🤝"}.get(mode, "👤")
+        lines    = [f"📋 *{t.get('title', 'Tournament')} — Registrations ({len(regs)})*\n🆔 `{tid}`\n"]
+
         for i, r in enumerate(regs, 1):
             reg_time = ""
             if r.get("registered_at"):
@@ -6553,11 +6639,29 @@ def cmd_tournament_regs(message):
                     reg_time = r["registered_at"].strftime("%d %b %H:%M")
                 except Exception:
                     reg_time = ""
-            lines.append(
-                f"{i}. *{r.get('ff_nickname', 'N/A')}*\n"
-                f"   FF UID: `{r.get('ff_uid', 'N/A')}`  |  TG: `{r.get('user_id', 'N/A')}`"
-                + (f"  |  {reg_time}" if reg_time else "")
-            )
+
+            rtype = r.get("registration_type", "solo")
+            if rtype in ("squad", "duo") or is_team:
+                # Team entry — show team name + all members
+                t_emoji   = "🤝" if rtype == "duo" else "🛡️"
+                team_name = r.get("team_name", "Unknown Team")
+                members   = r.get("members") or []
+                m_lines   = "  ".join(
+                    [f"`{m.get('ff_uid','?')}` {m.get('ff_nickname','?')}" for m in members]
+                ) if members else f"`{r.get('ff_uid','?')}` {r.get('ff_nickname','?')}"
+                lines.append(
+                    f"{i}. {t_emoji} *{team_name}*\n"
+                    f"   👑 TG: `{r.get('user_id', 'N/A')}`"
+                    + (f"  |  {reg_time}" if reg_time else "") + "\n"
+                    f"   {m_lines}"
+                )
+            else:
+                # Solo entry
+                lines.append(
+                    f"{i}. *{r.get('ff_nickname', 'N/A')}*\n"
+                    f"   FF UID: `{r.get('ff_uid', 'N/A')}`  |  TG: `{r.get('user_id', 'N/A')}`"
+                    + (f"  |  {reg_time}" if reg_time else "")
+                )
 
         msg = "\n".join(lines)
         if len(msg) > 4000:
@@ -6740,6 +6844,95 @@ def cmd_cancel_tournament(message):
         logger.info("Admin cancelled tournament: %s", tid)
     except Exception as exc:
         logger.error("cmd_cancel_tournament error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["setprizes"])
+def cmd_set_prizes(message):
+    """Admin: /setprizes <tournament_id> 1st:Prize | 2nd:Prize | 3rd:Prize
+    Example:
+      /setprizes t_123456 1st:5000 Coins | 2nd:3000 Coins | 3rd:1000 Coins
+    Maximum 3 prizes. Users ko tournament card mein dikhega.
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+
+    text  = message.text or ""
+    parts = text.split(None, 2)
+    if len(parts) < 3:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:*\n"
+            "`/setprizes <tournament_id> 1st:Prize | 2nd:Prize | 3rd:Prize`\n\n"
+            "*Example:*\n"
+            "`/setprizes t_123456 1st:5000 Coins | 2nd:3000 Coins | 3rd:1000 Coins`\n\n"
+            "IDs dekhne ke liye: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+
+    tid       = parts[1].strip()
+    prizes_raw = parts[2]
+
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(
+                message,
+                f"❌ Tournament `{tid}` nahi mila.\n`/listtournaments` se IDs dekho.",
+                parse_mode="Markdown",
+            )
+
+        rank_map = {"1st": 1, "2nd": 2, "3rd": 3, "1": 1, "2": 2, "3": 3}
+        entries  = [e.strip() for e in prizes_raw.split("|") if e.strip()][:3]
+
+        if not entries:
+            return bot.reply_to(message, "❌ Kam se kam 1 prize dena hai.")
+
+        prizes_docs = []
+        prize_lines = []
+        rank_emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
+        rank_labels = {1: "1st Place", 2: "2nd Place", 3: "3rd Place"}
+
+        for i, entry in enumerate(entries, 1):
+            if ":" in entry:
+                rank_str, prize_val = entry.split(":", 1)
+                rank_str  = rank_str.strip().lower()
+                prize_val = prize_val.strip()
+                rank      = rank_map.get(rank_str, i)
+            else:
+                rank      = i
+                prize_val = entry.strip()
+
+            if not prize_val:
+                return bot.reply_to(message, f"❌ Prize {i} ka value empty nahi ho sakta.")
+
+            prizes_docs.append({
+                "rank":  rank,
+                "label": rank_labels.get(rank, f"#{rank}"),
+                "prize": sanitize_text(prize_val, max_length=100),
+            })
+            prize_lines.append(f"{rank_emojis.get(rank,'🏅')} *{rank_labels.get(rank,f'#{rank}')}:* {prize_val}")
+
+        # Sort by rank
+        prizes_docs.sort(key=lambda x: x["rank"])
+
+        tournaments_col.update_one(
+            {"tournament_id": tid},
+            {"$set": {"prizes": prizes_docs}},
+        )
+
+        prizes_text = "\n".join(prize_lines)
+        bot.reply_to(
+            message,
+            f"✅ *Prizes Updated!*\n\n"
+            f"🏆 *{t.get('title', 'Tournament')}* `[{tid}]`\n\n"
+            f"{prizes_text}\n\n"
+            f"_Yeh prizes ab tournament card mein users ko dikhenge._",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin set prizes for tournament %s: %s", tid, prizes_docs)
+    except Exception as exc:
+        logger.error("cmd_set_prizes error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
