@@ -407,9 +407,39 @@
 
         <!-- Balance -->
         <div class="card balance-card" style="text-align:center;">
+            <div id="premium-status-badge" style="display:none; margin-bottom:8px; text-align:center;"></div>
             <p style="font-size:12px; color:var(--text-muted); margin-bottom:6px; letter-spacing:0.3px;">Your Balance</p>
             <h1 id="balance" style="font-size:42px; color:var(--gold); font-weight:800; letter-spacing:-1px;">0 🪙</h1>
             <p style="font-size:11px; color:var(--text-dim); margin-top:4px;">Keep earning to unlock withdrawal! 🚀</p>
+        </div>
+
+        <!-- Premium Buy Card -->
+        <div id="premium-buy-card" onclick="showPremiumModal()" style="
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            border: 1px solid rgba(241,196,15,0.35);
+            border-radius: 16px;
+            padding: 14px 18px;
+            margin: 0 0 12px 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            box-shadow: 0 4px 20px rgba(241,196,15,0.08);
+            position: relative;
+            overflow: hidden;
+        ">
+            <div style="position:absolute;top:-20px;right:-20px;font-size:80px;opacity:0.06;pointer-events:none;">👑</div>
+            <div style="flex:1;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+                    <span style="font-size:16px;">👑</span>
+                    <p style="font-size:14px;font-weight:800;color:#f1c40f;margin:0;" id="prem-card-title">Get Premium</p>
+                </div>
+                <p style="font-size:11px;color:#94a3b8;margin:0;" id="prem-card-sub">2x Coins • More Spins • Lower Withdrawal</p>
+            </div>
+            <div style="background:linear-gradient(135deg,#f1c40f,#e67e22);border-radius:20px;padding:6px 14px;white-space:nowrap;">
+                <p style="font-size:12px;font-weight:800;color:#1e293b;margin:0;" id="prem-card-btn-label">From ₹29 →</p>
+            </div>
         </div>
 
         <!-- Daily Streak Bonus -->
@@ -1505,6 +1535,208 @@
             </div>
             <button id="winner-close-btn" onclick="closeWinnerPopup()">🎊 Claim My Prize!</button>
         </div>
+    </div>
+
+    <!-- ===================== PREMIUM MODAL ===================== -->
+    <div id="premium-modal-overlay" onclick="hidePremiumModal()" style="
+        display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75);
+        z-index:3000; backdrop-filter:blur(4px);
+    "></div>
+
+    <div id="premium-modal" style="
+        display:none; position:fixed; bottom:0; left:0; right:0;
+        background:linear-gradient(180deg,#0d1b2a 0%,#07111a 100%);
+        border-radius:24px 24px 0 0;
+        border-top:1px solid rgba(241,196,15,0.25);
+        z-index:3001; max-height:88vh; overflow-y:auto;
+        padding:0 0 32px 0;
+    ">
+        <!-- Handle -->
+        <div style="text-align:center;padding:10px 0 0;">
+            <div style="width:36px;height:4px;background:#334155;border-radius:4px;display:inline-block;"></div>
+        </div>
+
+        <!-- Header -->
+        <div style="padding:16px 20px 0; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <h3 style="color:#f1c40f;margin:0;font-size:18px;">👑 Premium Membership</h3>
+                <p style="font-size:12px;color:#64748b;margin:4px 0 0;">Earn more, withdraw faster!</p>
+            </div>
+            <button onclick="hidePremiumModal()" style="background:rgba(255,255,255,0.08);border:none;color:#94a3b8;width:32px;height:32px;border-radius:50%;font-size:18px;cursor:pointer;line-height:30px;">✕</button>
+        </div>
+
+        <!-- Benefits list -->
+        <div style="margin:14px 20px 0; background:rgba(241,196,15,0.06); border:1px solid rgba(241,196,15,0.15); border-radius:14px; padding:14px;">
+            <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">✨ Premium Benefits</p>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px;">🎯</span><span style="font-size:13px;color:#e2e8f0;">Task reward <b style="color:#4ade80;">+25% bonus</b> coins</span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px;">📺</span><span style="font-size:13px;color:#e2e8f0;">Watch ads: <b style="color:#4ade80;">10 coins</b> (2x normal)</span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px;">🎡</span><span style="font-size:13px;color:#e2e8f0;">Spin wheel: <b style="color:#4ade80;">15 spins/day</b> (3x)</span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px;">💸</span><span style="font-size:13px;color:#e2e8f0;">Withdraw from <b style="color:#4ade80;">10,000 coins</b></span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px;">👥</span><span style="font-size:13px;color:#e2e8f0;">Only <b style="color:#4ade80;">2 referrals</b> needed</span></div>
+            </div>
+        </div>
+
+        <!-- Plan Cards -->
+        <div id="prem-plan-section" style="padding:0 20px;">
+            <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:16px 0 10px;">📦 Choose Your Plan</p>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+
+                <!-- Weekly -->
+                <div id="plan-weekly" onclick="selectPlan('weekly')" style="
+                    border:2px solid rgba(241,196,15,0.2); border-radius:14px;
+                    padding:14px 16px; cursor:pointer; position:relative;
+                    background:rgba(241,196,15,0.04); transition:all 0.2s;
+                    display:flex; justify-content:space-between; align-items:center;
+                ">
+                    <div>
+                        <p style="font-size:14px;font-weight:800;color:#e2e8f0;margin:0;">📅 Weekly</p>
+                        <p style="font-size:11px;color:#64748b;margin:3px 0 0;">7 days — Best for trying out</p>
+                    </div>
+                    <div style="text-align:right;">
+                        <p style="font-size:20px;font-weight:800;color:#f1c40f;margin:0;">₹29</p>
+                        <p style="font-size:10px;color:#64748b;margin:0;">~₹4/day</p>
+                    </div>
+                </div>
+
+                <!-- Monthly (Recommended) -->
+                <div id="plan-monthly" onclick="selectPlan('monthly')" style="
+                    border:2px solid #f1c40f; border-radius:14px;
+                    padding:14px 16px; cursor:pointer; position:relative;
+                    background:rgba(241,196,15,0.08); transition:all 0.2s;
+                    display:flex; justify-content:space-between; align-items:center;
+                ">
+                    <div style="position:absolute;top:-10px;left:14px;background:linear-gradient(135deg,#f1c40f,#e67e22);border-radius:20px;padding:2px 10px;">
+                        <p style="font-size:10px;font-weight:800;color:#1e293b;margin:0;">⭐ POPULAR</p>
+                    </div>
+                    <div>
+                        <p style="font-size:14px;font-weight:800;color:#f1c40f;margin:0;">📆 Monthly</p>
+                        <p style="font-size:11px;color:#94a3b8;margin:3px 0 0;">30 days — Most value!</p>
+                    </div>
+                    <div style="text-align:right;">
+                        <p style="font-size:20px;font-weight:800;color:#f1c40f;margin:0;">₹79</p>
+                        <p style="font-size:10px;color:#64748b;margin:0;">~₹2.6/day</p>
+                    </div>
+                </div>
+
+                <!-- Quarterly -->
+                <div id="plan-quarterly" onclick="selectPlan('quarterly')" style="
+                    border:2px solid rgba(241,196,15,0.2); border-radius:14px;
+                    padding:14px 16px; cursor:pointer; position:relative;
+                    background:rgba(241,196,15,0.04); transition:all 0.2s;
+                    display:flex; justify-content:space-between; align-items:center;
+                ">
+                    <div style="position:absolute;top:-10px;right:14px;background:linear-gradient(135deg,#22c55e,#16a34a);border-radius:20px;padding:2px 10px;">
+                        <p style="font-size:10px;font-weight:800;color:#fff;margin:0;">💰 BEST DEAL</p>
+                    </div>
+                    <div>
+                        <p style="font-size:14px;font-weight:800;color:#e2e8f0;margin:0;">🗓 Quarterly</p>
+                        <p style="font-size:11px;color:#64748b;margin:3px 0 0;">90 days — Save 16%</p>
+                    </div>
+                    <div style="text-align:right;">
+                        <p style="font-size:20px;font-weight:800;color:#f1c40f;margin:0;">₹199</p>
+                        <p style="font-size:10px;color:#64748b;margin:0;">~₹2.2/day</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Payment Instructions (shown after plan selected) -->
+        <div id="prem-pay-section" style="display:none; padding:0 20px; margin-top:16px;">
+            <div style="background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.2); border-radius:14px; padding:16px;">
+                <p style="font-size:12px;font-weight:800;color:#4ade80;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 12px;">💳 Payment Steps</p>
+
+                <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">
+                    <span style="background:#4ade80;color:#0d1b2a;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;">1</span>
+                    <div style="flex:1;">
+                        <p style="font-size:13px;font-weight:700;color:#e2e8f0;margin:0;">Pay via UPI</p>
+
+                        <!-- QR Code -->
+                        <div id="prem-qr-wrap" style="margin-top:10px;text-align:center;display:none;">
+                            <div style="background:#fff;border-radius:14px;padding:10px;display:inline-block;box-shadow:0 0 20px rgba(241,196,15,0.2);">
+                                <img id="prem-qr-img" src="" alt="UPI QR Code" style="width:170px;height:170px;object-fit:contain;border-radius:8px;display:block;">
+                            </div>
+                            <p style="font-size:11px;color:#4ade80;margin:6px 0 0;font-weight:700;">📷 Scan QR or copy UPI ID below</p>
+                        </div>
+
+                        <!-- UPI ID row -->
+                        <div style="background:rgba(0,0,0,0.3);border-radius:10px;padding:10px 14px;margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
+                            <p id="prem-upi-display" style="font-size:14px;font-weight:800;color:#f1c40f;margin:0;letter-spacing:0.5px;word-break:break-all;">loading...</p>
+                            <button onclick="copyUpi()" style="background:rgba(241,196,15,0.15);border:1px solid rgba(241,196,15,0.3);color:#f1c40f;border-radius:8px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;margin-left:8px;">📋 Copy</button>
+                        </div>
+                        <p id="prem-amount-display" style="font-size:12px;color:#94a3b8;margin:4px 0 0;">Amount: loading...</p>
+                    </div>
+                </div>
+
+                <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">
+                    <span style="background:#4ade80;color:#0d1b2a;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;">2</span>
+                    <div>
+                        <p style="font-size:13px;font-weight:700;color:#e2e8f0;margin:0;">Take a Screenshot</p>
+                        <p style="font-size:11px;color:#64748b;margin:2px 0 0;">Save screenshot of the successful payment</p>
+                    </div>
+                </div>
+
+                <div style="display:flex;align-items:flex-start;gap:10px;">
+                    <span style="background:#4ade80;color:#0d1b2a;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;">3</span>
+                    <div>
+                        <p style="font-size:13px;font-weight:700;color:#e2e8f0;margin:0;">Send screenshot to the bot</p>
+                        <p style="font-size:11px;color:#64748b;margin:2px 0 0;">Admin will verify and activate your premium within 10–30 minutes</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Transaction ID input -->
+            <div style="margin-top:14px;">
+                <label style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.7px;display:block;margin-bottom:6px;">
+                    🧾 Transaction / UTR ID <span style="color:#ef4444;">*</span>
+                </label>
+                <div style="position:relative;">
+                    <input
+                        id="prem-txn-input"
+                        type="text"
+                        inputmode="numeric"
+                        placeholder="Enter 12-digit UTR or Transaction ID"
+                        maxlength="30"
+                        oninput="validateTxnInput()"
+                        style="
+                            width:100%; box-sizing:border-box;
+                            background:rgba(0,0,0,0.35);
+                            border:1.5px solid rgba(255,255,255,0.1);
+                            border-radius:12px; padding:12px 44px 12px 14px;
+                            font-size:14px; font-weight:700;
+                            color:#f1c40f; outline:none;
+                            letter-spacing:0.5px;
+                            transition:border-color 0.2s;
+                        "
+                    />
+                    <span id="prem-txn-tick" style="
+                        position:absolute; right:14px; top:50%;
+                        transform:translateY(-50%);
+                        font-size:16px; display:none;
+                    ">✅</span>
+                </div>
+                <p id="prem-txn-err" style="font-size:11px;color:#ef4444;margin:4px 0 0;display:none;">
+                    ⚠️ Please enter a valid Transaction / UTR ID before proceeding.
+                </p>
+            </div>
+
+            <button id="prem-pay-btn" onclick="openBotForPayment()" style="
+                width:100%; margin-top:12px;
+                background:linear-gradient(135deg,#f1c40f,#e67e22);
+                border:none; border-radius:14px;
+                padding:14px; font-size:15px; font-weight:800;
+                color:#1e293b; cursor:pointer;
+                box-shadow:0 4px 20px rgba(241,196,15,0.3);
+            ">✅ I've Paid — Open Bot to Send Screenshot</button>
+
+            <button onclick="resetPremiumModal()" style="
+                width:100%; margin-top:8px;
+                background:transparent; border:1px solid rgba(255,255,255,0.1);
+                border-radius:14px; padding:10px; font-size:13px;
+                color:#64748b; cursor:pointer;
+            ">← Choose a Different Plan</button>
+        </div>
+
     </div>
 
     <!-- Cache-bust query param: bump v=N every time you deploy a change -->
