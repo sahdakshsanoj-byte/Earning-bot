@@ -14,7 +14,7 @@ window.USER_ID = userId;
 window._tgUser = tg.initDataUnsafe?.user || null;
 
 let userData = {};
-let _winnerPopupShown = false;   // guard: ek session mein sirf ek baar popup dikhao
+let _winnerPopupShown = false;   // guard: show winner popup only once per session
 const _pendingRequests = new Set();
 let monetagSdkPromise  = null;
 let monetagPreloaded   = false;
@@ -352,14 +352,32 @@ async function fetchLiveData() {
         if (data.status === "success") {
             userData = data;
 
-            const coins    = data.coins || 0;
-            const refCount = getRefCount(data.referrals);
+            const coins      = data.coins || 0;
+            const refCount   = getRefCount(data.referrals);
+            const premInfo   = data.premium_info || {};
+            const isPremium  = !!premInfo.premium;
+
+            // Dynamic withdrawal threshold based on premium
+            const _minWd    = isPremium ? 10000 : MIN_WITHDRAW_COINS;
+            const _refNeeded = isPremium ? 2 : 5;
 
             const balEl = document.getElementById('balance');
             if (balEl) balEl.innerText = `${coins} 🪙`;
 
-            const coinsPct = Math.min((coins / MIN_WITHDRAW_COINS) * 100, 100);
-            const refPct   = Math.min((refCount / 5) * 100, 100);
+            // ── Premium badge in balance area ─────────────────────────────
+            const premBadgeEl = document.getElementById('premium-status-badge');
+            if (premBadgeEl) {
+                if (isPremium) {
+                    premBadgeEl.innerHTML = `<span style="background:linear-gradient(135deg,#f1c40f,#e67e22);color:#1e293b;font-size:11px;font-weight:800;padding:3px 9px;border-radius:20px;letter-spacing:0.5px;">👑 PREMIUM · ${premInfo.days_left}d left</span>`;
+                    premBadgeEl.style.display = 'block';
+                } else {
+                    premBadgeEl.style.display = 'none';
+                }
+            }
+            // ─────────────────────────────────────────────────────────────
+
+            const coinsPct = Math.min((coins / _minWd) * 100, 100);
+            const refPct   = Math.min((refCount / _refNeeded) * 100, 100);
 
             const coinsBar  = document.getElementById('coins-progress-bar');
             const refBar    = document.getElementById('ref-progress-bar');
@@ -368,13 +386,13 @@ async function fetchLiveData() {
 
             if (coinsBar) {
                 coinsBar.style.width      = coinsPct + '%';
-                coinsBar.style.background = coins >= MIN_WITHDRAW_COINS
+                coinsBar.style.background = coins >= _minWd
                     ? 'linear-gradient(90deg,#2ecc71,#27ae60)'
                     : 'linear-gradient(90deg,#f1c40f,#f39c12)';
             }
             if (refBar)    refBar.style.width    = refPct + '%';
-            if (coinsText) coinsText.innerText   = `${coins} / ${MIN_WITHDRAW_COINS}${coins >= MIN_WITHDRAW_COINS ? ' ✅' : ''}`;
-            if (refText)   refText.innerText     = `${refCount} / 5${refCount >= 5 ? ' ✅' : ''}`;
+            if (coinsText) coinsText.innerText   = `${coins} / ${_minWd}${coins >= _minWd ? ' ✅' : ''}${isPremium ? ' 👑' : ''}`;
+            if (refText)   refText.innerText     = `${refCount} / ${_refNeeded}${refCount >= _refNeeded ? ' ✅' : ''}${isPremium ? ' 👑' : ''}`;
 
             applyReferralLock();
 
@@ -398,6 +416,12 @@ async function fetchLiveData() {
             loadSpinStatus();
             loadMiningStatus();
             loadBombBoxStatus();
+
+            // Update withdraw minimum check with premium dynamic value
+            window._dynamicMinWithdraw = isPremium ? 10000 : MIN_WITHDRAW_COINS;
+
+            // Update premium card on home tab
+            updatePremiumCard(premInfo);
 
             if (data.pending_winner_popup && !_winnerPopupShown) showWinnerPopup(data.pending_winner_prize || 0);
         }
@@ -434,7 +458,7 @@ function showWinnerPopup(prize) {
     const prizeEl = document.getElementById('winner-prize-coins');
     if (!overlay) return;
     if (_winnerPopupShown) return;   // double-show guard
-    _winnerPopupShown = true;        // immediately lock — fetchLiveData phir trigger nahi karega
+    _winnerPopupShown = true;        // immediately lock — prevent fetchLiveData from triggering again
     if (prizeEl) prizeEl.innerText = `+${prize} 🪙`;
     overlay.style.display = 'flex';
     _spawnConfetti();
@@ -1542,11 +1566,12 @@ async function requestWithdraw() {
     if (!rawAmount)                     return showToast("Please enter the coin amount!", "error");
     if (isNaN(reqAmount))               return showToast("Please enter a valid number!", "error");
     if (reqAmount <= 0)                 return showToast("Amount cannot be zero or negative!", "error");
-    if (reqAmount < MIN_WITHDRAW_COINS) return showToast(`Minimum ${MIN_WITHDRAW_COINS} coins required.`, "error");
+    const _minWdCheck = window._dynamicMinWithdraw || MIN_WITHDRAW_COINS;
+    if (reqAmount < _minWdCheck) return showToast(`Minimum ${_minWdCheck} coins required.${_minWdCheck < MIN_WITHDRAW_COINS ? ' (Premium)' : ''}`, "error");
     if (reqAmount > totalCoins)         return showToast(`Insufficient balance. You have ${totalCoins} coins.`, "error");
 
-    // Referral check — CONFIG.REFERRAL_ACTIVE: true hone par 5 referrals zaroori
-    // BUG FIX: duplicate const refCount hata diya, outer refCount use karo
+    // Referral check — 5 referrals required when CONFIG.REFERRAL_ACTIVE is true
+    // BUG FIX: removed duplicate const refCount, using outer refCount
     if (CONFIG.REFERRAL_ACTIVE === true) {
         if (refCount < 5) {
             return showToast(`You need ${5 - refCount} more referral(s) to unlock withdrawal.`, "error");
@@ -2456,7 +2481,7 @@ function switchTab(tabId, el) {
     if (tabId === 'history')     loadHistory();
     if (tabId === 'refer')       loadReferralDashboard();
 
-    // Re-apply referral lock on tab switch (rewards aur refer dono ke liye)
+    // Re-apply referral lock on tab switch (for both rewards and refer tabs)
     if (tabId === 'rewards' || tabId === 'refer') setTimeout(applyReferralLock, 50);
 }
 
@@ -2597,7 +2622,7 @@ function applyReferralLock() {
     const refsMet    = refCount >= 5;
     const lockActive = CONFIG.REFERRAL_ACTIVE !== false && !refsMet;
 
-    // ── Refer TAB lock — REFERRAL_ACTIVE: false pe tab lock karo ───────────
+    // ── Refer TAB lock — lock tab when REFERRAL_ACTIVE is false ───────────
     if (CONFIG.REFERRAL_ACTIVE === false) {
         if (referTab && !referTab.querySelector('.refer-tab-lock-overlay')) {
             const ov = document.createElement('div');
@@ -2622,7 +2647,7 @@ function applyReferralLock() {
         }
     }
 
-    // ── CASE 1: Withdraw lock — refs poore nahi hain ───────────────────────
+    // ── CASE 1: Withdraw lock — referrals not yet completed ───────────────────────
     if (lockActive) {
         if (withdrawTab && !withdrawTab.querySelector('.refer-lock-overlay')) {
             const ov = document.createElement('div');
@@ -3188,19 +3213,19 @@ async function registerForTournament() {
             if (!isDuoForm && i > 2 && !mUid && !mNick) continue;
             if (!mUid || !mNick) {
                 const label = isDuoForm ? `Player ${i}` : `Member ${i}`;
-                if (msg) { msg.style.color = '#ef4444'; msg.textContent = `⚠️ ${label}: FF UID aur FF Name dono bharein.`; }
+                if (msg) { msg.style.color = '#ef4444'; msg.textContent = `⚠️ ${label}: FF UID and FF Name are both required.`; }
                 return;
             }
             if (!/^\d{5,15}$/.test(mUid)) {
                 const label = isDuoForm ? `Player ${i}` : `Member ${i}`;
-                if (msg) { msg.style.color = '#ef4444'; msg.textContent = `⚠️ ${label}: FF UID sirf 5–15 digits hona chahiye.`; }
+                if (msg) { msg.style.color = '#ef4444'; msg.textContent = `⚠️ ${label}: FF UID must be 5–15 digits only.`; }
                 return;
             }
             members.push({ ff_uid: mUid, ff_nickname: mNick });
         }
         const minNeeded = isDuoForm ? 2 : 2;
         if (members.length < minNeeded) {
-            if (msg) { msg.style.color = '#ef4444'; msg.textContent = `⚠️ Kam se kam ${minNeeded} players chahiye.`; }
+            if (msg) { msg.style.color = '#ef4444'; msg.textContent = `⚠️ Minimum ${minNeeded} players required.`; }
             return;
         }
 
@@ -3211,7 +3236,7 @@ async function registerForTournament() {
         const uid  = (document.getElementById('t-ff-uid')?.value      || '').trim();
         const nick = (document.getElementById('t-ff-nickname')?.value  || '').trim();
         if (!uid || !nick) {
-            if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ FF UID aur FF Name dono chahiye.'; }
+            if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ FF UID and FF Name are both required.'; }
             return;
         }
         if (!/^\d{5,15}$/.test(uid)) {
@@ -3306,3 +3331,199 @@ window.addEventListener('DOMContentLoaded', () => {
     // Tournament: silently load status + show dot indicator
     setTimeout(_initTournamentIndicator, 2000);
 });
+
+// ============================================================
+// PREMIUM MEMBERSHIP — Modal & Buy Flow
+// ============================================================
+
+let _selectedPlan = null;
+
+const PREMIUM_PLANS_INFO = {
+    weekly:    { label: 'Weekly',    days: 7,   price: 29,  perDay: '~₹4/day' },
+    monthly:   { label: 'Monthly',   days: 30,  price: 79,  perDay: '~₹2.6/day' },
+    quarterly: { label: 'Quarterly', days: 90,  price: 199, perDay: '~₹2.2/day' },
+};
+
+function showPremiumModal() {
+    document.getElementById('premium-modal-overlay').style.display = 'block';
+    document.getElementById('premium-modal').style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    resetPremiumModal();
+}
+
+function hidePremiumModal() {
+    document.getElementById('premium-modal-overlay').style.display = 'none';
+    document.getElementById('premium-modal').style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+function resetPremiumModal() {
+    _selectedPlan = null;
+    document.getElementById('prem-plan-section').style.display = 'block';
+    document.getElementById('prem-pay-section').style.display  = 'none';
+    // Reset plan card borders
+    ['weekly','monthly','quarterly'].forEach(p => {
+        const el = document.getElementById('plan-' + p);
+        if (!el) return;
+        el.style.border = p === 'monthly'
+            ? '2px solid #f1c40f'
+            : '2px solid rgba(241,196,15,0.2)';
+        el.style.background = p === 'monthly'
+            ? 'rgba(241,196,15,0.08)'
+            : 'rgba(241,196,15,0.04)';
+    });
+    // Clear transaction ID input
+    const txnInput = document.getElementById('prem-txn-input');
+    const txnTick  = document.getElementById('prem-txn-tick');
+    const txnErr   = document.getElementById('prem-txn-err');
+    if (txnInput) { txnInput.value = ''; txnInput.style.borderColor = 'rgba(255,255,255,0.1)'; }
+    if (txnTick)  txnTick.style.display  = 'none';
+    if (txnErr)   txnErr.style.display   = 'none';
+}
+
+function selectPlan(plan) {
+    _selectedPlan = plan;
+    const info    = PREMIUM_PLANS_INFO[plan];
+    if (!info) return;
+
+    // Highlight selected card
+    ['weekly','monthly','quarterly'].forEach(p => {
+        const el = document.getElementById('plan-' + p);
+        if (!el) return;
+        const selected = p === plan;
+        el.style.border      = selected ? '2px solid #4ade80' : '2px solid rgba(241,196,15,0.15)';
+        el.style.background  = selected ? 'rgba(34,197,94,0.08)' : 'rgba(241,196,15,0.03)';
+    });
+
+    // UPI ID — from CONFIG.ADMIN_UPI, fallback to hardcoded default
+    const adminUpi = (typeof CONFIG !== 'undefined' && CONFIG.ADMIN_UPI)
+        ? CONFIG.ADMIN_UPI
+        : 'sahdaksh@fam';
+
+    // QR Image — from CONFIG.ADMIN_QR_URL, fallback to payment_qr.jpg
+    const qrUrl  = (typeof CONFIG !== 'undefined' && CONFIG.ADMIN_QR_URL)
+        ? CONFIG.ADMIN_QR_URL
+        : 'payment_qr.jpg';
+
+    // Show QR image
+    const qrWrap = document.getElementById('prem-qr-wrap');
+    const qrImg  = document.getElementById('prem-qr-img');
+    if (qrImg && qrWrap) {
+        qrImg.src        = qrUrl;
+        qrImg.onerror    = () => { qrWrap.style.display = 'none'; };
+        qrImg.onload     = () => { qrWrap.style.display = 'block'; };
+        qrWrap.style.display = 'block';
+    }
+
+    // Update payment section
+    const upiEl    = document.getElementById('prem-upi-display');
+    const amountEl = document.getElementById('prem-amount-display');
+    if (upiEl)    upiEl.textContent    = adminUpi;
+    if (amountEl) amountEl.textContent = `Amount: ₹${info.price} (${info.label} — ${info.days} days)`;
+
+    // Show payment section, hide plan section
+    document.getElementById('prem-plan-section').style.display = 'none';
+    document.getElementById('prem-pay-section').style.display  = 'block';
+
+    // Scroll to top of modal
+    const modal = document.getElementById('premium-modal');
+    if (modal) modal.scrollTop = 0;
+}
+
+function copyUpi() {
+    const adminUpi = (typeof CONFIG !== 'undefined' && CONFIG.ADMIN_UPI)
+        ? CONFIG.ADMIN_UPI
+        : 'sahdaksh@fam';
+    if (!adminUpi) {
+        showToast('⚠️ UPI ID not configured. Contact admin.', 'error');
+        return;
+    }
+    try {
+        navigator.clipboard.writeText(adminUpi).then(() => {
+            showToast('✅ UPI ID copied!', 'ok');
+        }).catch(() => {
+            // Fallback
+            const el = document.createElement('textarea');
+            el.value = adminUpi;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            showToast('✅ UPI ID copied!', 'ok');
+        });
+    } catch (e) {
+        showToast('❌ Copy failed. Copy manually: ' + adminUpi, 'error');
+    }
+}
+
+function validateTxnInput() {
+    const inp  = document.getElementById('prem-txn-input');
+    const tick = document.getElementById('prem-txn-tick');
+    const err  = document.getElementById('prem-txn-err');
+    if (!inp) return;
+    const val = inp.value.trim();
+    const valid = val.length >= 6;
+    // Border colour feedback
+    inp.style.borderColor = val.length === 0
+        ? 'rgba(255,255,255,0.1)'
+        : valid ? '#4ade80' : '#ef4444';
+    // Tick icon
+    if (tick) tick.style.display = valid ? 'inline' : 'none';
+    // Hide error when user starts typing valid input
+    if (err && valid) err.style.display = 'none';
+}
+
+function openBotForPayment() {
+    if (!_selectedPlan) return;
+
+    // Validate transaction ID
+    const txnInput = document.getElementById('prem-txn-input');
+    const txnErr   = document.getElementById('prem-txn-err');
+    const txnId    = txnInput ? txnInput.value.trim() : '';
+    if (txnId.length < 6) {
+        if (txnErr)   txnErr.style.display = 'block';
+        if (txnInput) {
+            txnInput.style.borderColor = '#ef4444';
+            txnInput.focus();
+        }
+        return;
+    }
+
+    const info  = PREMIUM_PLANS_INFO[_selectedPlan];
+    const botUN = (typeof CONFIG !== 'undefined' && CONFIG.BOT_USERNAME) ? CONFIG.BOT_USERNAME : '';
+    if (!botUN) {
+        showToast('⚠️ Bot username not configured.', 'error');
+        return;
+    }
+    const uid    = userId || 'unknown';
+    const botUrl = `https://t.me/${botUN.replace('@','')}?start=premium_pay_${_selectedPlan}_${uid}_${encodeURIComponent(txnId)}`;
+    hidePremiumModal();
+    if (window.Telegram && window.Telegram.WebApp) {
+        window.Telegram.WebApp.openTelegramLink(botUrl);
+    } else {
+        window.open(botUrl, '_blank');
+    }
+    showToast('📤 Bot opened — send your screenshot!', 'ok');
+}
+
+// Update premium card on home tab based on user's premium status
+function updatePremiumCard(premInfo) {
+    const card      = document.getElementById('premium-buy-card');
+    const title     = document.getElementById('prem-card-title');
+    const sub       = document.getElementById('prem-card-sub');
+    const btnLabel  = document.getElementById('prem-card-btn-label');
+    if (!card) return;
+
+    if (premInfo && premInfo.premium) {
+        // Already premium — show status
+        if (title)    title.textContent   = '👑 Premium Active';
+        if (sub)      sub.textContent     = `${premInfo.plan || 'Standard'} · ${premInfo.days_left || 0} days remaining`;
+        if (btnLabel) btnLabel.textContent = 'View Benefits →';
+        card.style.borderColor = 'rgba(74,222,128,0.4)';
+    } else {
+        if (title)    title.textContent   = 'Get Premium';
+        if (sub)      sub.textContent     = '2x Coins • 15 Spins/Day • Withdraw from 10k';
+        if (btnLabel) btnLabel.textContent = 'From ₹29 →';
+        card.style.borderColor = 'rgba(241,196,15,0.35)';
+    }
+}
