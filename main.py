@@ -229,6 +229,20 @@ MIN_WITHDRAW      = 25000
 MAX_WITHDRAW      = 100000
 WITHDRAW_COOLDOWN = 86400
 
+# ── Premium Membership ────────────────────────────────────────────────────
+PREMIUM_TASK_BONUS_PCT    = 25    # Task reward pe +25% bonus
+PREMIUM_SPIN_PER_DAY      = 15   # Premium: 15 spins/day (free: SPIN_PER_DAY)
+PREMIUM_MIN_WITHDRAW      = 10000 # Premium: lower withdrawal minimum
+PREMIUM_REFERRAL_NEEDED   = 2    # Premium: sirf 2 referrals chahiye
+PREMIUM_AD_REWARD         = 10   # Premium: 10 coins/ad (normal: AD_COIN_REWARD=5)
+PREMIUM_REFERRAL_BONUS    = 200  # Premium: 2x referral join bonus (normal: REFERRAL_JOIN_BONUS=30... wait its commission based)
+PREMIUM_PLANS = {
+    "weekly":    {"label": "Weekly",    "days": 7,   "price": 29},
+    "monthly":   {"label": "Monthly",   "days": 30,  "price": 79},
+    "quarterly": {"label": "Quarterly", "days": 90,  "price": 199},
+}
+# ─────────────────────────────────────────────────────────────────────────
+
 # ============================================================
 # 4a-2. REFERRAL COMMISSION SYSTEM
 # ============================================================
@@ -906,6 +920,47 @@ def sanitize_text(value: str, max_length: int = 1000) -> str:
     return value.strip()[:max_length]
 
 
+# ── Premium Membership Helpers ────────────────────────────────────────────
+def is_premium(user_id: int) -> bool:
+    """Returns True if user has active (non-expired) premium membership."""
+    try:
+        u = users_col.find_one({"user_id": user_id}, {"premium": 1, "premium_expiry": 1})
+        if not u or not u.get("premium"):
+            return False
+        expiry = u.get("premium_expiry")
+        if expiry and datetime.utcnow() > expiry:
+            users_col.update_one({"user_id": user_id}, {"$set": {"premium": False}})
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def get_premium_info(user_id: int) -> dict:
+    """Returns premium status dict for a user — used in API responses."""
+    try:
+        u = users_col.find_one(
+            {"user_id": user_id},
+            {"premium": 1, "premium_expiry": 1, "premium_plan": 1},
+        )
+        if not u or not u.get("premium"):
+            return {"premium": False}
+        expiry = u.get("premium_expiry")
+        if expiry and datetime.utcnow() > expiry:
+            users_col.update_one({"user_id": user_id}, {"$set": {"premium": False}})
+            return {"premium": False}
+        days_left = max(0, (expiry - datetime.utcnow()).days) if expiry else 9999
+        return {
+            "premium":   True,
+            "expiry":    expiry.strftime("%d %b %Y") if expiry else "Lifetime",
+            "days_left": days_left,
+            "plan":      u.get("premium_plan", "Standard"),
+        }
+    except Exception:
+        return {"premium": False}
+# ─────────────────────────────────────────────────────────────────────────
+
+
 def is_group_chat(message) -> bool:
     return getattr(message.chat, "type", "") in ("group", "supergroup")
 
@@ -1318,6 +1373,7 @@ def get_user_data_api(user_id: int):
             "allcomplete_bonus_date": user.get("allcomplete_bonus_date", ""),
             "pending_winner_popup":   user.get("pending_winner_popup", False),
             "pending_winner_prize":   user.get("pending_winner_prize", 0),
+            "premium_info":           get_premium_info(user_id),
         })
     except Exception as exc:
         logger.error("get_user error for %s: %s", user_id, exc)
@@ -1651,8 +1707,9 @@ def withdraw_api():
 
     if requested_amount <= 0:
         return jsonify({"status": "error", "message": "Amount cannot be zero or negative."}), 400
-    if requested_amount < MIN_WITHDRAW:
-        return jsonify({"status": "error", "message": f"Minimum withdrawal is {MIN_WITHDRAW} coins."}), 400
+    _min_wd  = PREMIUM_MIN_WITHDRAW if is_premium(user_id) else MIN_WITHDRAW
+    if requested_amount < _min_wd:
+        return jsonify({"status": "error", "message": f"Minimum withdrawal is {_min_wd} coins."}), 400
     if requested_amount > MAX_WITHDRAW:
         return jsonify({"status": "error", "message": "Amount exceeds maximum limit."}), 400
 
@@ -1691,12 +1748,13 @@ def withdraw_api():
 
     # ── Referral check (REFERRAL_ACTIVE env var se on/off) ──────────────────
     if REFERRAL_ACTIVE:
-        _ref_user = users_col.find_one({"user_id": user_id}, {"referral_count": 1, "_id": 0})
-        ref_count = _ref_user.get("referral_count", 0) if _ref_user else 0
-        if ref_count < 5:
+        _ref_user    = users_col.find_one({"user_id": user_id}, {"referral_count": 1, "_id": 0})
+        ref_count    = _ref_user.get("referral_count", 0) if _ref_user else 0
+        _ref_needed  = PREMIUM_REFERRAL_NEEDED if is_premium(user_id) else 5
+        if ref_count < _ref_needed:
             return jsonify({
                 "status":  "error",
-                "message": f"You need {5 - ref_count} more referral(s) to unlock withdrawal.",
+                "message": f"You need {_ref_needed - ref_count} more referral(s) to unlock withdrawal.",
             }), 400
 
     # ── Withdrawal Duplicate Guard — ek pending request hote hue doosra nahi jayega ──
@@ -1909,6 +1967,13 @@ def verify_task_api():
         if sponsor_link:
             completion_record["link"] = sponsor_link
 
+        # ── Premium bonus: +25% task reward ──────────────────────────────
+        premium_bonus = 0
+        if is_premium(user_id):
+            premium_bonus = int(reward * PREMIUM_TASK_BONUS_PCT / 100)
+            reward += premium_bonus
+        # ─────────────────────────────────────────────────────────────────
+
         upd = users_col.update_one(
             guard_filter,
             {"$inc": {"coins": reward}, "$set": {completion_field: completion_record}},
@@ -1922,10 +1987,11 @@ def verify_task_api():
         clear_task_fail_counter(user_id, task_id)
         # Referral commission — non-blocking, 10% to sponsor
         _fire_commission(user_id, reward, "task", f"task_{user_id}_{task_id}_{today}_{correct_code}")
+        _prem_msg = f" (+{premium_bonus} 👑 Premium Bonus!)" if premium_bonus > 0 else ""
         return jsonify({
             "status":  "success",
-            "message": f"{reward} coins added to your balance!",
-            "data":    {"reward": reward},
+            "message": f"{reward} coins added to your balance!{_prem_msg}",
+            "data":    {"reward": reward, "premium_bonus": premium_bonus},
         })
     except Exception as exc:
         logger.error("verify_task error for %s: %s", user_id, exc)
@@ -2024,10 +2090,12 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
         done        = ads_today + 1
         remaining   = MAX_ADS_PER_DAY - done
         ad_event_id = f"ad_{user_id}_{today}_{done}"
+        # Premium: 2x ad coins
+        _ad_reward  = PREMIUM_AD_REWARD if is_premium(user_id) else AD_COIN_REWARD
         users_col.update_one(
             {"user_id": user_id},
             {
-                "$inc": {"coins": AD_COIN_REWARD},
+                "$inc": {"coins": _ad_reward},
                 "$set": {
                     "ads_date":        today,
                     "ads_today":       done,
@@ -2036,11 +2104,12 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
             },
         )
         # Referral commission — non-blocking, 10% to sponsor
-        _fire_commission(user_id, AD_COIN_REWARD, "ad", ad_event_id)
+        _fire_commission(user_id, _ad_reward, "ad", ad_event_id)
+        _prem_tag = " 👑 (Premium 2x!)" if _ad_reward > AD_COIN_REWARD else ""
         return {
             "status":  "success",
-            "message": f"{AD_COIN_REWARD} coins earned! ({done}/{MAX_ADS_PER_DAY} ads watched today)",
-            "data":    {"reward": AD_COIN_REWARD, "ads_done": done, "ads_total": MAX_ADS_PER_DAY, "remaining": remaining},
+            "message": f"{_ad_reward} coins earned{_prem_tag} ({done}/{MAX_ADS_PER_DAY} ads watched today)",
+            "data":    {"reward": _ad_reward, "ads_done": done, "ads_total": MAX_ADS_PER_DAY, "remaining": remaining},
         }, 200
     except Exception as exc:
         logger.error("manual_ad_reward error for %s: %s", user_id, exc)
@@ -3472,10 +3541,11 @@ def do_spin_api(user_id: int):
         spins_date = user.get("spins_date", "")
         spins_done = user.get("spins_today", 0) if spins_date == today else 0
 
-        if spins_done >= SPIN_PER_DAY:
+        _spin_limit = PREMIUM_SPIN_PER_DAY if is_premium(user_id) else SPIN_PER_DAY
+        if spins_done >= _spin_limit:
             return jsonify({
                 "status":  "error",
-                "message": f"Daily spin limit reached ({SPIN_PER_DAY}/{SPIN_PER_DAY}). Come back tomorrow!",
+                "message": f"Daily spin limit reached ({_spin_limit}/{_spin_limit}). Come back tomorrow!",
             }), 400
 
         # Weighted random spin result
@@ -3506,8 +3576,8 @@ def do_spin_api(user_id: int):
             "reward":      reward,
             "message":     msg,
             "spins_done":  new_spins,
-            "spins_total": SPIN_PER_DAY,
-            "spins_left":  SPIN_PER_DAY - new_spins,
+            "spins_total": _spin_limit,
+            "spins_left":  _spin_limit - new_spins,
         })
     except Exception as exc:
         logger.error("do_spin_api error for %s: %s", user_id, exc)
@@ -3529,8 +3599,8 @@ def get_spin_status_api(user_id: int):
             "status":       "success",
             "spin_active":  cfg.get("spin_active", True),
             "spins_done":   spins_done,
-            "spins_total":  SPIN_PER_DAY,
-            "spins_left":   max(0, SPIN_PER_DAY - spins_done),
+            "spins_total":  PREMIUM_SPIN_PER_DAY if is_premium(user_id) else SPIN_PER_DAY,
+            "spins_left":   max(0, (PREMIUM_SPIN_PER_DAY if is_premium(user_id) else SPIN_PER_DAY) - spins_done),
             "ad_required":  SPIN_AD_REQUIRED,
         })
     except Exception as exc:
@@ -4780,8 +4850,54 @@ def start(message):
     user_id   = message.from_user.id
     username  = message.from_user.first_name or "User"
     params    = message.text.split()
-    referrer_id = params[1] if len(params) > 1 else None
+    deep_link = params[1] if len(params) > 1 else None
 
+    # ── Premium payment deep link: premium_pay_<plan>_<uid>_<txnId> ──
+    if deep_link and deep_link.startswith("premium_pay_"):
+        try:
+            # Format: premium_pay_monthly_123456789_UTR123456789012
+            parts_dl  = deep_link.split("_", 4)   # ['premium','pay','plan','uid','txnId']
+            plan_key  = parts_dl[2] if len(parts_dl) > 2 else "unknown"
+            pay_uid   = parts_dl[3] if len(parts_dl) > 3 else str(user_id)
+            txn_id    = parts_dl[4] if len(parts_dl) > 4 else "N/A"
+
+            plan_labels = {"weekly": "Weekly ₹29", "monthly": "Monthly ₹79", "quarterly": "Quarterly ₹199"}
+            plan_days   = {"weekly": 7, "monthly": 30, "quarterly": 90}
+            plan_label  = plan_labels.get(plan_key, plan_key)
+            plan_day    = plan_days.get(plan_key, 30)
+
+            # Notify admin
+            admin_text = (
+                f"💳 *New Premium Payment Request*\n\n"
+                f"👤 User ID: `{pay_uid}`\n"
+                f"📛 Name: {username}\n"
+                f"📦 Plan: *{plan_label}*\n"
+                f"🧾 UTR / Txn ID: `{txn_id}`\n\n"
+                f"✅ Verify & activate:\n"
+                f"`/setpremium {pay_uid} {plan_day} {plan_key}`\n\n"
+                f"❌ To reject: simply ignore or notify user."
+            )
+            try:
+                bot.send_message(ADMIN_ID, admin_text, parse_mode="Markdown")
+            except Exception:
+                pass
+
+            # Acknowledge user
+            bot.send_message(
+                user_id,
+                f"✅ *Payment request received!*\n\n"
+                f"📦 Plan: *{plan_label}*\n"
+                f"🧾 UTR ID: `{txn_id}`\n\n"
+                f"📸 Please send your payment screenshot below so the admin can verify faster.\n\n"
+                f"⏳ Premium will be activated within *10–30 minutes* after verification.",
+                parse_mode="Markdown"
+            )
+            return
+        except Exception as e:
+            logger.error("premium_pay deep link error: %s", e)
+
+    # ── Normal /start ──
+    referrer_id = deep_link if deep_link and not deep_link.startswith("premium") else None
     user          = get_or_create_user(user_id, username, referrer_id)
     current_coins = user.get("coins", 0)
     web_app_url   = f"https://sahdakshsanoj-byte.github.io/Earning-bot/?user_id={user_id}"
@@ -6988,6 +7104,190 @@ def cmd_list_tournaments(message):
 
 
 # ============================================================
+# PREMIUM MEMBERSHIP BOT COMMANDS
+# ============================================================
+
+@bot.message_handler(commands=["setpremium"])
+def cmd_set_premium(message):
+    """Admin: /setpremium <user_id> <days> [plan]
+    Example:
+      /setpremium 123456789 30
+      /setpremium 123456789 30 monthly
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+
+    text  = message.text or ""
+    parts = text.split()
+    if len(parts) < 3:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:*\n`/setpremium <user_id> <days> [plan]`\n\n"
+            "*Plans:* `weekly` (7d ₹29) | `monthly` (30d ₹79) | `quarterly` (90d ₹199)\n\n"
+            "*Example:*\n`/setpremium 123456789 30 monthly`",
+            parse_mode="Markdown",
+        )
+
+    try:
+        target_uid = int(parts[1])
+        days       = int(parts[2])
+        plan       = parts[3].lower() if len(parts) > 3 else "monthly"
+    except (ValueError, IndexError):
+        return bot.reply_to(message, "❌ Invalid format. `/setpremium <user_id> <days>`", parse_mode="Markdown")
+
+    if days <= 0 or days > 3650:
+        return bot.reply_to(message, "❌ Days must be between 1 and 3650.")
+
+    target_user = users_col.find_one({"user_id": target_uid}, {"username": 1, "first_name": 1})
+    if not target_user:
+        return bot.reply_to(message, f"❌ User `{target_uid}` not found.", parse_mode="Markdown")
+
+    expiry_dt = datetime.utcnow() + timedelta(days=days)
+
+    users_col.update_one(
+        {"user_id": target_uid},
+        {"$set": {
+            "premium":         True,
+            "premium_expiry":  expiry_dt,
+            "premium_plan":    plan,
+            "premium_set_by":  ADMIN_ID,
+            "premium_set_at":  datetime.utcnow(),
+        }},
+    )
+
+    display_name = target_user.get("first_name") or target_user.get("username") or str(target_uid)
+    plan_info    = PREMIUM_PLANS.get(plan, {"label": plan.capitalize()})
+    bot.reply_to(
+        message,
+        f"✅ *Premium Activated!*\n\n"
+        f"👤 *User:* {display_name} (`{target_uid}`)\n"
+        f"👑 *Plan:* {plan_info['label']}\n"
+        f"📅 *Expires:* {expiry_dt.strftime('%d %b %Y')} ({days} days)\n\n"
+        f"*Benefits Unlocked:*\n"
+        f"• 🎯 Task reward +25% bonus\n"
+        f"• 📺 Ads: 10 coins/ad (2x)\n"
+        f"• 🎡 Spin: 15 spins/day (3x)\n"
+        f"• 💸 Withdrawal minimum: 10,000 coins\n"
+        f"• 👥 Referrals needed: 2 (instead of 5)",
+        parse_mode="Markdown",
+    )
+
+    # Notify user in DM
+    try:
+        bot.send_message(
+            target_uid,
+            f"🎉 *Congratulations! Premium Activated!*\n\n"
+            f"👑 *Plan:* {plan_info['label']}\n"
+            f"📅 *Valid till:* {expiry_dt.strftime('%d %b %Y')}\n\n"
+            f"*Your benefits:*\n"
+            f"• 🎯 Task reward +25% bonus\n"
+            f"• 📺 Watch ads: 10 coins (2x normal)\n"
+            f"• 🎡 Spin wheel: 15 spins/day\n"
+            f"• 💸 Withdraw from 10,000 coins\n"
+            f"• 👥 Only 2 referrals needed\n\n"
+            f"App kholo aur enjoy karo! 🚀",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        pass
+
+    logger.info("Admin set premium for user %s: %s days (%s)", target_uid, days, plan)
+
+
+@bot.message_handler(commands=["removepremium"])
+def cmd_remove_premium(message):
+    """Admin: /removepremium <user_id>"""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+
+    text  = message.text or ""
+    parts = text.split()
+    if len(parts) < 2:
+        return bot.reply_to(message, "📋 *Usage:* `/removepremium <user_id>`", parse_mode="Markdown")
+
+    try:
+        target_uid = int(parts[1])
+    except ValueError:
+        return bot.reply_to(message, "❌ Invalid user ID.")
+
+    target_user = users_col.find_one({"user_id": target_uid}, {"username": 1, "first_name": 1, "premium": 1})
+    if not target_user:
+        return bot.reply_to(message, f"❌ User `{target_uid}` not found.", parse_mode="Markdown")
+
+    if not target_user.get("premium"):
+        return bot.reply_to(message, f"⚠️ User `{target_uid}` already has no premium.", parse_mode="Markdown")
+
+    users_col.update_one(
+        {"user_id": target_uid},
+        {"$set": {"premium": False, "premium_expiry": None}},
+    )
+
+    display_name = target_user.get("first_name") or target_user.get("username") or str(target_uid)
+    bot.reply_to(
+        message,
+        f"✅ Premium removed for *{display_name}* (`{target_uid}`).",
+        parse_mode="Markdown",
+    )
+
+    try:
+        bot.send_message(
+            target_uid,
+            "⚠️ Aapki *Premium Membership* expire/remove ho gayi hai.\n\n"
+            "Premium benefits ab available nahi hain.\n"
+            "Admin se contact karo renewal ke liye.",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        pass
+
+    logger.info("Admin removed premium for user %s", target_uid)
+
+
+@bot.message_handler(commands=["premium"])
+def cmd_premium_status(message):
+    """User: /premium — Premium status aur benefits dekho."""
+    if is_group_chat(message):
+        return
+
+    user_id    = message.from_user.id
+    prem_info  = get_premium_info(user_id)
+    user       = users_col.find_one({"user_id": user_id}, {"first_name": 1})
+    first_name = (user.get("first_name") or "User") if user else "User"
+
+    if prem_info.get("premium"):
+        plan      = prem_info.get("plan", "Standard").capitalize()
+        expiry    = prem_info.get("expiry", "N/A")
+        days_left = prem_info.get("days_left", 0)
+        bot.reply_to(
+            message,
+            f"👑 *Premium Active — {first_name}!*\n\n"
+            f"📦 *Plan:* {plan}\n"
+            f"📅 *Expires:* {expiry} ({days_left} days left)\n\n"
+            f"*Your Premium Benefits:*\n"
+            f"• 🎯 Task reward: +25% bonus coins\n"
+            f"• 📺 Watch ads: 10 coins/ad (2x normal)\n"
+            f"• 🎡 Spin wheel: 15 spins/day (3x normal)\n"
+            f"• 💸 Withdraw from: 10,000 coins (normal: 25,000)\n"
+            f"• 👥 Referrals needed: 2 (normal: 5)\n\n"
+            f"_Enjoy your premium benefits! 🚀_",
+            parse_mode="Markdown",
+        )
+    else:
+        bot.reply_to(
+            message,
+            f"❌ *No Premium Membership*\n\n"
+            f"Premium ke saath milega:\n"
+            f"• 🎯 Task reward +25% bonus\n"
+            f"• 📺 Ads: 10 coins/ad (2x)\n"
+            f"• 🎡 Spin: 15 spins/day (3x)\n"
+            f"• 💸 Withdraw from 10,000 coins\n"
+            f"• 👥 Sirf 2 referrals chahiye\n\n"
+            f"_Premium ke liye admin se contact karo!_",
+            parse_mode="Markdown",
+        )
+
+
+# ============================================================
 # BOT POLLING THREAD
 # ============================================================
 
@@ -7009,11 +7309,15 @@ def run_bot() -> None:
             # ── Register bot commands in Telegram menu ──
             try:
                 bot.set_my_commands([
-                    types.BotCommand("start",    "🚀 Bot shuru karo"),
-                    types.BotCommand("balance",  "💰 Apna balance dekho"),
-                    types.BotCommand("redeem",   "🎟 Promo code redeem karo"),
-                    types.BotCommand("stats",    "📊 Bot stats dekho (Admin)"),
-                    types.BotCommand("monetag",  "💵 Monetag earnings dekho (Admin)"),
+                    types.BotCommand("start",          "🚀 Bot shuru karo"),
+                    types.BotCommand("balance",        "💰 Apna balance dekho"),
+                    types.BotCommand("premium",        "👑 Premium status & benefits"),
+                    types.BotCommand("redeem",         "🎟 Promo code redeem karo"),
+                    types.BotCommand("stats",          "📊 Bot stats dekho (Admin)"),
+                    types.BotCommand("monetag",        "💵 Monetag earnings dekho (Admin)"),
+                    types.BotCommand("setpremium",     "👑 Premium activate karo (Admin)"),
+                    types.BotCommand("removepremium",  "❌ Premium remove karo (Admin)"),
+                    types.BotCommand("listtournaments","📋 Tournament list dekho (Admin)"),
                 ])
                 logger.info("Bot commands registered successfully.")
             except Exception as cmd_exc:
