@@ -368,7 +368,20 @@ async function fetchLiveData() {
             const premBadgeEl = document.getElementById('premium-status-badge');
             if (premBadgeEl) {
                 if (isPremium) {
-                    premBadgeEl.innerHTML = `<span style="background:linear-gradient(135deg,#f1c40f,#e67e22);color:#1e293b;font-size:11px;font-weight:800;padding:3px 9px;border-radius:20px;letter-spacing:0.5px;">👑 PREMIUM · ${premInfo.days_left}d left</span>`;
+                    premBadgeEl.innerHTML = `
+                        <span style="
+                            display:inline-flex;align-items:center;gap:5px;
+                            background:linear-gradient(135deg,#1a78c2,#1D9BF0);
+                            color:#fff;font-size:11px;font-weight:800;
+                            padding:4px 11px 4px 8px;border-radius:20px;
+                            letter-spacing:0.4px;box-shadow:0 2px 8px rgba(29,155,240,0.4);
+                        ">
+                            <svg width="14" height="14" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="9" cy="9" r="9" fill="rgba(255,255,255,0.25)"/>
+                                <path d="M5 9.5L7.5 12L13 6.5" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            VERIFIED PREMIUM · ${premInfo.days_left}d left
+                        </span>`;
                     premBadgeEl.style.display = 'block';
                 } else {
                     premBadgeEl.style.display = 'none';
@@ -391,8 +404,8 @@ async function fetchLiveData() {
                     : 'linear-gradient(90deg,#f1c40f,#f39c12)';
             }
             if (refBar)    refBar.style.width    = refPct + '%';
-            if (coinsText) coinsText.innerText   = `${coins} / ${_minWd}${coins >= _minWd ? ' ✅' : ''}${isPremium ? ' 👑' : ''}`;
-            if (refText)   refText.innerText     = `${refCount} / ${_refNeeded}${refCount >= _refNeeded ? ' ✅' : ''}${isPremium ? ' 👑' : ''}`;
+            if (coinsText) coinsText.innerText   = `${coins} / ${_minWd}${coins >= _minWd ? ' ✅' : ''}${isPremium ? ' ✓' : ''}`;
+            if (refText)   refText.innerText     = `${refCount} / ${_refNeeded}${refCount >= _refNeeded ? ' ✅' : ''}${isPremium ? ' ✓' : ''}`;
 
             applyReferralLock();
 
@@ -3400,10 +3413,15 @@ function selectPlan(plan) {
         ? CONFIG.ADMIN_UPI
         : 'sahdaksh@fam';
 
-    // QR Image — from CONFIG.ADMIN_QR_URL, fallback to payment_qr.jpg
-    const qrUrl  = (typeof CONFIG !== 'undefined' && CONFIG.ADMIN_QR_URL)
-        ? CONFIG.ADMIN_QR_URL
-        : 'payment_qr.jpg';
+    // QR Image — CONFIG.ADMIN_QR_URL > absolute URL built from page location > hidden
+    let qrUrl = '';
+    if (typeof CONFIG !== 'undefined' && CONFIG.ADMIN_QR_URL) {
+        qrUrl = CONFIG.ADMIN_QR_URL;
+    } else {
+        // Build absolute URL from current page so relative paths always work
+        const base = window.location.href.replace(/[^/]*$/, '');
+        qrUrl = base + 'payment_qr.jpg';
+    }
 
     // Show QR image
     const qrWrap = document.getElementById('prem-qr-wrap');
@@ -3515,11 +3533,19 @@ function updatePremiumCard(premInfo) {
     if (!card) return;
 
     if (premInfo && premInfo.premium) {
-        // Already premium — show status
-        if (title)    title.textContent   = '👑 Premium Active';
+        // Already premium — show status with blue tick
+        if (title) {
+            title.innerHTML = `
+                <svg width="15" height="15" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle;margin-right:4px;margin-bottom:1px;">
+                    <circle cx="9" cy="9" r="9" fill="#1D9BF0"/>
+                    <path d="M5 9.5L7.5 12L13 6.5" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>Premium Active`;
+            title.style.color = '#1D9BF0';
+        }
         if (sub)      sub.textContent     = `${premInfo.plan || 'Standard'} · ${premInfo.days_left || 0} days remaining`;
         if (btnLabel) btnLabel.textContent = 'View Benefits →';
-        card.style.borderColor = 'rgba(74,222,128,0.4)';
+        card.style.borderColor = 'rgba(29,155,240,0.5)';
+        card.style.boxShadow   = '0 4px 20px rgba(29,155,240,0.08)';
     } else {
         if (title)    title.textContent   = 'Get Premium';
         if (sub)      sub.textContent     = '2x Coins • 15 Spins/Day • Withdraw from 10k';
