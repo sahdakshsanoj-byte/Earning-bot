@@ -7129,23 +7129,45 @@ def cmd_set_premium(message):
         )
 
     try:
-        target_uid = int(parts[1])
-        days       = int(parts[2])
-        plan       = parts[3].lower() if len(parts) > 3 else "monthly"
+        raw_uid = parts[1].strip()
+        target_uid = int(raw_uid)
+        days       = int(parts[2].strip())
+        plan       = parts[3].strip().lower() if len(parts) > 3 else "monthly"
     except (ValueError, IndexError):
-        return bot.reply_to(message, "❌ Invalid format. `/setpremium <user_id> <days>`", parse_mode="Markdown")
+        return bot.reply_to(
+            message,
+            "❌ *Invalid format.*\n\n"
+            "Correct usage:\n`/setpremium <user_id> <days> [plan]`\n\n"
+            "Example:\n`/setpremium 6613528513 30 monthly`",
+            parse_mode="Markdown"
+        )
 
     if days <= 0 or days > 3650:
         return bot.reply_to(message, "❌ Days must be between 1 and 3650.")
 
-    target_user = users_col.find_one({"user_id": target_uid}, {"username": 1, "first_name": 1})
+    if plan not in ("weekly", "monthly", "quarterly"):
+        plan = "monthly"
+
+    # Search by int OR string user_id (handles MongoDB field type mismatch)
+    target_user = users_col.find_one(
+        {"$or": [{"user_id": target_uid}, {"user_id": str(target_uid)}]},
+        {"user_id": 1, "username": 1, "first_name": 1}
+    )
     if not target_user:
-        return bot.reply_to(message, f"❌ User `{target_uid}` not found.", parse_mode="Markdown")
+        return bot.reply_to(
+            message,
+            f"❌ User `{target_uid}` not found in database.\n\n"
+            f"Make sure the user has started the bot at least once.",
+            parse_mode="Markdown"
+        )
+
+    # Use the actual stored user_id field for update (preserves field type)
+    stored_uid = target_user.get("user_id", target_uid)
 
     expiry_dt = datetime.utcnow() + timedelta(days=days)
 
     users_col.update_one(
-        {"user_id": target_uid},
+        {"user_id": stored_uid},
         {"$set": {
             "premium":         True,
             "premium_expiry":  expiry_dt,
@@ -7288,6 +7310,54 @@ def cmd_premium_status(message):
 
 
 # ============================================================
+# SCREENSHOT / PHOTO HANDLER — Payment proof forwarding
+# ============================================================
+
+@bot.message_handler(content_types=["photo"])
+def handle_photo(message):
+    """When a user sends a photo, forward it to admin as payment proof."""
+    if is_group_chat(message):
+        return
+
+    user_id   = message.from_user.id
+    username  = message.from_user.first_name or "User"
+    caption   = message.caption or ""
+
+    # Forward photo to admin with user details
+    try:
+        file_id   = message.photo[-1].file_id   # highest resolution
+        prem_info = get_premium_info(user_id)
+        status    = "👑 PREMIUM ACTIVE" if prem_info.get("premium") else "❌ Not Premium"
+
+        admin_caption = (
+            f"📸 *Payment Screenshot Received*\n\n"
+            f"👤 User: {username} (`{user_id}`)\n"
+            f"💬 Caption: {caption or '—'}\n"
+            f"📦 Premium Status: {status}\n\n"
+            f"✅ To activate:\n"
+            f"`/setpremium {user_id} 30 monthly`"
+        )
+        bot.send_photo(
+            ADMIN_ID,
+            file_id,
+            caption=admin_caption,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error("handle_photo forward error: %s", e)
+
+    # Acknowledge user
+    bot.reply_to(
+        message,
+        "✅ *Screenshot received!*\n\n"
+        "Your payment proof has been forwarded to the admin.\n"
+        "⏳ Premium will be activated within *10–30 minutes*.\n\n"
+        "_Thank you for your patience!_",
+        parse_mode="Markdown"
+    )
+
+
+# ============================================================
 # BOT POLLING THREAD
 # ============================================================
 
@@ -7308,17 +7378,42 @@ def run_bot() -> None:
                 logger.warning("Could not remove webhook before polling: %s", webhook_exc)
             # ── Register bot commands in Telegram menu ──
             try:
-                bot.set_my_commands([
-                    types.BotCommand("start",          "🚀 Bot shuru karo"),
-                    types.BotCommand("balance",        "💰 Apna balance dekho"),
-                    types.BotCommand("premium",        "👑 Premium status & benefits"),
-                    types.BotCommand("redeem",         "🎟 Promo code redeem karo"),
-                    types.BotCommand("stats",          "📊 Bot stats dekho (Admin)"),
-                    types.BotCommand("monetag",        "💵 Monetag earnings dekho (Admin)"),
-                    types.BotCommand("setpremium",     "👑 Premium activate karo (Admin)"),
-                    types.BotCommand("removepremium",  "❌ Premium remove karo (Admin)"),
-                    types.BotCommand("listtournaments","📋 Tournament list dekho (Admin)"),
-                ])
+                # User-facing commands (visible to everyone)
+                user_commands = [
+                    types.BotCommand("start",   "🚀 Start the bot"),
+                    types.BotCommand("balance", "💰 Check your balance"),
+                    types.BotCommand("premium", "👑 Premium status & benefits"),
+                    types.BotCommand("redeem",  "🎟 Redeem a promo code"),
+                ]
+                bot.set_my_commands(
+                    user_commands,
+                    scope=types.BotCommandScopeDefault()
+                )
+
+                # Admin-only commands (visible only to admin in their chat)
+                admin_commands = user_commands + [
+                    types.BotCommand("stats",            "📊 Bot stats"),
+                    types.BotCommand("monetag",          "💵 Monetag earnings"),
+                    types.BotCommand("setpremium",       "👑 Activate premium for user"),
+                    types.BotCommand("removepremium",    "❌ Remove premium from user"),
+                    types.BotCommand("listtournaments",  "📋 List all tournaments"),
+                    types.BotCommand("addtournament",    "➕ Add a tournament"),
+                    types.BotCommand("deltournament",    "🗑 Delete a tournament"),
+                    types.BotCommand("setprizes",        "🏆 Set tournament prizes"),
+                    types.BotCommand("broadcast",        "📢 Broadcast message to all users"),
+                    types.BotCommand("addtask",          "✅ Add a task"),
+                    types.BotCommand("deltask",          "🗑 Delete a task"),
+                    types.BotCommand("resetdevice",      "🔄 Reset user device lock"),
+                    types.BotCommand("ban",              "🚫 Ban a user"),
+                    types.BotCommand("unban",            "✅ Unban a user"),
+                    types.BotCommand("setbalance",       "💰 Set user balance"),
+                    types.BotCommand("addpromo",         "🎟 Add promo code"),
+                    types.BotCommand("delpromo",         "🗑 Delete promo code"),
+                ]
+                bot.set_my_commands(
+                    admin_commands,
+                    scope=types.BotCommandScopeChat(chat_id=ADMIN_ID)
+                )
                 logger.info("Bot commands registered successfully.")
             except Exception as cmd_exc:
                 logger.warning("Could not set bot commands: %s", cmd_exc)
