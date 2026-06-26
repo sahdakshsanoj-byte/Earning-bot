@@ -1,1414 +1,1761 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin Panel — Daksh Grand Earn</title>
-<style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { background:#0f172a; color:#e2e8f0; font-family:'Segoe UI',sans-serif; min-height:100vh; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daksh Grand Earn</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* ═══════════════════════════════════════════════════════
+           DESIGN SYSTEM — Glassmorphism + Unified Palette
+           ═══════════════════════════════════════════════════════ */
+        :root {
+            --glass-bg:       rgba(255,255,255,0.045);
+            --glass-border:   rgba(255,255,255,0.09);
+            --glass-blur:     blur(16px);
+            --card-radius:    18px;
+            --card-shadow:    0 4px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+            --gold:           #f1c40f;
+            --text-primary:   #e2e8f0;
+            --text-muted:     #94a3b8;
+            --text-dim:       #64748b;
+        }
 
-    #login-screen {
-        display:flex; flex-direction:column; align-items:center; justify-content:center;
-        min-height:100vh; padding:20px;
-    }
-    #login-screen h2 { color:#f1c40f; font-size:22px; margin-bottom:6px; }
-    #login-screen p  { color:#64748b; font-size:13px; margin-bottom:24px; }
-    #token-input {
-        width:100%; max-width:340px; padding:12px 16px;
-        background:#1e293b; border:1px solid #334155; border-radius:10px;
-        color:#e2e8f0; font-size:14px; margin-bottom:12px;
-    }
-    #token-input:focus { outline:none; border-color:#f1c40f; }
-    .btn-login {
-        width:100%; max-width:340px; padding:12px;
-        background:#f1c40f; color:#000; font-weight:700; font-size:15px;
-        border:none; border-radius:10px; cursor:pointer;
-    }
-    #login-err { color:#e74c3c; font-size:13px; margin-top:10px; display:none; }
+        /* ── Glass Card base — overrides all inline card styles ── */
+        .card {
+            background:              var(--glass-bg) !important;
+            backdrop-filter:         var(--glass-blur) !important;
+            -webkit-backdrop-filter: var(--glass-blur) !important;
+            border:                  1px solid var(--glass-border) !important;
+            border-radius:           var(--card-radius) !important;
+            padding:                 16px 18px !important;
+            margin-bottom:           10px;
+            box-shadow:              var(--card-shadow) !important;
+            position:                relative;
+            overflow:                hidden;
+        }
+        /* Subtle shimmer top edge */
+        .card::before {
+            content: '';
+            position: absolute; top: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.14), transparent);
+            pointer-events: none;
+        }
 
-    #dashboard { display:none; padding-bottom:80px; }
-    .top-bar {
-        background:#1e293b; padding:14px 20px;
-        display:flex; justify-content:space-between; align-items:center;
-        border-bottom:1px solid #334155; position:sticky; top:0; z-index:100;
-    }
-    .top-bar h3 { color:#f1c40f; font-size:16px; }
-    .logout-btn {
-        background:#e74c3c; color:#fff; border:none;
-        padding:6px 14px; border-radius:8px; cursor:pointer; font-size:12px;
-    }
+        /* ── Accent tint overrides (applied via class on individual cards) ── */
+        .c-gold   { border-color: rgba(241,196,15,0.28) !important;  background: rgba(241,196,15,0.04)  !important; }
+        .c-purple { border-color: rgba(168,85,247,0.28) !important;  background: rgba(168,85,247,0.04)  !important; }
+        .c-amber  { border-color: rgba(245,158,11,0.28) !important;  background: rgba(245,158,11,0.04)  !important; }
+        .c-red    { border-color: rgba(239,68,68,0.28)  !important;  background: rgba(239,68,68,0.04)   !important; }
+        .c-blue   { border-color: rgba(56,189,248,0.28) !important;  background: rgba(56,189,248,0.04)  !important; }
+        .c-green  { border-color: rgba(34,197,94,0.28)  !important;  background: rgba(34,197,94,0.04)   !important; }
 
-    .tabs {
-        display:flex; background:#1e293b;
-        border-bottom:1px solid #334155;
-        overflow-x:auto; -webkit-overflow-scrolling:touch;
-    }
-    .tab-btn {
-        flex:0 0 auto; padding:12px 14px; font-size:12px; font-weight:600;
-        background:none; border:none; color:#64748b; cursor:pointer;
-        border-bottom:2px solid transparent; white-space:nowrap;
-    }
-    .tab-btn.active { color:#f1c40f; border-bottom-color:#f1c40f; }
+        /* ── Balance hero card ── */
+        .balance-card {
+            background: linear-gradient(145deg, rgba(241,196,15,0.07), rgba(255,255,255,0.03)) !important;
+            border-color: rgba(241,196,15,0.25) !important;
+        }
 
-    .section { display:none; padding:16px; }
-    .section.active { display:block; }
-    .card {
-        background:#1e293b; border:1px solid #334155; border-radius:12px;
-        padding:16px; margin-bottom:14px;
-    }
-    .card h4 { color:#38bdf8; font-size:14px; margin-bottom:14px; border-bottom:1px solid #334155; padding-bottom:8px; }
+        /* ── Section header card (Tasks Daily, Leaderboard, etc.) ── */
+        .section-header-card {
+            background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)) !important;
+            border-color: rgba(255,255,255,0.12) !important;
+            padding: 14px 18px !important;
+        }
 
-    .code-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-    .code-label { font-size:12px; color:#94a3b8; width:90px; flex-shrink:0; }
-    .code-input {
-        flex:1; padding:9px 12px;
-        background:#0f172a; border:1px solid #334155; border-radius:8px;
-        color:#f1c40f; font-size:13px; font-weight:700; font-family:monospace;
-    }
-    .code-input:focus { outline:none; border-color:#f1c40f; }
+        /* ── Lock Animation ── */
+        @keyframes lock-pulse {
+            0%,100% { transform: scale(1) rotate(0deg);    }
+            25%      { transform: scale(1.12) rotate(-8deg); }
+            75%      { transform: scale(1.12) rotate(8deg);  }
+        }
+        .lock-overlay {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            background: rgba(5,10,20,0.88);
+            backdrop-filter: blur(8px);
+            border-radius: var(--card-radius);
+            z-index: 10; pointer-events: all; cursor: default;
+        }
+        .lock-icon  { font-size: 28px; animation: lock-pulse 1.8s ease-in-out infinite; display: block; }
+        .lock-label { font-size: 11px; color: #64748b; margin-top: 4px; font-weight: 600; letter-spacing: 0.5px; }
 
-    .btn-save {
-        width:100%; padding:12px;
-        background:#2ecc71; color:#000; font-weight:700;
-        border:none; border-radius:10px; cursor:pointer; font-size:14px;
-        margin-top:4px;
-    }
-    .btn-save:active { opacity:0.8; }
-    .btn-danger {
-        padding:7px 14px; background:#e74c3c; color:#fff;
-        border:none; border-radius:8px; cursor:pointer; font-size:12px;
-    }
-    .btn-success {
-        padding:7px 14px; background:#2ecc71; color:#000;
-        border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700;
-    }
-    .btn-warn {
-        padding:7px 14px; background:#f39c12; color:#000;
-        border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700;
-    }
-    .btn-purple {
-        padding:7px 14px; background:#a855f7; color:#fff;
-        border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700;
-    }
-    .btn-blue {
-        padding:7px 14px; background:#38bdf8; color:#000;
-        border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700;
-    }
+        /* ── Lottery Lock Overlay ── */
+        .lottery-lock-overlay {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            background: rgba(5,10,20,0.88);
+            backdrop-filter: blur(8px);
+            border-radius: var(--card-radius);
+            z-index: 10; pointer-events: all; cursor: default;
+        }
+        .lottery-lock-icon  { font-size: 36px; animation: lock-pulse 1.6s ease-in-out infinite; display: block; }
+        .lottery-lock-label { font-size: 13px; color: #e8d5ff; margin-top: 8px; font-weight: 700; letter-spacing: 0.5px; }
+        .lottery-lock-sub   { font-size: 11px; color: #94a3b8; margin-top: 3px; }
 
-    .wd-card {
-        background:#0f172a; border:1px solid #334155; border-radius:10px;
-        padding:14px; margin-bottom:10px;
-    }
-    .wd-row { display:flex; justify-content:space-between; gap:10px; margin-bottom:6px; align-items:flex-start; }
-    .wd-label { font-size:11px; color:#64748b; flex-shrink:0; }
-    .wd-value { font-size:12px; color:#e2e8f0; font-weight:600; word-break:break-all; text-align:right; }
-    .wd-actions { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+        /* ── Ad Counter Badge ── */
+        .ad-counter-badge {
+            display: inline-block;
+            background: rgba(241,196,15,0.10);
+            border: 1px solid rgba(241,196,15,0.30);
+            border-radius: 20px; padding: 3px 14px;
+            font-size: 12px; font-weight: 700; color: #f1c40f; margin-bottom: 8px;
+        }
 
-    .stats-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
-    .stat-box {
-        background:#0f172a; border:1px solid #334155; border-radius:10px;
-        padding:14px; text-align:center;
-    }
-    .stat-num { font-size:24px; font-weight:700; color:#f1c40f; }
-    .stat-lbl { font-size:11px; color:#64748b; margin-top:4px; }
+        /* ── Channel Claim Button ── */
+        .ch-claim-btn { transition: background 0.3s, opacity 0.3s; }
+        .ch-claim-btn:disabled { cursor: not-allowed; opacity: 0.85; }
 
-    .ban-card {
-        background:#0f172a; border:1px solid #7f1d1d; border-radius:10px;
-        padding:12px 14px; margin-bottom:8px;
-        display:flex; align-items:center; gap:12px;
-    }
-    .ban-avatar { font-size:24px; flex-shrink:0; }
-    .ban-info   { flex:1; min-width:0; }
-    .ban-name   { font-size:13px; font-weight:600; color:#e2e8f0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .ban-id     { font-size:11px; color:#64748b; margin-top:2px; }
-    .ban-coins  { font-size:11px; color:#f1c40f; margin-top:1px; }
+        /* ── Partner / Promo Task Card ── */
+        .partner-card {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(168,85,247,0.20);
+            border-radius: 14px; padding: 14px; margin-bottom: 8px;
+            position: relative; overflow: hidden;
+        }
+        .promo-task-card {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(34,197,94,0.18);
+            border-radius: 14px; padding: 14px; margin-bottom: 8px; position: relative;
+        }
+        .promo-task-card.completed { border-color: rgba(51,65,85,0.4); opacity: 0.65; }
+        .promo-task-card .promo-btn {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            color: #fff; border: none; border-radius: 10px;
+            padding: 8px 18px; font-size: 13px; font-weight: 700;
+            cursor: pointer; width: 100%; margin-top: 8px;
+        }
+        .promo-task-card .promo-btn:disabled { background: #1e293b; cursor: not-allowed; opacity: 0.65; }
 
-    #toast {
-        position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
-        background:#1e293b; color:#e2e8f0; padding:10px 20px;
-        border-radius:20px; font-size:13px; font-weight:600;
-        display:none; z-index:999; border:1px solid #334155;
-    }
-    #toast.show { display:block; }
-    #toast.ok  { border-color:#2ecc71; color:#2ecc71; }
-    #toast.err { border-color:#e74c3c; color:#e74c3c; }
+        /* ── Section Divider ── */
+        .section-gap { height: 14px; }
 
-    .empty { text-align:center; color:#475569; padding:30px 0; font-size:13px; }
+        /* ── Social Icons ── */
+        .social-icons-row { display: flex; justify-content: center; gap: 20px; margin-top: 18px; }
+        .social-icon-link  { display: flex; flex-direction: column; align-items: center; gap: 6px; text-decoration: none; }
+        .social-icon-circle {
+            width: 48px; height: 48px; border-radius: 14px;
+            display: flex; align-items: center; justify-content: center;
+            transition: transform 0.2s, opacity 0.2s;
+        }
+        .social-icon-circle:active { transform: scale(0.92); opacity: 0.85; }
+        .social-icon-label { font-size: 11px; color: #94a3b8; font-weight: 500; }
 
-    #bcast-msg {
-        width:100%; min-height:100px; padding:12px;
-        background:#0f172a; border:1px solid #334155; border-radius:10px;
-        color:#e2e8f0; font-size:14px; resize:vertical; margin-bottom:12px;
-    }
-    #bcast-msg:focus { outline:none; border-color:#38bdf8; }
-    #bcast-result { font-size:12px; color:#64748b; margin-top:8px; text-align:center; }
+        /* Channel progress indicator */
+        .channel-progress-label { font-size: 11px; color: #64748b; text-align: center; margin-bottom: 10px; }
 
-    #dm-msg {
-        width:100%; min-height:110px; padding:12px;
-        background:#0f172a; border:1px solid #334155; border-radius:10px;
-        color:#e2e8f0; font-size:14px; resize:vertical; margin-bottom:12px;
-    }
-    #dm-msg:focus { outline:none; border-color:#38bdf8; }
+        /* ── Spin Wheel ── */
+        .spin-segment-row { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; margin: 10px 0 6px; }
+        .spin-segment {
+            background: rgba(241,196,15,0.08); border: 1px solid rgba(241,196,15,0.25);
+            border-radius: 8px; padding: 4px 10px; font-size: 12px; color: #f1c40f; font-weight: 700;
+        }
+        .spin-segment.miss { color: #64748b; border-color: rgba(51,65,85,0.5); background: rgba(51,65,85,0.2); }
+        @keyframes spinResultPop {
+            from { opacity: 0; transform: scale(0.6) translateY(8px); }
+            to   { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .spin-wheel-wrap   { display: flex; flex-direction: column; align-items: center; margin: 8px 0 10px; }
+        .spin-pointer-wrap { position: relative; display: inline-block; }
+        .spin-pointer {
+            position: absolute; top: -4px; left: 50%; transform: translateX(-50%);
+            width: 0; height: 0;
+            border-left: 10px solid transparent; border-right: 10px solid transparent;
+            border-top: 22px solid #f1c40f; z-index: 5;
+            filter: drop-shadow(0 0 6px #f1c40f);
+        }
+        #spin-wheel-canvas { border-radius: 50%; display: block; }
 
-    /* ── Tournament specific ── */
-    .t-form-row { display:flex; flex-direction:column; gap:5px; margin-bottom:10px; }
-    .t-form-row label { font-size:11px; color:#94a3b8; }
-    .t-form-input {
-        width:100%; padding:9px 12px;
-        background:#0f172a; border:1px solid #334155; border-radius:8px;
-        color:#e2e8f0; font-size:13px;
-    }
-    .t-form-input:focus { outline:none; border-color:#f1c40f; }
-    .t-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        /* ── Mining ── */
+        .mining-progress-bar-wrap { background: rgba(30,41,59,0.6); border-radius: 20px; height: 6px; overflow: hidden; margin-top: 6px; }
+        .mining-progress-bar      { height: 100%; background: linear-gradient(90deg, #f59e0b, #f97316); border-radius: 20px; width: 0%; transition: width 0.5s; }
+        @keyframes miningGlow {
+            0%,100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.0); }
+            50%      { box-shadow: 0 0 14px 4px rgba(245,158,11,0.22); }
+        }
+        .mining-active-glow { animation: miningGlow 2s ease-in-out infinite; }
 
-    .t-card {
-        background:#0f172a; border:1px solid #334155; border-radius:12px;
-        padding:14px; margin-bottom:12px; position:relative;
-    }
-    .t-card-header {
-        display:flex; justify-content:space-between; align-items:flex-start;
-        margin-bottom:10px; gap:8px;
-    }
-    .t-card-title { font-size:14px; font-weight:700; color:#e2e8f0; }
-    .t-card-tid   { font-size:10px; color:#64748b; font-family:monospace; margin-top:2px; }
-    .t-status-badge {
-        font-size:10px; font-weight:700; padding:3px 8px; border-radius:20px; white-space:nowrap; flex-shrink:0;
-    }
-    .t-status-coming_soon       { background:rgba(100,116,139,0.2); color:#94a3b8; border:1px solid #475569; }
-    .t-status-registration_open { background:rgba(74,222,128,0.15); color:#4ade80; border:1px solid rgba(74,222,128,0.3); }
-    .t-status-registration_closed { background:rgba(251,146,60,0.15); color:#fb923c; border:1px solid rgba(251,146,60,0.3); }
-    .t-status-match_live        { background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); }
-    .t-status-completed         { background:rgba(241,196,15,0.12); color:#f1c40f; border:1px solid rgba(241,196,15,0.25); }
+        /* ── Info strip inside game cards ── */
+        .game-info-strip {
+            display: flex; gap: 0; justify-content: center;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 12px; padding: 9px 12px; margin-bottom: 10px;
+        }
+        .game-info-strip > div { text-align: center; flex: 1; }
+        .game-info-strip .divider { width: 1px; background: rgba(255,255,255,0.08); margin: 0 2px; flex: none; }
+        .game-info-strip .lbl { font-size: 10px; color: var(--text-dim); margin: 0; }
+        .game-info-strip .val { font-size: 14px; font-weight: 700; color: var(--text-primary); margin: 0; }
 
-    .t-meta-row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
-    .t-meta-pill {
-        font-size:10px; padding:2px 8px; border-radius:20px;
-        background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);
-        color:#94a3b8;
-    }
+        /* ── Withdraw inner boxes ── */
+        .withdraw-inner {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px; padding: 12px; margin-bottom: 10px;
+        }
 
-    .t-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+        /* ── Help notice accent boxes ── */
+        .notice-green { background: rgba(34,197,94,0.07); border-left: 3px solid rgba(34,197,94,0.5); border-radius: 0 10px 10px 0; padding: 10px 14px; margin-bottom: 10px; }
+        .notice-red   { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25); border-radius: 10px; padding: 12px 14px; }
 
-    .t-sub-panel {
-        background:#0f172a; border:1px solid #334155; border-radius:10px;
-        padding:12px; margin-top:10px; display:none;
-    }
-    .t-sub-panel.open { display:block; }
-    .t-sub-panel label { font-size:11px; color:#94a3b8; display:block; margin-bottom:4px; }
-    .t-sub-input {
-        width:100%; padding:8px 10px; margin-bottom:8px;
-        background:#1e293b; border:1px solid #334155; border-radius:8px;
-        color:#e2e8f0; font-size:12px;
-    }
-    .t-sub-input:focus { outline:none; border-color:#f1c40f; }
+        /* ══════════════════════════════════════════════════════
+           TOURNAMENT HUB — Premium Esports Design
+           ══════════════════════════════════════════════════════ */
 
-    .reg-table { width:100%; border-collapse:collapse; font-size:11px; }
-    .reg-table th { background:#1e293b; color:#64748b; padding:6px 8px; text-align:left; font-weight:600; }
-    .reg-table td { padding:6px 8px; border-bottom:1px solid rgba(255,255,255,0.04); color:#e2e8f0; }
-    .reg-table tr:last-child td { border-bottom:none; }
-</style>
+        /* Modal overlay */
+        #tournament-modal {
+            display: none; position: fixed; inset: 0; z-index: 99000;
+            background: rgba(0,0,0,0.92); backdrop-filter: blur(10px);
+            overflow-y: auto; -webkit-overflow-scrolling: touch;
+        }
+        #tournament-modal.open { display: block; }
+
+        /* Slide-in animation */
+        @keyframes t-slide-in {
+            from { opacity:0; transform: translateY(40px) scale(0.96); }
+            to   { opacity:1; transform: translateY(0) scale(1); }
+        }
+        #tournament-hub-box {
+            animation: t-slide-in 0.4s cubic-bezier(.17,.67,.35,1.2) both;
+            background: linear-gradient(160deg, #0d1117 0%, #0f1923 50%, #0a0e1a 100%);
+            border: 1px solid rgba(241,196,15,0.20);
+            border-radius: 24px;
+            margin: 16px;
+            padding: 0;
+            overflow: hidden;
+            box-shadow: 0 0 60px rgba(241,196,15,0.12), 0 24px 64px rgba(0,0,0,0.8);
+        }
+
+        /* Header band */
+        .t-header-band {
+            background: linear-gradient(135deg, rgba(241,196,15,0.12), rgba(139,92,246,0.12));
+            border-bottom: 1px solid rgba(241,196,15,0.15);
+            padding: 18px 20px 14px;
+            position: relative;
+        }
+        .t-close-btn {
+            position: absolute; top: 14px; right: 16px;
+            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 50%; width: 32px; height: 32px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 16px; color: #94a3b8;
+            transition: background 0.2s;
+        }
+        .t-close-btn:active { background: rgba(255,255,255,0.16); }
+
+        /* Status badge */
+        @keyframes live-pulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.6); }
+            50%      { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+        }
+        @keyframes reg-glow {
+            0%,100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.5); }
+            50%      { box-shadow: 0 0 0 6px rgba(74,222,128,0); }
+        }
+        .t-status-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 12px; border-radius: 20px;
+            font-size: 11px; font-weight: 800; letter-spacing: 0.6px;
+            text-transform: uppercase;
+        }
+        .t-status-badge.coming-soon    { background:rgba(148,163,184,0.12); color:#94a3b8; border:1px solid rgba(148,163,184,0.20); }
+        .t-status-badge.reg-open       { background:rgba(74,222,128,0.12);  color:#4ade80; border:1px solid rgba(74,222,128,0.25); animation: reg-glow 1.8s ease infinite; }
+        .t-status-badge.reg-closed     { background:rgba(251,146,60,0.12);  color:#fb923c; border:1px solid rgba(251,146,60,0.25); }
+        .t-status-badge.match-live     { background:rgba(239,68,68,0.12);   color:#f87171; border:1px solid rgba(239,68,68,0.30); animation: live-pulse 1.4s ease infinite; }
+        .t-status-badge.completed      { background:rgba(241,196,15,0.12);  color:#f1c40f; border:1px solid rgba(241,196,15,0.25); }
+
+        /* Info stat tiles */
+        .t-stats-grid {
+            display: grid; grid-template-columns: repeat(3,1fr); gap: 8px;
+            padding: 14px 16px;
+        }
+        .t-stat-tile {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px; padding: 10px 6px; text-align: center;
+        }
+        .t-stat-tile .t-lbl { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; }
+        .t-stat-tile .t-val { font-size: 16px; font-weight: 800; color: #e2e8f0; margin: 2px 0 0; }
+
+        /* Prize cards */
+        .t-prize-card {
+            display: flex; align-items: center; gap: 12px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
+        }
+        .t-prize-medal { font-size: 26px; flex-shrink: 0; }
+        .t-prize-name  { font-size: 13px; font-weight: 700; color: #e2e8f0; margin: 0; }
+        .t-prize-reward{ font-size: 11px; color: #94a3b8; margin: 2px 0 0; }
+
+        /* Winners cards */
+        .t-winner-card {
+            display: flex; align-items: center; gap: 12px;
+            border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
+            position: relative; overflow: hidden;
+        }
+        .t-winner-card.rank-1 { background: linear-gradient(135deg,rgba(241,196,15,0.12),rgba(241,196,15,0.04)); border: 1px solid rgba(241,196,15,0.30); }
+        .t-winner-card.rank-2 { background: linear-gradient(135deg,rgba(148,163,184,0.10),rgba(148,163,184,0.03)); border: 1px solid rgba(148,163,184,0.25); }
+        .t-winner-card.rank-3 { background: linear-gradient(135deg,rgba(205,127,50,0.10),rgba(205,127,50,0.03)); border: 1px solid rgba(205,127,50,0.25); }
+
+        /* Registration form */
+        .t-input {
+            width: 100%; box-sizing: border-box;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px; padding: 11px 14px;
+            color: #e2e8f0; font-size: 13px; outline: none;
+            margin-bottom: 10px;
+        }
+        .t-input:focus { border-color: rgba(241,196,15,0.40); }
+        .t-input::placeholder { color: #475569; }
+
+        .t-reg-btn {
+            width: 100%; padding: 13px;
+            background: linear-gradient(135deg, #f1c40f, #e67e22);
+            color: #000; font-weight: 800; font-size: 14px;
+            border: none; border-radius: 12px; cursor: pointer;
+            letter-spacing: 0.3px;
+            transition: opacity 0.2s, transform 0.15s;
+        }
+        .t-reg-btn:active  { transform: scale(0.97); opacity: 0.9; }
+        .t-reg-btn:disabled { background: #1e293b; color: #475569; cursor: not-allowed; }
+
+        /* Already registered badge */
+        .t-registered-badge {
+            background: rgba(74,222,128,0.10); border: 1px solid rgba(74,222,128,0.25);
+            border-radius: 12px; padding: 14px; text-align: center; margin-bottom: 10px;
+        }
+
+        /* Lock overlay for tournament states */
+        .t-lock-overlay {
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            padding: 40px 20px; text-align: center;
+        }
+        .t-lock-icon { font-size: 48px; animation: lock-pulse 1.8s ease-in-out infinite; display: block; margin-bottom: 12px; }
+        .t-lock-title { font-size: 18px; font-weight: 800; color: #e2e8f0; margin: 0 0 6px; }
+        .t-lock-sub   { font-size: 13px; color: #64748b; margin: 0; }
+
+        /* Trophy icon pulse when tournament is live */
+        @keyframes trophy-live-pulse {
+            0%,100% { filter: drop-shadow(0 0 0px #f1c40f); }
+            50%      { filter: drop-shadow(0 0 8px #f1c40f); }
+        }
+        #tournament-trophy-btn.has-active { animation: trophy-live-pulse 2s ease-in-out infinite; }
+
+        /* Content padding area */
+        .t-body { padding: 0 16px 20px; }
+
+        /* ── Task section labels ── */
+        .task-section-label {
+            padding: 8px 4px 4px 4px;
+        }
+        .task-section-label .tsl-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 2px 0; }
+        .task-section-label .tsl-sub   { font-size: 11px; color: #64748b; margin: 0; }
+    </style>
 </head>
 <body>
 
-<!-- ===================== LOGIN ===================== -->
-<div id="login-screen">
-    <h2>🔐 Admin Panel</h2>
-    <p>Daksh Grand Earn — Secure Access</p>
-    <input type="password" id="token-input" placeholder="Enter Admin Token" autocomplete="off">
-    <button class="btn-login" onclick="doLogin()">Login</button>
-    <p id="login-err">❌ Invalid token. Try again.</p>
-</div>
-
-<!-- ===================== DASHBOARD ===================== -->
-<div id="dashboard">
-
-    <div class="top-bar">
-        <h3>⚙️ Admin Panel</h3>
-        <button class="logout-btn" onclick="doLogout()">Logout</button>
-    </div>
-
-    <div class="tabs">
-        <button class="tab-btn active" onclick="switchTab('codes',this)">📝 Codes</button>
-        <button class="tab-btn" onclick="switchTab('withdrawals',this)">💸 Withdraw</button>
-        <button class="tab-btn" onclick="switchTab('users',this)">👤 Users</button>
-        <button class="tab-btn" onclick="switchTab('ban',this)">🚫 Ban/Unban</button>
-        <button class="tab-btn" onclick="switchTab('stats',this)">📊 Stats</button>
-        <button class="tab-btn" onclick="switchTab('tournament',this)">🏆 Tournament</button>
-        <button class="tab-btn" onclick="switchTab('broadcast',this)">📢 Broadcast</button>
-        <button class="tab-btn" onclick="switchTab('dm',this)">💬 DM</button>
-    </div>
-
-    <!-- ── CODES TAB ── -->
-    <div id="tab-codes" class="section active" style="padding:16px;">
-
-        <div class="card">
-            <h4>📺 YouTube Task Codes</h4>
-            <div class="code-row">
-                <span class="code-label">Task 1 Code</span>
-                <input class="code-input" id="code-yt1" placeholder="CODE1">
+    <div class="header" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px;">
+        <h3 id="tab-title">Rewards</h3>
+        <div style="display:flex; gap:15px; align-items:center;">
+            <div onclick="openTournamentHub(event)" id="tournament-trophy-btn" style="cursor:pointer; font-size:20px; position:relative;" title="Tournament Hub">
+                🏆
+                <span id="t-trophy-dot" style="display:none; position:absolute; top:-2px; right:-2px; width:7px; height:7px; background:#ef4444; border-radius:50%; border:1.5px solid #0a0e1a;"></span>
             </div>
-            <div class="code-row">
-                <span class="code-label">Task 2 Code</span>
-                <input class="code-input" id="code-yt2" placeholder="CODE2">
-            </div>
-            <div class="code-row">
-                <span class="code-label">Task 3 Code</span>
-                <input class="code-input" id="code-yt3" placeholder="CODE3">
-            </div>
-        </div>
-
-        <div class="card">
-            <h4>🌐 Website Task Codes</h4>
-            <div class="code-row">
-                <span class="code-label">Task 1 Code</span>
-                <input class="code-input" id="code-web1" placeholder="SITE1">
-            </div>
-            <div class="code-row">
-                <span class="code-label">Task 2 Code</span>
-                <input class="code-input" id="code-web2" placeholder="SITE2">
-            </div>
-            <div class="code-row">
-                <span class="code-label">Task 3 Code</span>
-                <input class="code-input" id="code-web3" placeholder="SITE3">
-            </div>
-        </div>
-
-        <div class="card" style="border-color:#a855f7;">
-            <h4 style="color:#a855f7;">🌟 Sponsor Slot 3 — Verify Code</h4>
-            <p style="font-size:11px; color:#64748b; margin-top:-8px; margin-bottom:14px;">
-                Yeh code users Sponsor Slot 3 mein enter karke 4 coins claim karte hain. One-time task hai.
-                Bot command: <code style="color:#a855f7;">/settask slot3 CODE</code>
-            </p>
-            <div class="code-row">
-                <span class="code-label">Slot 3 Code</span>
-                <input class="code-input" id="code-slot3" placeholder="SLOT3CODE" style="border-color:#a855f7; color:#a855f7;">
-            </div>
-        </div>
-
-        <div class="card" style="border-color:#3498db;">
-            <h4 style="color:#3498db;">🔐 Sponsor Slot 4 — Verify Code</h4>
-            <p style="font-size:11px; color:#64748b; margin-top:-8px; margin-bottom:14px;">
-                Yeh code users Sponsor Slot 4 mein enter karke 4 coins claim karte hain. One-time task hai.
-                Bot command: <code style="color:#3498db;">/settask slot4 CODE</code>
-            </p>
-            <div class="code-row">
-                <span class="code-label">Slot 4 Code</span>
-                <input class="code-input" id="code-slot4" placeholder="SLOT4CODE" style="border-color:#3498db; color:#3498db;">
-            </div>
-        </div>
-
-        <label style="display:flex; align-items:center; gap:10px; padding:10px 14px;
-                      background:#1e293b; border:1px solid #334155; border-radius:10px;
-                      margin-bottom:10px; cursor:pointer; font-size:13px; color:#94a3b8;">
-            <input type="checkbox" id="notify-users-codes" style="width:18px; height:18px; accent-color:#a855f7;">
-            <span>📢 Notify all users that codes were updated (uncheck for silent save)</span>
-        </label>
-
-        <button class="btn-save" onclick="saveCodes()">💾 Save All Codes</button>
-
-    </div>
-
-    <!-- ── WITHDRAWALS TAB ── -->
-    <div id="tab-withdrawals" class="section" style="padding:16px;">
-        <div class="card">
-            <h4>⏳ Pending Withdrawals</h4>
-            <div id="wd-list"><p class="empty">Loading...</p></div>
+            <div onclick="switchTab('history', this)" style="cursor:pointer; font-size:24px; color:var(--gold);">⋮</div>
         </div>
     </div>
 
-    <!-- ── USERS TAB ── -->
-    <div id="tab-users" class="section" style="padding:16px;">
-        <div class="card">
-            <h4>👤 Search & Manage User</h4>
-            <div class="code-row" style="margin-bottom:8px;">
-                <input class="code-input" id="search-uid" placeholder="Telegram User ID (numeric)" type="number" style="flex:1;">
-                <button class="btn-success" onclick="searchUser('id')" style="white-space:nowrap;">Search by ID</button>
-            </div>
-            <div class="code-row">
-                <input class="code-input" id="search-uname" placeholder="@username (without @)" type="text" style="flex:1;">
-                <button class="btn-success" onclick="searchUser('username')" style="white-space:nowrap;">Search by Name</button>
-            </div>
-        </div>
-        <div id="user-result"></div>
-    </div>
+    <!-- ═══════════════════════════════════════════
+         TOURNAMENT HUB MODAL
+         ═══════════════════════════════════════════ -->
+    <div id="tournament-modal">
+        <div id="tournament-hub-box">
 
-    <!-- ── BAN / UNBAN TAB ── -->
-    <div id="tab-ban" class="section" style="padding:16px;">
-
-        <div class="card">
-            <h4>🚫 Ban / Unban User</h4>
-            <div class="code-row" style="margin-bottom:14px;">
-                <input class="code-input" id="ban-uid" placeholder="Telegram User ID" type="number" style="flex:1;">
-            </div>
-            <div style="display:flex; gap:8px;">
-                <button class="btn-danger" style="flex:1; padding:10px;" onclick="quickBan()">⛔ Ban User</button>
-                <button class="btn-success" style="flex:1; padding:10px;" onclick="quickUnban()">✅ Unban User</button>
-            </div>
-            <p id="ban-result" style="font-size:12px; color:#64748b; margin-top:10px; text-align:center;"></p>
-        </div>
-
-        <div class="card">
-            <h4 style="display:flex; justify-content:space-between; align-items:center;">
-                <span>⛔ Currently Banned Users</span>
-                <button class="btn-warn" style="padding:5px 10px; font-size:11px;" onclick="loadBannedUsers()">🔄 Refresh</button>
-            </h4>
-            <div id="ban-list"><p class="empty">Click Refresh to load banned users.</p></div>
-        </div>
-
-    </div>
-
-    <!-- ── STATS TAB ── -->
-    <div id="tab-stats" class="section" style="padding:16px;">
-        <div class="stats-grid">
-            <div class="stat-box">
-                <div class="stat-num" id="stat-users">—</div>
-                <div class="stat-lbl">Total Users</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-num" id="stat-pending">—</div>
-                <div class="stat-lbl">Pending Withdrawals</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-num" id="stat-approved">—</div>
-                <div class="stat-lbl">Approved</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-num" id="stat-coins">—</div>
-                <div class="stat-lbl">Total Coins Given</div>
-            </div>
-        </div>
-        <button class="btn-save" style="background:#38bdf8;" onclick="loadStats()">🔄 Refresh Stats</button>
-
-        <div class="card" style="margin-top:16px; border-color:#22c55e;">
-            <h4 style="color:#22c55e; display:flex; justify-content:space-between; align-items:center;">
-                <span>🖥️ Server Health</span>
-                <button class="btn-save" style="background:#22c55e; padding:4px 10px; font-size:11px;" onclick="loadHealth()">🔄 Refresh</button>
-            </h4>
-            <div id="health-display">
-                <p class="empty" style="font-size:12px;">Click Refresh Stats or Refresh to load.</p>
-            </div>
-        </div>
-
-        <div class="card" style="margin-top:16px; border-color:#38bdf8;">
-            <h4 style="color:#38bdf8;">🤝 Sponsor Link Clicks</h4>
-            <p style="font-size:11px; color:#64748b; margin-bottom:12px; margin-top:-8px;">
-                Unique users jo link pe click kiye. Link change hone par automatically reset hota hai.
-            </p>
-            <div id="sponsor-clicks-list">
-                <p class="empty">Click Refresh Stats to load.</p>
-            </div>
-        </div>
-    </div>
-
-    <!-- ── TOURNAMENT TAB ── -->
-    <div id="tab-tournament" class="section" style="padding:16px;">
-
-        <!-- Create / Edit Tournament -->
-        <div class="card" style="border-color:#f1c40f;">
-            <h4 style="color:#f1c40f; display:flex; justify-content:space-between; align-items:center;">
-                <span>🏆 Create Tournament</span>
-                <span id="t-count-badge" style="font-size:11px; background:rgba(241,196,15,0.1); border:1px solid rgba(241,196,15,0.25); border-radius:20px; padding:2px 8px; color:#f1c40f;">0 / 5</span>
-            </h4>
-
-            <div class="t-form-row">
-                <label>Tournament ID <span style="color:#64748b;">(custom ya auto — e.g. ff_july, t1)</span></label>
-                <input class="t-form-input" id="t-id" placeholder="Leave blank for auto ID">
-            </div>
-            <div class="t-form-row">
-                <label>Title *</label>
-                <input class="t-form-input" id="t-title" placeholder="Free Fire Grand Finals — July 2026">
-            </div>
-            <div class="t-form-grid">
-                <div class="t-form-row">
-                    <label>Mode</label>
-                    <select class="t-form-input" id="t-mode">
-                        <option value="Solo">Solo</option>
-                        <option value="Duo">Duo</option>
-                        <option value="Squad" selected>Squad</option>
-                    </select>
-                </div>
-                <div class="t-form-row">
-                    <label>Map</label>
-                    <input class="t-form-input" id="t-map" placeholder="Bermuda" value="Bermuda">
-                </div>
-                <div class="t-form-row">
-                    <label>Date</label>
-                    <input class="t-form-input" id="t-date" placeholder="20 July 2026">
-                </div>
-                <div class="t-form-row">
-                    <label>Time</label>
-                    <input class="t-form-input" id="t-time" placeholder="8:00 PM IST">
-                </div>
-                <div class="t-form-row">
-                    <label>Entry Fee (coins)</label>
-                    <input class="t-form-input" id="t-fee" type="number" placeholder="0" value="0">
-                </div>
-                <div class="t-form-row">
-                    <label>Max Players</label>
-                    <input class="t-form-input" id="t-maxp" type="number" placeholder="50" value="50">
-                </div>
-            </div>
-            <div class="t-form-row">
-                <label>Prize Pool (General Description)</label>
-                <input class="t-form-input" id="t-prize" placeholder="e.g. Total 15000 Coins">
-            </div>
-            <div style="margin-top:8px;">
-                <label style="font-size:12px;font-weight:700;color:#94a3b8;display:block;margin-bottom:6px;">🏅 Individual Prizes (optional — users ko dikhega)</label>
-                <div style="display:flex;gap:6px;margin-bottom:6px;">
-                    <span style="font-size:18px;line-height:32px;">🥇</span>
-                    <input class="t-form-input" id="t-prize-1st" placeholder="1st Place Prize (e.g. 5000 Coins)" style="margin:0;">
-                </div>
-                <div style="display:flex;gap:6px;margin-bottom:6px;">
-                    <span style="font-size:18px;line-height:32px;">🥈</span>
-                    <input class="t-form-input" id="t-prize-2nd" placeholder="2nd Place Prize (e.g. 3000 Coins)" style="margin:0;">
-                </div>
-                <div style="display:flex;gap:6px;">
-                    <span style="font-size:18px;line-height:32px;">🥉</span>
-                    <input class="t-form-input" id="t-prize-3rd" placeholder="3rd Place Prize (e.g. 1000 Coins)" style="margin:0;">
-                </div>
-            </div>
-            <p id="t-create-msg" style="font-size:12px; min-height:18px; margin:8px 0 4px; text-align:center;"></p>
-            <button class="btn-save" onclick="createTournament()">➕ Create Tournament</button>
-        </div>
-
-        <!-- Existing Tournaments -->
-        <div class="card">
-            <h4 style="display:flex; justify-content:space-between; align-items:center;">
-                <span>📋 All Tournaments</span>
-                <button class="btn-warn" style="padding:5px 10px; font-size:11px;" onclick="loadTournamentSection()">🔄 Refresh</button>
-            </h4>
-            <div id="t-list"><p class="empty">Loading...</p></div>
-        </div>
-
-    </div>
-
-    <!-- ── BROADCAST TAB ── -->
-    <div id="tab-broadcast" class="section" style="padding:16px;">
-        <div class="card">
-            <h4>📢 Send Message to All Users</h4>
-            <textarea id="bcast-msg" placeholder="Message likhiyo yahan... (Telegram markdown supported)&#10;Example: *Bold*, _italic_, [link](url)"></textarea>
-            <button class="btn-save" style="background:#a855f7;" onclick="sendBroadcast()">📤 Send to All</button>
-            <p id="bcast-result"></p>
-        </div>
-    </div>
-
-    <!-- ── DM TAB ── -->
-    <div id="tab-dm" class="section" style="padding:16px;">
-        <div class="card">
-            <h4>💬 Direct Message to User</h4>
-            <p style="font-size:11px; color:#64748b; margin-top:-8px; margin-bottom:14px;">
-                Bot ke through ek specific user ko private message bhejein.
-            </p>
-            <div class="code-row" style="margin-bottom:12px;">
-                <input class="code-input" id="dm-uid" placeholder="Telegram User ID" type="number" style="flex:1;">
-            </div>
-            <textarea id="dm-msg" placeholder="Message likhiyo yahan... (Telegram Markdown supported)&#10;Example: *Bold*, _italic_, [link](url)"></textarea>
-            <button class="btn-save" style="background:#38bdf8; margin-top:4px;" onclick="sendDM()">📩 Message Bhejo</button>
-            <p id="dm-result" style="font-size:12px; margin-top:10px; text-align:center;"></p>
-        </div>
-
-        <div class="card" style="border-color:#334155; margin-top:4px;">
-            <h4 style="color:#64748b; font-size:12px; margin-bottom:6px;">💡 Tips</h4>
-            <ul style="font-size:11px; color:#475569; padding-left:16px; margin:0; line-height:1.8;">
-                <li>User ID pehle <b>👤 Users</b> tab se search kar ke hasil karein</li>
-                <li>User ne agar bot ko block kar rakha hai to message fail hoga</li>
-                <li><code>*bold*</code>, <code>_italic_</code>, <code>[text](url)</code> Markdown supported hai</li>
-            </ul>
-        </div>
-    </div>
-
-</div>
-
-<div id="toast"></div>
-
-<script>
-const BACKEND_URL = '';
-const API = BACKEND_URL || window.location.origin;
-
-let adminToken = sessionStorage.getItem('admin_token') || '';
-
-const CODE_KEYS = ['yt1','yt2','yt3','web1','web2','web3','slot3','slot4'];
-
-const T_STATUSES = [
-    { val:'coming_soon',          label:'🔜 Coming Soon' },
-    { val:'registration_open',    label:'✅ Registration Open' },
-    { val:'registration_closed',  label:'🔒 Registration Closed' },
-    { val:'match_live',           label:'🔴 Match Live' },
-    { val:'completed',            label:'🏆 Completed' },
-];
-
-function toast(msg, type='ok') {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = 'show ' + type;
-    setTimeout(() => t.className = '', 3000);
-}
-
-// ── Login ──
-async function doLogin() {
-    const token = document.getElementById('token-input').value.trim();
-    if (!token) return;
-    try {
-        const res  = await fetch(`${API}/admin/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            adminToken = token;
-            sessionStorage.setItem('admin_token', token);
-            showDashboard();
-        } else {
-            document.getElementById('login-err').style.display = 'block';
-        }
-    } catch(e) {
-        document.getElementById('login-err').style.display = 'block';
-    }
-}
-
-function doLogout() {
-    sessionStorage.removeItem('admin_token');
-    adminToken = '';
-    document.getElementById('dashboard').style.display = 'none';
-    document.getElementById('login-screen').style.display = 'flex';
-    document.getElementById('token-input').value = '';
-}
-
-function showDashboard() {
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('dashboard').style.display = 'block';
-    loadCodes();
-    loadWithdrawals();
-}
-
-if (adminToken) {
-    fetch(`${API}/admin/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: adminToken })
-    }).then(r => r.json()).then(d => {
-        if (d.status === 'success') showDashboard();
-        else { sessionStorage.removeItem('admin_token'); adminToken = ''; }
-    }).catch(() => {});
-}
-
-document.getElementById('token-input').addEventListener('keydown', e => {
-    if (e.key === 'Enter') doLogin();
-});
-
-// ── Tab Switch ──
-function switchTab(name, el) {
-    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('tab-' + name).classList.add('active');
-    el.classList.add('active');
-    if (name === 'withdrawals') loadWithdrawals();
-    if (name === 'stats')       loadStats();
-    if (name === 'ban')         loadBannedUsers();
-    if (name === 'tournament')  loadTournamentSection();
-}
-
-function authHeaders() {
-    return { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken };
-}
-
-// ── Load Codes ──
-async function loadCodes() {
-    try {
-        const res  = await fetch(`${API}/admin/get_config`, { headers: authHeaders() });
-        const data = await res.json();
-        if (data.status === 'success') {
-            const codes = data.task_codes;
-            CODE_KEYS.forEach(k => {
-                const el = document.getElementById('code-' + k);
-                if (el && codes[k]) el.value = codes[k];
-            });
-        }
-    } catch(e) {}
-}
-
-// ── Save Codes ──
-async function saveCodes() {
-    const codes = {};
-    CODE_KEYS.forEach(k => {
-        const v = document.getElementById('code-' + k)?.value.trim().toUpperCase();
-        if (v) codes[k] = v;
-    });
-    if (!Object.keys(codes).length) {
-        return toast('❌ No codes to save', 'err');
-    }
-    const notify = document.getElementById('notify-users-codes')?.checked || false;
-    try {
-        const res  = await fetch(`${API}/admin/update_codes`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ codes, notify })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            toast(notify ? '✅ Codes saved & broadcasting!' : '✅ Codes saved (silent)', 'ok');
-        } else {
-            toast('❌ ' + (data.message || 'Failed to save'), 'err');
-        }
-    } catch(e) { toast('❌ Network error', 'err'); }
-}
-
-// ── Load Withdrawals ──
-async function loadWithdrawals() {
-    const list = document.getElementById('wd-list');
-    list.innerHTML = '<p class="empty">Loading...</p>';
-    try {
-        const res  = await fetch(`${API}/admin/withdrawals`, { headers: authHeaders() });
-        const data = await res.json();
-        if (data.status === 'success') {
-            const wds = data.withdrawals;
-            if (!wds.length) { list.innerHTML = '<p class="empty">✅ No pending withdrawals</p>'; return; }
-            list.innerHTML = wds.map(w => `
-                <div class="wd-card">
-                    <div class="wd-row">
-                        <span class="wd-label">User ID</span>
-                        <span class="wd-value">${w.user_id}</span>
-                    </div>
-                    <div class="wd-row">
-                        <span class="wd-label">Coins</span>
-                        <span class="wd-value" style="color:#f1c40f;">${w.amount || w.coins} 🪙</span>
-                    </div>
-                    <div class="wd-row">
-                        <span class="wd-label">UPI ID</span>
-                        <span class="wd-value">${w.upi_id}</span>
-                    </div>
-                    <div class="wd-row">
-                        <span class="wd-label">Date</span>
-                        <span class="wd-value">${w.date || '—'}</span>
-                    </div>
-                    <div class="wd-actions">
-                        <button class="btn-success" onclick="updateWithdrawal('${w.user_id}', ${w.amount || w.coins}, 'approve')">✅ Approve</button>
-                        <button class="btn-danger"  onclick="updateWithdrawal('${w.user_id}', ${w.amount || w.coins}, 'reject')">❌ Reject</button>
+            <!-- ── Header Band ── -->
+            <div class="t-header-band">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                    <span style="font-size:26px;">🏆</span>
+                    <div>
+                        <h3 style="color:#f1c40f; margin:0; font-size:17px; font-weight:800; letter-spacing:0.3px;">Tournament Hub</h3>
+                        <p style="font-size:11px; color:#64748b; margin:0;">Free Fire Esports Arena</p>
                     </div>
                 </div>
-            `).join('');
-        }
-    } catch(e) { list.innerHTML = '<p class="empty">Error loading</p>'; }
-}
-
-async function updateWithdrawal(userId, coins, action) {
-    const label = action === 'approve' ? 'Approve' : 'Reject';
-    if (!confirm(`${label} withdrawal of ${coins} coins for user ${userId}?`)) return;
-    try {
-        const res  = await fetch(`${API}/admin/update_withdrawal`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ user_id: userId, action })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            toast(`✅ Withdrawal ${label}d!`, 'ok');
-            loadWithdrawals();
-        } else {
-            toast('❌ Failed', 'err');
-        }
-    } catch(e) { toast('❌ Network error', 'err'); }
-}
-
-// ── Stats ──
-async function loadStats() {
-    try {
-        const [statsRes, clicksRes] = await Promise.all([
-            fetch(`${API}/admin/stats`,          { headers: authHeaders() }),
-            fetch(`${API}/admin/sponsor_clicks`, { headers: authHeaders() })
-        ]);
-        const statsData  = await statsRes.json();
-        const clicksData = await clicksRes.json();
-
-        if (statsData.status === 'success') {
-            document.getElementById('stat-users').textContent    = statsData.total_users    ?? '—';
-            document.getElementById('stat-pending').textContent  = statsData.pending        ?? '—';
-            document.getElementById('stat-approved').textContent = statsData.approved       ?? '—';
-            document.getElementById('stat-coins').textContent    = statsData.total_coins != null
-                ? statsData.total_coins.toLocaleString('en-IN') : '—';
-        }
-
-        const clickEl = document.getElementById('sponsor-clicks-list');
-        if (clickEl) {
-            if (clicksData.status === 'success') {
-                const clicks = clicksData.clicks || {};
-                const slots  = ['slot1', 'slot2', 'slot3', 'slot4'];
-                const labels = {
-                    slot1: 'Sponsor Slot 1 (Channel)',
-                    slot2: 'Sponsor Slot 2 (Channel)',
-                    slot3: 'Partner Slot 3 (Task)',
-                    slot4: 'Partner Slot 4 (Verify 🔐)'
-                };
-                const colors = {
-                    slot1: '#38bdf8', slot2: '#38bdf8',
-                    slot3: '#a855f7', slot4: '#3498db'
-                };
-                const rows = slots.map(slot => {
-                    const info      = clicks[slot];
-                    const count     = info ? info.count    : 0;
-                    const link      = info ? info.link_url : '—';
-                    const shortLink = link.length > 40 ? link.substring(0, 40) + '...' : link;
-                    const col       = colors[slot] || '#38bdf8';
-                    return `
-                        <div style="background:#0f172a; border:1px solid ${count > 0 ? col : '#334155'}; border-radius:10px; padding:12px 14px; margin-bottom:8px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <span style="font-size:13px; font-weight:600; color:#e2e8f0;">🤝 ${labels[slot]}</span>
-                                <span style="font-size:22px; font-weight:700; color:${col};">${count}</span>
-                            </div>
-                            <div style="font-size:10px; color:#64748b; margin-top:4px;">unique clicks / verifications</div>
-                            <div style="font-size:10px; color:#475569; margin-top:6px; word-break:break-all;">
-                                🔗 ${count > 0 ? shortLink : 'No link active yet'}
-                            </div>
-                        </div>`;
-                }).join('');
-                clickEl.innerHTML = rows || '<p class="empty">No sponsor links active.</p>';
-            } else {
-                clickEl.innerHTML = '<p class="empty">Could not load click data.</p>';
-            }
-        }
-    } catch(e) {
-        console.error('loadStats error:', e);
-    }
-    loadHealth();
-}
-
-// ── Server Health ──
-async function loadHealth() {
-    const el = document.getElementById('health-display');
-    if (!el) return;
-    el.innerHTML = '<p class="empty" style="font-size:12px;">Loading...</p>';
-    try {
-        const res = await fetch(`${API}/admin/health`, { headers: authHeaders() });
-        const d   = await res.json();
-        if (d.status !== 'ok') { el.innerHTML = '<p class="empty">❌ Health check failed.</p>'; return; }
-        function bar(pct) {
-            const filled = Math.round(pct / 100 * 12);
-            const color  = pct < 60 ? '#22c55e' : pct < 85 ? '#f1c40f' : '#e74c3c';
-            return `<span style="font-family:monospace; color:${color};">${'█'.repeat(filled)}${'░'.repeat(12-filled)}</span>`;
-        }
-        function dot(pct) { return pct < 60 ? '🟢' : pct < 85 ? '🟡' : '🔴'; }
-        el.innerHTML = `
-            <div style="font-size:12px; color:#64748b; margin-bottom:12px;">
-                ⏱️ Uptime: <span style="color:#e2e8f0; font-weight:600;">${d.uptime}</span>
+                <div id="t-status-badge-wrap"></div>
+                <div class="t-close-btn" onclick="closeTournamentHub()">✕</div>
             </div>
-            <div style="margin-bottom:10px;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <span style="font-size:12px;">${dot(d.cpu_pct)} CPU</span>
-                    <span style="font-size:12px; font-weight:700; color:${d.cpu_pct<60?'#22c55e':d.cpu_pct<85?'#f1c40f':'#e74c3c'};">${d.cpu_pct.toFixed(1)}%</span>
+
+            <!-- ── Dynamic Content ── -->
+            <div id="tournament-content">
+                <div style="padding:40px; text-align:center;">
+                    <div style="font-size:28px; margin-bottom:8px;">⏳</div>
+                    <p style="color:#64748b; font-size:13px;">Loading tournament...</p>
                 </div>
-                <div>${bar(d.cpu_pct)}</div>
             </div>
-            <div style="margin-bottom:10px;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <span style="font-size:12px;">${dot(d.mem_pct)} Memory</span>
-                    <span style="font-size:12px; font-weight:700; color:${d.mem_pct<60?'#22c55e':d.mem_pct<85?'#f1c40f':'#e74c3c'};">${d.mem_pct.toFixed(1)}% &nbsp;<span style="color:#64748b; font-size:10px;">${d.mem_used_mb} / ${d.mem_total_mb} MB</span></span>
+
+        </div>
+    </div>
+
+    <!-- ===================== REWARDS TAB ===================== -->
+    <div id="rewards" class="tab-content active-tab">
+
+        <!-- Balance -->
+        <div class="card balance-card" style="text-align:center;">
+            <div id="premium-status-badge" style="display:none; margin-bottom:8px; text-align:center;"></div>
+            <p style="font-size:12px; color:var(--text-muted); margin-bottom:6px; letter-spacing:0.3px;">Your Balance</p>
+            <h1 id="balance" style="font-size:42px; color:var(--gold); font-weight:800; letter-spacing:-1px;">0 🪙</h1>
+            <p style="font-size:11px; color:var(--text-dim); margin-top:4px;">Keep earning to unlock withdrawal! 🚀</p>
+        </div>
+
+        <!-- Premium Buy Card -->
+        <div id="premium-buy-card" onclick="showPremiumModal()" style="
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            border: 1px solid rgba(241,196,15,0.35);
+            border-radius: 16px;
+            padding: 14px 18px;
+            margin: 0 0 12px 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            box-shadow: 0 4px 20px rgba(241,196,15,0.08);
+            position: relative;
+            overflow: hidden;
+        ">
+            <div style="position:absolute;top:-16px;right:-16px;opacity:0.07;pointer-events:none;">
+                <svg width="80" height="80" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="9" cy="9" r="9" fill="#1D9BF0"/>
+                    <path d="M5 9.5L7.5 12L13 6.5" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+            <div style="flex:1;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+                    <svg width="17" height="17" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+                        <circle cx="9" cy="9" r="9" fill="#1D9BF0"/>
+                        <path d="M5 9.5L7.5 12L13 6.5" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <p style="font-size:14px;font-weight:800;color:#1D9BF0;margin:0;" id="prem-card-title">Get Premium</p>
                 </div>
-                <div>${bar(d.mem_pct)}</div>
+                <p style="font-size:11px;color:#94a3b8;margin:0;" id="prem-card-sub">2x Coins • More Spins • Lower Withdrawal</p>
             </div>
-            <div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <span style="font-size:12px;">${dot(d.disk_pct)} Disk</span>
-                    <span style="font-size:12px; font-weight:700; color:${d.disk_pct<60?'#22c55e':d.disk_pct<85?'#f1c40f':'#e74c3c'};">${d.disk_pct.toFixed(1)}% &nbsp;<span style="color:#64748b; font-size:10px;">${d.disk_used_gb} / ${d.disk_total_gb} GB</span></span>
+            <div style="background:linear-gradient(135deg,#1a78c2,#1D9BF0);border-radius:20px;padding:6px 14px;white-space:nowrap;box-shadow:0 2px 8px rgba(29,155,240,0.35);">
+                <p style="font-size:12px;font-weight:800;color:#fff;margin:0;" id="prem-card-btn-label">From ₹29 →</p>
+            </div>
+        </div>
+
+        <!-- Daily Streak Bonus -->
+        <div class="card c-gold" style="padding:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+                <div>
+                    <h4 style="margin-bottom:2px; color:var(--text-primary);">🔥 Daily Streak</h4>
+                    <p style="font-size:11px; color:var(--text-muted); margin:0;">Claim every 24h to keep your streak!</p>
                 </div>
-                <div>${bar(d.disk_pct)}</div>
+                <button class="btn" id="daily-btn" onclick="claimDaily()" style="width:auto; padding:8px 16px; font-size:13px;">🔥 Claim Streak</button>
             </div>
-            <div style="margin-top:12px; font-size:11px; color:#64748b; text-align:right;">
-                🟢 Flask &amp; Bot: Online
-            </div>`;
-    } catch(e) {
-        el.innerHTML = '<p class="empty">❌ Network error</p>';
-    }
-}
 
-// ── Search User ──
-async function searchUser(mode) {
-    const result = document.getElementById('user-result');
-    let url;
-    if (mode === 'username') {
-        const uname = document.getElementById('search-uname').value.trim().replace(/^@/, '');
-        if (!uname) return toast('❌ Enter a username', 'err');
-        url = `${API}/admin/search_user?username=${encodeURIComponent(uname)}`;
-    } else {
-        const uid = document.getElementById('search-uid').value.trim();
-        if (!uid) return toast('❌ Enter a User ID', 'err');
-        url = `${API}/admin/search_user?user_id=${uid}`;
-    }
-    result.innerHTML = '<p class="empty">Searching...</p>';
-    try {
-        const res  = await fetch(url, { headers: authHeaders() });
-        const data = await res.json();
-        if (data.status === 'success') {
-            const u      = data.user;
-            const banned = u.blocked ? true : false;
-            const refCount = u.referral_count !== undefined
-                ? u.referral_count
-                : (u.referrals || '').split(',').filter(Boolean).length;
-            result.innerHTML = `
-                <div class="card">
-                    <h4>${banned ? '⛔ BANNED USER' : '✅ Active User'}</h4>
-                    <div class="wd-card">
-                        <div class="wd-row"><span class="wd-label">User ID</span><span class="wd-value">${u.user_id}</span></div>
-                        <div class="wd-row"><span class="wd-label">Username</span><span class="wd-value">${u.username ? '@' + u.username : '—'}</span></div>
-                        <div class="wd-row"><span class="wd-label">Coins</span><span class="wd-value" style="color:#f1c40f;">${u.coins || 0} 🪙</span></div>
-                        <div class="wd-row"><span class="wd-label">Referrals</span><span class="wd-value">${refCount}</span></div>
-                        <div class="wd-row"><span class="wd-label">Status</span><span class="wd-value" style="color:${banned ? '#e74c3c' : '#2ecc71'};">${banned ? '⛔ Banned' : '✅ Active'}</span></div>
-                        <div class="wd-row"><span class="wd-label">Joined</span><span class="wd-value">${u.joined || '—'}</span></div>
-                        ${u.ip_flagged ? '<div class="wd-row"><span class="wd-label">IP Flag</span><span class="wd-value" style="color:#f39c12;">⚠️ Flagged</span></div>' : ''}
-                    </div>
-                    <div class="wd-actions">
-                        ${banned
-                            ? `<button class="btn-success" style="flex:1;" onclick="banAction(${u.user_id}, 'unban')">✅ Unban User</button>`
-                            : `<button class="btn-danger"  style="flex:1;" onclick="banAction(${u.user_id}, 'ban')">⛔ Ban User</button>`
-                        }
-                    </div>
-                </div>`;
-        } else {
-            result.innerHTML = `<p class="empty">❌ ${data.message || 'User not found'}</p>`;
-        }
-    } catch(e) {
-        result.innerHTML = '<p class="empty">❌ Network error</p>';
-    }
-}
+            <!-- Streak Stats Row -->
+            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                <div style="flex:1; background:rgba(255,255,255,0.05); border-radius:10px; padding:8px 10px; text-align:center;">
+                    <p style="font-size:10px; color:var(--text-dim); margin:0 0 2px;">📅 Day</p>
+                    <p style="font-size:20px; font-weight:800; color:var(--gold); margin:0;" id="streak-day-num">1</p>
+                </div>
+                <div style="flex:1; background:rgba(255,255,255,0.05); border-radius:10px; padding:8px 10px; text-align:center;">
+                    <p style="font-size:10px; color:var(--text-dim); margin:0 0 2px;">💰 Today</p>
+                    <p style="font-size:16px; font-weight:800; color:#4ade80; margin:0;" id="streak-reward-num">+10 🪙</p>
+                </div>
+                <div style="flex:1; background:rgba(255,255,255,0.05); border-radius:10px; padding:8px 10px; text-align:center;">
+                    <p style="font-size:10px; color:var(--text-dim); margin:0 0 2px;">🏆 Tier</p>
+                    <p style="font-size:13px; font-weight:800; margin:0;" id="streak-tier-label">🔥 Tier 1</p>
+                </div>
+            </div>
 
-async function banAction(userId, action) {
-    const label = action === 'ban' ? 'Ban' : 'Unban';
-    if (!confirm(`${label} user ${userId}?`)) return;
-    try {
-        const res  = await fetch(`${API}/admin/${action}_user`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ user_id: userId })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            toast(`✅ User ${label}ned!`, 'ok');
-            const hasName = document.getElementById('search-uname').value.trim();
-            const hasId   = document.getElementById('search-uid').value.trim();
-            searchUser(hasName && !hasId ? 'username' : 'id');
-        } else {
-            toast('❌ Failed', 'err');
-        }
-    } catch(e) { toast('❌ Network error', 'err'); }
-}
+            <!-- Progress Bar -->
+            <div style="background:rgba(255,255,255,0.08); border-radius:20px; height:6px; overflow:hidden; margin-bottom:6px;">
+                <div id="streak-progress-bar" style="height:100%; width:10%; background:#f1c40f; border-radius:20px; transition:width 0.5s;"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--text-dim); margin-bottom:8px;">
+                <span>🔥 Day 1</span>
+                <span>⚡ Day 11</span>
+                <span>💎 Day 21</span>
+                <span>Day 30</span>
+            </div>
 
-document.addEventListener('DOMContentLoaded', () => {
-    const s  = document.getElementById('search-uid');
-    if (s)  s.addEventListener('keydown',  e => { if (e.key === 'Enter') searchUser('id'); });
-    const su = document.getElementById('search-uname');
-    if (su) su.addEventListener('keydown', e => { if (e.key === 'Enter') searchUser('username'); });
-    const b  = document.getElementById('ban-uid');
-    if (b)  b.addEventListener('keydown',  e => { if (e.key === 'Enter') quickBan(); });
-});
+            <!-- Tier Info -->
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
+                <span style="font-size:10px; background:rgba(241,196,15,0.12); border:1px solid rgba(241,196,15,0.25); border-radius:20px; padding:2px 8px; color:#f1c40f;">🔥 Day 1-10 → 10 🪙</span>
+                <span style="font-size:10px; background:rgba(56,189,248,0.10); border:1px solid rgba(56,189,248,0.25); border-radius:20px; padding:2px 8px; color:#38bdf8;">⚡ Day 11-20 → 15 🪙</span>
+                <span style="font-size:10px; background:rgba(168,85,247,0.10); border:1px solid rgba(168,85,247,0.25); border-radius:20px; padding:2px 8px; color:#a855f7;">💎 Day 21-30 → 20 🪙</span>
+            </div>
 
-// ── Quick Ban / Unban ──
-async function quickBan() {
-    const uid = document.getElementById('ban-uid').value.trim();
-    if (!uid) return toast('❌ Enter a User ID', 'err');
-    if (!confirm(`Ban user ${uid}?`)) return;
-    const result = document.getElementById('ban-result');
-    try {
-        const res  = await fetch(`${API}/admin/ban_user`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ user_id: parseInt(uid) })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            toast('✅ User banned!', 'ok');
-            result.textContent = `⛔ User ${uid} banned successfully.`;
-            result.style.color = '#e74c3c';
-            document.getElementById('ban-uid').value = '';
-            loadBannedUsers();
-        } else {
-            toast('❌ ' + (data.message || 'Failed'), 'err');
-            result.textContent = '❌ ' + (data.message || 'Failed');
-            result.style.color = '#e74c3c';
-        }
-    } catch(e) { toast('❌ Network error', 'err'); }
-}
+            <!-- Countdown + Next reward -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+                <p id="daily-timer" style="font-size:11px; color:var(--gold); font-weight:700; margin:0; display:none;">
+                    ⏰ Next: <span id="daily-countdown">--:--:--</span>
+                </p>
+                <p style="font-size:10px; color:var(--text-dim); margin:0;">
+                    Next day → <span id="streak-next-reward" style="color:var(--text-muted);">Day 2: +10 🪙</span>
+                </p>
+            </div>
+        </div>
 
-async function quickUnban() {
-    const uid = document.getElementById('ban-uid').value.trim();
-    if (!uid) return toast('❌ Enter a User ID', 'err');
-    if (!confirm(`Unban user ${uid}?`)) return;
-    const result = document.getElementById('ban-result');
-    try {
-        const res  = await fetch(`${API}/admin/unban_user`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ user_id: parseInt(uid) })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            toast('✅ User unbanned!', 'ok');
-            result.textContent = `✅ User ${uid} unbanned successfully.`;
-            result.style.color = '#2ecc71';
-            document.getElementById('ban-uid').value = '';
-            loadBannedUsers();
-        } else {
-            toast('❌ ' + (data.message || 'Failed'), 'err');
-            result.textContent = '❌ ' + (data.message || 'Failed');
-            result.style.color = '#e74c3c';
-        }
-    } catch(e) { toast('❌ Network error', 'err'); }
-}
-
-// ── Load Banned Users ──
-async function loadBannedUsers() {
-    const list = document.getElementById('ban-list');
-    list.innerHTML = '<p class="empty">Loading...</p>';
-    try {
-        const res  = await fetch(`${API}/admin/list_banned`, { headers: authHeaders() });
-        const data = await res.json();
-        if (data.status === 'success') {
-            const users = data.banned_users || [];
-            if (!users.length) { list.innerHTML = '<p class="empty">✅ No banned users found.</p>'; return; }
-            const total = data.total || users.length;
-            list.innerHTML = `<p style="font-size:11px; color:#64748b; margin-bottom:10px;">Showing ${users.length} of ${total} banned user(s). Tap Unban to restore.</p>`
-                + users.map(u => {
-                    const reason = u.block_reason
-                        ? `<div class="ban-id" style="color:#e74c3c;">⚠️ ${u.block_reason.replace(/_/g,' ')}</div>`
-                        : '';
-                    const at = u.blocked_at
-                        ? `<div class="ban-id">${u.blocked_at.slice(0,10)}</div>`
-                        : '';
-                    const flags = (u.fp_flagged ? '🖐️FP ' : '') + (u.ip_flagged ? '🌐IP' : '');
-                    return `
-                    <div class="ban-card">
-                        <span class="ban-avatar">⛔</span>
-                        <div class="ban-info">
-                            <div class="ban-name">${u.username ? '@'+u.username : 'Unknown'}</div>
-                            <div class="ban-id">ID: ${u.user_id}</div>
-                            <div class="ban-coins">${u.coins || 0} 🪙${flags ? ' · '+flags : ''}</div>
-                            ${reason}${at}
+        <!-- Lottery -->
+        <div class="card c-purple" id="lottery-card" style="display:none; position:relative; overflow:hidden;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+                <div style="flex:1;">
+                    <h4 style="margin-bottom:4px; color:#d8b4fe;">🎰 Daily Lottery</h4>
+                    <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">
+                        Buy a ticket. Win the jackpot at end of day!
+                    </p>
+                    <div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:6px;">
+                        <div>
+                            <p style="font-size:10px; color:var(--text-dim); margin:0;">🎫 Ticket</p>
+                            <p style="font-size:16px; font-weight:700; margin:0; color:var(--text-primary);">
+                                <span id="lottery-ticket-price">--</span> 🪙
+                            </p>
                         </div>
-                        <button class="btn-success" style="padding:6px 12px; font-size:11px;" onclick="inlineUnban(${u.user_id}, this)">✅ Unban</button>
-                    </div>`;
-                }).join('');
-        } else {
-            list.innerHTML = '<p class="empty">❌ Error loading banned users.</p>';
-        }
-    } catch(e) {
-        list.innerHTML = '<p class="empty">❌ Network error</p>';
-    }
-}
+                        <div>
+                            <p style="font-size:10px; color:var(--text-dim); margin:0;">🏆 Prize</p>
+                            <p style="font-size:16px; font-weight:700; margin:0; color:var(--gold);">
+                                <span id="lottery-prize">--</span> 🪙
+                            </p>
+                        </div>
+                        <div>
+                            <p style="font-size:10px; color:var(--text-dim); margin:0;">👥 Players</p>
+                            <p style="font-size:16px; font-weight:700; margin:0; color:var(--text-primary);">
+                                <span id="lottery-players">0</span>
+                            </p>
+                        </div>
+                    </div>
+                    <p id="lottery-last-winner" style="font-size:10px; color:var(--text-dim); margin-top:6px; display:none;"></p>
+                </div>
+            </div>
+            <button
+                class="btn"
+                id="lottery-btn"
+                onclick="buyLotteryTicket()"
+                style="background:#ffd700; color:#1a1a1a; font-weight:700; margin-top:10px;">
+                🎫 Buy Ticket
+            </button>
+        </div>
 
-async function inlineUnban(userId, btn) {
-    if (!confirm(`Unban user ${userId}?`)) return;
-    btn.disabled  = true;
-    btn.innerText = '...';
-    try {
-        const res  = await fetch(`${API}/admin/unban_user`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ user_id: userId })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            toast('✅ User unbanned!', 'ok');
-            btn.closest('.ban-card').remove();
-        } else {
-            toast('❌ Failed', 'err');
-            btn.disabled  = false;
-            btn.innerText = '✅ Unban';
-        }
-    } catch(e) {
-        toast('❌ Network error', 'err');
-        btn.disabled  = false;
-        btn.innerText = '✅ Unban';
-    }
-}
+        <!-- Promo Code -->
+        <div class="card" style="display:flex; flex-direction:column; gap:10px;">
+            <h4 style="margin-bottom:4px; color:var(--text-primary);">🎫 Promo Code</h4>
+            <p style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">Got a promo code? Redeem it for free coins!</p>
+            <div style="display:flex; gap:8px;">
+                <input
+                    type="text"
+                    id="promo-input"
+                    placeholder="Enter promo code"
+                    style="flex:1; text-transform:uppercase; letter-spacing:1px;"
+                    maxlength="30"
+                >
+                <button
+                    id="promo-btn"
+                    class="btn"
+                    onclick="redeemPromo()"
+                    style="width:auto; padding:10px 18px; background:linear-gradient(135deg,#a855f7,#7c3aed); color:#fff; font-weight:700;"
+                >
+                    Redeem
+                </button>
+            </div>
+        </div>
 
-// ============================================================
-// TOURNAMENT MANAGEMENT
-// ============================================================
+        <!-- Watch Ad -->
+        <div class="card" style="text-align:center;">
+            <p style="font-size:11px; color:var(--text-dim); margin-bottom:6px; letter-spacing:0.5px; text-transform:uppercase; font-weight:600;">Advertisement</p>
+            <div class="ad-counter-badge">📺 Ads Today: <span id="ad-counter">0</span>/<span id="ad-max">10</span></div>
+            <p style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">Earn <b style="color:var(--gold);">+5 coins</b> per ad • Max 10 ads/day</p>
+            <div id="adsgram-container">
+                <button class="btn" id="ad-btn" style="background:linear-gradient(135deg,#f1c40f,#f39c12); color:#000; font-weight:700;" onclick="showAd()">
+                    📺 Watch Ad & Earn 5 Coins
+                </button>
+            </div>
+            <p style="font-size:10px; color:#475569; margin-top:6px;">Reward credited only after full ad completion</p>
+        </div>
 
-// Load all tournaments list
-async function loadTournamentSection() {
-    const list = document.getElementById('t-list');
-    const badge = document.getElementById('t-count-badge');
-    list.innerHTML = '<p class="empty">Loading...</p>';
-    try {
-        const res  = await fetch(`${API}/admin/tournaments`, { headers: authHeaders() });
-        const data = await res.json();
-        if (data.status !== 'success') throw new Error(data.message || 'Failed');
+        <!-- Promotion Tasks Section -->
+        <div class="card c-green">
+            <h4 style="color:#4ade80; margin-bottom:4px;">📢 Promotion Tasks</h4>
+            <p style="font-size:11px; color:var(--text-dim); margin-bottom:12px;">Complete tasks to earn coins • Each task is one-time only</p>
+            <div id="promo-tasks-list">
+                <p style="color:#475569; text-align:center; font-size:13px;">Loading tasks...</p>
+            </div>
+        </div>
 
-        const tournaments = data.data || [];
-        const total       = tournaments.length;
-        if (badge) badge.textContent = `${total} / 5`;
+        <!-- Partnership & Sponsors -->
+        <div class="card c-blue">
+            <h4 style="color:#7dd3fc; margin-bottom:4px;">🤝 Partnership & Sponsors</h4>
+            <p style="font-size:11px; color:var(--text-dim); margin-bottom:12px;">Join sponsors & earn coins • Manage from config.js</p>
+            <div id="sponsor-slots-container">
+                <p style="color:#475569; text-align:center; font-size:13px;">Loading...</p>
+            </div>
+        </div>
 
-        if (!tournaments.length) {
-            list.innerHTML = '<p class="empty">Koi tournament nahi hai. Upar form se banao!</p>';
+        <div class="section-gap"></div>
+
+        <!-- Withdraw -->
+        <div class="card c-gold" id="withdraw-card" style="position:relative; overflow:hidden;">
+            <h4 style="margin-bottom:14px; color:var(--text-primary);">Withdraw 💸</h4>
+
+            <div class="withdraw-inner">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="font-size:13px; color:var(--text-muted);">🪙 Coins Required</span>
+                    <span style="font-size:13px; font-weight:700;" id="coins-progress-text">0 / 25000</span>
+                </div>
+                <div style="background:rgba(30,41,59,0.6); border-radius:20px; height:8px; overflow:hidden;">
+                    <div id="coins-progress-bar" style="height:100%; background:linear-gradient(90deg,#f1c40f,#f97316); border-radius:20px; width:0%; transition:width 0.5s;"></div>
+                </div>
+            </div>
+
+            <div id="ref-requirement-box" class="withdraw-inner" style="margin-bottom:14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="font-size:13px; color:var(--text-muted);">👥 Referrals Required</span>
+                    <span style="font-size:13px; font-weight:700;" id="ref-progress-text">0 / 5</span>
+                </div>
+                <div id="ref-bar-wrap" style="background:rgba(30,41,59,0.6); border-radius:20px; height:8px; overflow:hidden;">
+                    <div id="ref-progress-bar" style="height:100%; background:linear-gradient(90deg,#22c55e,#16a34a); border-radius:20px; width:0%; transition:width 0.5s;"></div>
+                </div>
+            </div>
+
+            <input type="text" id="withdraw-amount" placeholder="Enter coin amount (Min. 25000)"
+                style="margin-bottom:10px;"
+                oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+
+            <div style="display:flex; gap:8px; margin-bottom:14px;">
+                <button id="method-btn-upi" onclick="selectWithdrawMethod('upi')"
+                    style="flex:1; padding:9px 4px; border-radius:12px; border:1px solid rgba(34,197,94,0.45);
+                           background:rgba(34,197,94,0.10); color:#4ade80; font-size:12px; font-weight:700;
+                           cursor:pointer; transition:all 0.2s;">
+                    🏦 UPI
+                </button>
+                <button id="method-btn-usdt" onclick="selectWithdrawMethod('usdt')"
+                    style="flex:1; padding:9px 4px; border-radius:12px; border:1px solid rgba(255,255,255,0.10);
+                           background:rgba(255,255,255,0.05); color:var(--text-muted); font-size:12px; font-weight:700;
+                           cursor:pointer; transition:all 0.2s;">
+                    💎 USDT
+                </button>
+                <button id="method-btn-google" onclick="selectWithdrawMethod('google')"
+                    style="flex:1; padding:9px 4px; border-radius:12px; border:1px solid rgba(255,255,255,0.10);
+                           background:rgba(255,255,255,0.05); color:var(--text-muted); font-size:12px; font-weight:700;
+                           cursor:pointer; transition:all 0.2s;">
+                    🎁 Google
+                </button>
+            </div>
+
+            <div id="method-input-upi">
+                <input type="text" id="upi-id" placeholder="Enter UPI ID (name@upi)" style="margin-bottom:4px;">
+                <p style="font-size:11px; color:var(--text-dim); margin-bottom:12px;">Example: yourname@paytm, name@okicici</p>
+            </div>
+
+            <div id="method-input-usdt" style="display:none;">
+                <input type="text" id="usdt-address" placeholder="Enter USDT TRC20 wallet address"
+                    style="margin-bottom:4px;" maxlength="34">
+                <p style="font-size:11px; color:var(--text-dim); margin-bottom:12px;">
+                    ⚠️ TRC20 network only. Address starts with T, 34 characters.
+                </p>
+            </div>
+
+            <div id="method-input-google" style="display:none;">
+                <div class="withdraw-inner" style="text-align:center; margin-bottom:12px;">
+                    <div style="font-size:22px; margin-bottom:6px;">🎁</div>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0; font-weight:600;">Google Play Gift Card</p>
+                    <p style="font-size:11px; color:var(--text-muted); margin:0;">Code will be sent via Telegram after admin approval.</p>
+                </div>
+            </div>
+
+            <p style="font-size:11px; color:var(--text-dim); margin-bottom:10px;">⏳ 1 withdrawal request allowed per day.</p>
+            <button class="btn" style="background:linear-gradient(135deg,#ef4444,#b91c1c); font-weight:700;" onclick="requestWithdraw()">Withdraw Now</button>
+        </div>
+
+    </div>
+
+    <!-- ===================== TASKS TAB ===================== -->
+    <div id="tasks" class="tab-content" style="display:none;">
+
+        <div class="card section-header-card" style="text-align:center;">
+            <h4 style="color:var(--gold); letter-spacing:0.3px;">Daily Tasks 🌟</h4>
+            <p style="color:var(--text-muted); font-size:13px; margin-top:2px;">Tasks reset every day. Complete and earn!</p>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════ -->
+        <!-- 🎡 SPIN WHEEL CARD                                 -->
+        <!-- ══════════════════════════════════════════════════ -->
+        <div class="card c-purple" id="spin-card" style="position:relative; overflow:hidden;">
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <h4 style="color:#c4b5fd; margin:0;">🎡 Spin Wheel</h4>
+                <span id="spin-count-badge"
+                      style="font-size:11px; background:rgba(168,85,247,0.12);
+                             border:1px solid rgba(168,85,247,0.30); border-radius:20px;
+                             padding:2px 10px; color:#c4b5fd; white-space:nowrap;">
+                    0/5 used
+                </span>
+            </div>
+
+            <p style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">
+                Watch 1 ad per spin • 5 spins/day • Win up to <b style="color:var(--gold);">100 coins!</b>
+            </p>
+
+            <div class="spin-wheel-wrap">
+                <div class="spin-pointer-wrap">
+                    <div class="spin-pointer"></div>
+                    <canvas id="spin-wheel-canvas" width="220" height="220"></canvas>
+                </div>
+            </div>
+
+            <div id="spin-result"
+                 style="display:none; text-align:center; font-size:20px; font-weight:800;
+                        margin: 4px 0 8px; padding:10px; border-radius:12px;
+                        background:rgba(255,255,255,0.07); letter-spacing:0.5px;">
+            </div>
+
+            <button id="spin-btn" class="btn" onclick="doSpin()"
+                style="background:linear-gradient(135deg,#f1c40f,#f39c12);
+                       color:#000; font-weight:700; margin-top:4px;">
+                🎡 Watch Ad &amp; Spin (5 left)
+            </button>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════ -->
+        <!-- ⛏️ COIN MINING CARD                                -->
+        <!-- ══════════════════════════════════════════════════ -->
+        <div class="card c-amber" id="mining-card" style="position:relative; overflow:hidden;">
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <h4 style="color:#fcd34d; margin:0;">⛏️ Coin Mining</h4>
+                <span style="font-size:11px; background:rgba(245,158,11,0.12);
+                             border:1px solid rgba(245,158,11,0.30); border-radius:20px;
+                             padding:2px 10px; color:#fcd34d; white-space:nowrap;">
+                    +10 🪙/hr
+                </span>
+            </div>
+
+            <p style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">
+                Watch <b style="color:#fcd34d;">2 ads</b> → mine for <b style="color:#fcd34d;">1 hour</b> → collect <b style="color:#fcd34d;">10 coins!</b>
+            </p>
+
+            <div id="mining-ads-progress"
+                 style="font-size:11px; color:var(--text-dim); margin-bottom:6px; text-align:center;">
+                0/2 ads watched
+            </div>
+
+            <div id="mining-status-label"
+                 style="font-size:12px; color:var(--text-muted); text-align:center;
+                        margin-bottom:8px; font-weight:500; min-height:18px;">
+                Watch 2 ads to start mining!
+            </div>
+
+            <div class="game-info-strip" style="margin-bottom:10px;">
+                <div><p class="lbl">⏱️ Duration</p><p class="val" style="color:#fcd34d;">1 Hour</p></div>
+                <div class="divider"></div>
+                <div><p class="lbl">🪙 Reward</p><p class="val" style="color:#fcd34d;">10 Coins</p></div>
+                <div class="divider"></div>
+                <div><p class="lbl">📺 Ads</p><p class="val" style="color:#fcd34d;">2 Ads</p></div>
+            </div>
+
+            <button id="mining-watch-ad-btn" class="btn" onclick="watchMiningAd()"
+                style="background:linear-gradient(135deg,#f59e0b,#d97706);
+                       color:#000; font-weight:700; margin-bottom:6px; display:none;">
+                📺 Watch Ad 0/2
+            </button>
+
+            <button id="mining-collect-btn" class="btn" onclick="collectMining()"
+                style="background:linear-gradient(135deg,#22c55e,#16a34a);
+                       color:#fff; font-weight:700; display:none;"
+                disabled>
+                ⛏️ Collect 10 Coins!
+            </button>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════ -->
+        <!-- 💣 BOMB BOX CHALLENGE CARD                         -->
+        <!-- ══════════════════════════════════════════════════ -->
+        <div class="card c-red" id="bomb-box-card" style="position:relative; overflow:hidden;">
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <h4 style="color:#fca5a5; margin:0;">💣 Bomb Box Challenge</h4>
+                <span style="font-size:11px; background:rgba(239,68,68,0.12);
+                             border:1px solid rgba(239,68,68,0.30); border-radius:20px;
+                             padding:2px 10px; color:#fca5a5; white-space:nowrap;">
+                    1 game / 15min
+                </span>
+            </div>
+
+            <p style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">
+                Watch <b style="color:#fca5a5;">1 ad</b> → Pick a box →
+                Win <b style="color:var(--gold);">5 / 10 / 20 coins</b> or hit 💣!
+            </p>
+
+            <div id="bomb-box-status"
+                 style="font-size:12px; color:var(--text-muted); text-align:center;
+                        margin-bottom:8px; font-weight:500; min-height:18px;">
+                Watch 1 ad to start!
+            </div>
+
+            <!-- 2×2 Box Grid (hidden until game starts) -->
+            <div id="bomb-box-grid"
+                 style="display:none; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+                <button class="btn" id="bb-btn-0" onclick="pickBombBox(0)"
+                    style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.30);
+                           color:#fca5a5; font-weight:700; font-size:15px; padding:14px 0;">
+                    📦 Box 1
+                </button>
+                <button class="btn" id="bb-btn-1" onclick="pickBombBox(1)"
+                    style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.30);
+                           color:#fca5a5; font-weight:700; font-size:15px; padding:14px 0;">
+                    📦 Box 2
+                </button>
+                <button class="btn" id="bb-btn-2" onclick="pickBombBox(2)"
+                    style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.30);
+                           color:#fca5a5; font-weight:700; font-size:15px; padding:14px 0;">
+                    📦 Box 3
+                </button>
+                <button class="btn" id="bb-btn-3" onclick="pickBombBox(3)"
+                    style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.30);
+                           color:#fca5a5; font-weight:700; font-size:15px; padding:14px 0;">
+                    📦 Box 4
+                </button>
+            </div>
+
+            <!-- Result reveal (hidden until picked) -->
+            <div id="bomb-box-result"
+                 style="display:none; text-align:center; font-size:15px; font-weight:700;
+                        padding:10px 14px; border-radius:12px; margin-bottom:10px;">
+            </div>
+
+            <div class="game-info-strip" style="margin-bottom:10px;">
+                <div><p class="lbl">🎯 Boxes</p><p class="val" style="color:#fca5a5;">4</p></div>
+                <div class="divider"></div>
+                <div><p class="lbl">💣 Bombs</p><p class="val" style="color:#fca5a5;">1</p></div>
+                <div class="divider"></div>
+                <div><p class="lbl">🏆 Max Win</p><p class="val" style="color:var(--gold);">20 🪙</p></div>
+                <div class="divider"></div>
+                <div><p class="lbl">📺 Ads</p><p class="val" style="color:#fca5a5;">1 Ad</p></div>
+            </div>
+
+            <button id="bomb-box-ad-btn" class="btn" onclick="watchBombBoxAd()"
+                style="background:linear-gradient(135deg,#ef4444,#b91c1c);
+                       color:#fff; font-weight:700;">
+                📺 Watch Ad to Play
+            </button>
+        </div>
+
+        <!-- All-Tasks Complete Bonus -->
+        <div class="card c-green">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                <div>
+                    <h4 style="color:#4ade80; margin-bottom:4px;">🏅 All-Tasks Bonus</h4>
+                    <p style="font-size:11px; color:var(--text-dim);">Complete all daily tasks → Earn <b style="color:var(--gold);">+10 bonus coins</b></p>
+                </div>
+                <span id="allbonus-status-badge" style="font-size:11px; background:rgba(34,197,94,0.10); color:#4ade80; border:1px solid rgba(34,197,94,0.30); border-radius:20px; padding:2px 10px; white-space:nowrap; margin-top:2px;">0/4</span>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:12px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="check-daily" style="font-size:16px;">⬜</span>
+                    <span style="font-size:12px; color:#94a3b8;">Daily Bonus Claimed</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="check-ads" style="font-size:16px;">⬜</span>
+                    <span style="font-size:12px; color:#94a3b8;">Watch All 10 Ads <span id="allbonus-ads-count" style="color:#f1c40f;">(0/10)</span></span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="check-yt" style="font-size:16px;">⬜</span>
+                    <span style="font-size:12px; color:#94a3b8;">All 3 YouTube Tasks <span id="allbonus-yt-count" style="color:#f1c40f;">(0/3)</span></span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="check-web" style="font-size:16px;">⬜</span>
+                    <span style="font-size:12px; color:#94a3b8;">All 3 Website Tasks <span id="allbonus-web-count" style="color:#f1c40f;">(0/3)</span></span>
+                </div>
+            </div>
+            <button id="allbonus-btn" class="btn" onclick="claimAllBonus()"
+                style="background:rgba(34,197,94,0.12); border:1px solid rgba(34,197,94,0.25); font-weight:700; color:#4ade80;" disabled>
+                🏅 Complete All Tasks (0/4)
+            </button>
+        </div>
+
+        <!-- YouTube Tasks -->
+        <div id="yt-tasks-section" style="position:relative;">
+        <div class="task-section-label">
+            <p class="tsl-title" style="color:#f87171;">📺 YouTube Tasks</p>
+            <p class="tsl-sub">+5 coins each • Max 3 per day</p>
+        </div>
+
+        <div class="card task-item" data-task="yt1">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <p style="font-size:13px; font-weight:600; margin:0;">Task 1: Watch & Verify</p>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+5 🪙</span>
+            </div>
+            <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt1', 'yt')">▶ Watch Video 1</button>
+            <div class="task-input-row">
+                <input type="text" id="yt-1" placeholder="Enter Code">
+                <button class="btn-sm" onclick="verifyTask('yt1', 'yt-1')">Verify</button>
+            </div>
+        </div>
+
+        <div class="card task-item" data-task="yt2">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <p style="font-size:13px; font-weight:600; margin:0;">Task 2: Watch & Verify</p>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+5 🪙</span>
+            </div>
+            <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt2', 'yt')">▶ Watch Video 2</button>
+            <div class="task-input-row">
+                <input type="text" id="yt-2" placeholder="Enter Code">
+                <button class="btn-sm" onclick="verifyTask('yt2', 'yt-2')">Verify</button>
+            </div>
+        </div>
+
+        <div class="card task-item" data-task="yt3">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <p style="font-size:13px; font-weight:600; margin:0;">Task 3: Watch & Verify</p>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+5 🪙</span>
+            </div>
+            <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt3', 'yt')">▶ Watch Video 3</button>
+            <div class="task-input-row">
+                <input type="text" id="yt-3" placeholder="Enter Code">
+                <button class="btn-sm" onclick="verifyTask('yt3', 'yt-3')">Verify</button>
+            </div>
+        </div>
+        </div><!-- /#yt-tasks-section -->
+
+        <!-- Website Tasks -->
+        <div class="task-section-label">
+            <p class="tsl-title" style="color:#60a5fa;">🌐 Website Tasks</p>
+            <p class="tsl-sub">+3 coins each • Max 3 per day</p>
+        </div>
+
+        <div class="card task-item" data-task="web1">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <p style="font-size:13px; font-weight:600; margin:0;">Task 1: Visit Site</p>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+3 🪙</span>
+            </div>
+            <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web1', 'web')">🌐 Visit Site 1</button>
+            <div class="task-input-row">
+                <input type="text" id="web-1" placeholder="Enter Code">
+                <button class="btn-sm" onclick="verifyTask('web1', 'web-1')">Verify</button>
+            </div>
+        </div>
+
+        <div class="card task-item" data-task="web2">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <p style="font-size:13px; font-weight:600; margin:0;">Task 2: Visit Site</p>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+3 🪙</span>
+            </div>
+            <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web2', 'web')">🌐 Visit Site 2</button>
+            <div class="task-input-row">
+                <input type="text" id="web-2" placeholder="Enter Code">
+                <button class="btn-sm" onclick="verifyTask('web2', 'web-2')">Verify</button>
+            </div>
+        </div>
+
+        <div class="card task-item" data-task="web3">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <p style="font-size:13px; font-weight:600; margin:0;">Task 3: Visit Site</p>
+                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+3 🪙</span>
+            </div>
+            <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web3', 'web')">🌐 Visit Site 3</button>
+            <div class="task-input-row">
+                <input type="text" id="web-3" placeholder="Enter Code">
+                <button class="btn-sm" onclick="verifyTask('web3', 'web-3')">Verify</button>
+            </div>
+        </div>
+
+        <!-- Telegram Channels -->
+        <div class="task-section-label">
+            <p class="tsl-title" style="color:#38bdf8;">📢 Telegram Channels</p>
+            <p class="tsl-sub">Join all 3 channels • +5 coins each (one-time per channel)</p>
+        </div>
+
+        <div class="card c-blue" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <p style="font-size:13px; font-weight:600; margin:0; color:var(--text-primary);">Official Channel</p>
+                <p style="font-size:11px; color:var(--text-muted); margin:2px 0 0 0;">Join once & earn coins 🎁</p>
+            </div>
+            <button id="ch-btn-official" class="btn-sm ch-claim-btn" style="background:#0088cc;"
+                onclick="claimChannel('official', CONFIG.CHANNELS.official)">+5 🪙 Join</button>
+        </div>
+
+        <div class="card c-blue" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <p style="font-size:13px; font-weight:600; margin:0; color:var(--text-primary);">Channel 2</p>
+                <p style="font-size:11px; color:var(--text-muted); margin:2px 0 0 0;">Join once & earn coins 🎁</p>
+            </div>
+            <button id="ch-btn-channel2" class="btn-sm ch-claim-btn" style="background:#0088cc;"
+                onclick="claimChannel('channel2', CONFIG.CHANNELS.channel2)">+5 🪙 Join</button>
+        </div>
+
+        <div class="card c-blue" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <p style="font-size:13px; font-weight:600; margin:0; color:var(--text-primary);">Channel 3</p>
+                <p style="font-size:11px; color:var(--text-muted); margin:2px 0 0 0;">Join once & earn coins 🎁</p>
+            </div>
+            <button id="ch-btn-channel3" class="btn-sm ch-claim-btn" style="background:#0088cc;"
+                onclick="claimChannel('channel3', CONFIG.CHANNELS.channel3)">+5 🪙 Join</button>
+        </div>
+
+    </div>
+
+    <!-- ===================== LEADERBOARD TAB ===================== -->
+    <div id="leaderboard" class="tab-content" style="display:none;">
+        <div class="card section-header-card" style="text-align:center;">
+            <h4 style="color:var(--gold);">Top 10 Earners 🏆</h4>
+            <p style="font-size:13px; color:var(--text-muted); margin-top:2px;">Compete and climb to the top!</p>
+        </div>
+        <div class="card">
+            <div id="leaderboard-list"><p class="spinner">Loading ranking...</p></div>
+        </div>
+    </div>
+
+    <!-- ===================== REFER TAB ===================== -->
+    <div id="refer" class="tab-content" style="display:none; position:relative; overflow:hidden;">
+
+        <!-- ── Hero Header ── -->
+        <div class="card balance-card" style="text-align:center; background:linear-gradient(135deg,rgba(241,196,15,0.10) 0%,rgba(139,92,246,0.10) 100%); border:1px solid rgba(241,196,15,0.18);">
+            <div style="font-size:32px; margin-bottom:6px;">🚀</div>
+            <h3 style="color:var(--gold); margin:0 0 4px 0; font-size:17px; font-weight:800; letter-spacing:0.3px;">Refer & Earn Commission</h3>
+            <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.6;">Invite friends • Earn <b style="color:var(--gold);">30 coins</b> on join + <b style="color:#a78bfa;">10% passive commission</b> from their earnings forever!</p>
+        </div>
+
+        <!-- ── Stats Grid (4 tiles) ── -->
+        <div class="card" style="padding:14px 16px;">
+            <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0 0 12px 0;">📊 Dashboard Overview</p>
+            <div id="ref-stats-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div style="background:rgba(241,196,15,0.07); border:1px solid rgba(241,196,15,0.15); border-radius:12px; padding:12px; text-align:center;">
+                    <p style="font-size:10px; color:var(--text-dim); margin:0 0 4px 0; text-transform:uppercase; letter-spacing:0.5px;">Total Referrals</p>
+                    <p id="ref-stat-total" style="font-size:22px; font-weight:800; color:var(--gold); margin:0;">—</p>
+                    <p style="font-size:10px; color:var(--text-muted); margin:2px 0 0 0;">👥 Invited</p>
+                </div>
+                <div style="background:rgba(74,222,128,0.07); border:1px solid rgba(74,222,128,0.15); border-radius:12px; padding:12px; text-align:center;">
+                    <p style="font-size:10px; color:var(--text-dim); margin:0 0 4px 0; text-transform:uppercase; letter-spacing:0.5px;">Active Referrals</p>
+                    <p id="ref-stat-active" style="font-size:22px; font-weight:800; color:#4ade80; margin:0;">—</p>
+                    <p style="font-size:10px; color:var(--text-muted); margin:2px 0 0 0;">✅ Earning</p>
+                </div>
+                <div style="background:rgba(167,139,250,0.07); border:1px solid rgba(167,139,250,0.15); border-radius:12px; padding:12px; text-align:center;">
+                    <p style="font-size:10px; color:var(--text-dim); margin:0 0 4px 0; text-transform:uppercase; letter-spacing:0.5px;">Today's Commission</p>
+                    <p id="ref-stat-today" style="font-size:22px; font-weight:800; color:#a78bfa; margin:0;">—</p>
+                    <p style="font-size:10px; color:var(--text-muted); margin:2px 0 0 0;">💰 Today</p>
+                </div>
+                <div style="background:rgba(56,189,248,0.07); border:1px solid rgba(56,189,248,0.15); border-radius:12px; padding:12px; text-align:center;">
+                    <p style="font-size:10px; color:var(--text-dim); margin:0 0 4px 0; text-transform:uppercase; letter-spacing:0.5px;">Lifetime Earned</p>
+                    <p id="ref-stat-lifetime" style="font-size:22px; font-weight:800; color:#38bdf8; margin:0;">—</p>
+                    <p style="font-size:10px; color:var(--text-muted); margin:2px 0 0 0;">📈 All Time</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Daily Limit + Milestone Progress ── -->
+        <div class="card" style="padding:14px 16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">🚀 Progress Tracker</p>
+                <span id="ref-daily-badge" style="font-size:10px; background:rgba(167,139,250,0.15); color:#a78bfa; padding:3px 8px; border-radius:20px; font-weight:700;">Loading...</span>
+            </div>
+
+            <p style="font-size:12px; color:var(--text-muted); margin:0 0 6px 0; display:flex; justify-content:space-between;">
+                <span>📊 Daily Commission Limit</span>
+                <b id="ref-daily-text" style="color:var(--text-primary);">— / 200</b>
+            </p>
+            <div style="background:rgba(255,255,255,0.06); border-radius:20px; height:8px; overflow:hidden; margin-bottom:16px;">
+                <div id="ref-daily-bar" style="height:100%; border-radius:20px; background:linear-gradient(90deg,#a78bfa,#7c3aed); width:0%; transition:width 0.5s ease;"></div>
+            </div>
+
+            <div id="ref-milestone-block">
+                <p style="font-size:12px; color:var(--text-muted); margin:0 0 6px 0; display:flex; justify-content:space-between;">
+                    <span id="ref-ms-label">🎯 Next Milestone</span>
+                    <b id="ref-ms-text" style="color:var(--gold);">Loading...</b>
+                </p>
+                <div style="background:rgba(255,255,255,0.06); border-radius:20px; height:8px; overflow:hidden; margin-bottom:10px;">
+                    <div id="ref-ms-bar" style="height:100%; border-radius:20px; background:linear-gradient(90deg,#f1c40f,#e67e22); width:0%; transition:width 0.5s ease;"></div>
+                </div>
+                <p id="ref-ms-reward-text" style="font-size:11px; color:var(--text-muted); text-align:center; margin:0;">Loading next milestone...</p>
+            </div>
+        </div>
+
+        <!-- ── Referral Link ── -->
+        <div class="card c-gold" style="padding:14px 16px;">
+            <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0 0 10px 0;">🔗 Your Referral Link</p>
+            <div id="display-link" style="background:rgba(241,196,15,0.06); padding:10px 12px; border-radius:10px; font-size:11px; word-break:break-all; border:1px dashed rgba(241,196,15,0.30); margin-bottom:10px; color:var(--gold);">Loading...</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <button class="btn" style="font-size:13px; padding:10px;" onclick="inviteFriend()">📤 Share Link</button>
+                <button class="btn" style="font-size:13px; padding:10px; background:rgba(241,196,15,0.10); border:1px solid rgba(241,196,15,0.3); color:var(--gold);" onclick="copyReferralLink()">📋 Copy Link</button>
+            </div>
+        </div>
+
+        <!-- ── Milestones ── -->
+        <div class="card" style="padding:14px 16px;">
+            <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0 0 12px 0;">🏆 Milestone Rewards</p>
+            <div id="ref-milestones-list">
+                <p style="color:var(--text-muted); font-size:13px; text-align:center;">Loading...</p>
+            </div>
+        </div>
+
+        <!-- ── Recent Referrals ── -->
+        <div class="card" style="padding:14px 16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">👥 Recent Referrals</p>
+                <span id="ref-active-count-label" style="font-size:10px; background:rgba(74,222,128,0.12); color:#4ade80; padding:3px 8px; border-radius:20px;">0 active</span>
+            </div>
+            <div id="refer-list">
+                <p style="color:var(--text-muted); text-align:center; font-size:13px;">No referrals yet. Invite your friends! 🚀</p>
+            </div>
+        </div>
+
+        <!-- ── Commission History ── -->
+        <div class="card" style="padding:14px 16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">💰 Commission History</p>
+                <button onclick="loadReferralDashboard(true)" style="font-size:10px; background:rgba(167,139,250,0.15); color:#a78bfa; border:none; padding:3px 10px; border-radius:20px; cursor:pointer; font-weight:700;">↻ Refresh</button>
+            </div>
+            <div id="commission-history-list">
+                <p style="color:var(--text-muted); text-align:center; font-size:13px;">Loading...</p>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ===================== HISTORY TAB ===================== -->
+    <div id="history" class="tab-content" style="display:none;">
+        <div class="card section-header-card" style="text-align:center;">
+            <h4 style="color:var(--gold);">Withdrawal History 📜</h4>
+            <p style="font-size:13px; color:var(--text-muted); margin-top:2px;">All your past withdrawal requests</p>
+        </div>
+        <div class="card">
+            <div id="history-list"><p class="spinner">Loading...</p></div>
+        </div>
+    </div>
+
+    <!-- ===================== HELP TAB ===================== -->
+    <div id="help" class="tab-content" style="display:none;">
+
+        <div class="card c-gold" style="padding:0 !important; overflow:hidden !important;">
+            <div style="background:rgba(241,196,15,0.12); border-bottom:1px solid rgba(241,196,15,0.20); padding:12px 18px; display:flex; align-items:center; gap:8px;">
+                <span style="font-size:18px;">📋</span>
+                <h4 style="color:var(--gold); margin:0; font-size:15px; font-weight:700;">Notice Board</h4>
+            </div>
+            <div style="padding:16px;">
+
+                <div class="notice-green">
+                    <p style="font-size:13px; font-weight:700; color:#4ade80; margin:0 0 8px 0;">🎯 Earning Rates</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Watch Ad: <b style="color:var(--gold);">+5 🪙</b> (max 10/day)</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• YouTube Task: <b style="color:var(--gold);">+5 🪙</b> (max 3/day)</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Website Task: <b style="color:var(--gold);">+3 🪙</b> (max 3/day)</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Telegram Channel: <b style="color:var(--gold);">+5 🪙</b> (one-time each)</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Promotion Task: <b style="color:var(--gold);">+5 🪙</b> (one-time each)</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• 🎡 Spin Wheel: <b style="color:var(--gold);">up to 100 🪙</b> (5 spins/day • 1 ad each)</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0;">• ⛏️ Coin Mining: <b style="color:var(--gold);">+10 🪙/hr</b> (2 ads to start • 1hr cooldown)</p>
+                </div>
+
+                <div class="notice-green">
+                    <p style="font-size:13px; font-weight:700; color:#4ade80; margin:0 0 8px 0;">📤 Withdrawal Rules</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Minimum Withdrawal: <b style="color:var(--gold);">25000 🪙</b></p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;" id="help-ref-rule">• Referral Requirement: <b style="color:var(--gold);">5 Users</b></p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0;">• Cooldown: <b style="color:var(--gold);">1 Request per 24 Hours</b></p>
+                </div>
+
+                <div class="notice-red">
+                    <p style="font-size:14px; font-weight:700; color:#f87171; text-align:center; margin:0 0 8px 0;">⚠️ Warning ⚠️</p>
+                    <p style="font-size:12px; color:var(--text-primary); text-align:center; margin:0 0 4px 0;">Using multiple accounts is <b style="color:#f87171;">strictly prohibited.</b></p>
+                    <p style="font-size:12px; color:var(--text-primary); text-align:center; margin:0 0 8px 0;">Detected accounts will be <b style="color:#f87171;">suspended.</b></p>
+                    <div style="background:rgba(239,68,68,0.12); border-radius:8px; padding:8px; text-align:center;">
+                        <p style="font-size:15px; font-weight:700; color:#f87171; margin:0;">Penalty: Account Block</p>
+                    </div>
+                    <p style="font-size:11px; color:var(--text-muted); text-align:center; margin:8px 0 0 0;">Please earn fair 🙏</p>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="card c-blue">
+            <h4 style="margin-bottom:6px; color:#7dd3fc;">💬 Support</h4>
+            <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">Tap the button below to message the admin directly on Telegram.</p>
+            <div id="tg-contact-box" style="background:rgba(56,189,248,0.06); border:1px dashed rgba(56,189,248,0.30); border-radius:12px; padding:14px; text-align:center; margin-bottom:12px;">
+                <span style="font-size:22px;">✈️</span>
+                <p id="admin-tg-username" style="font-size:16px; font-weight:700; color:#7dd3fc; margin:6px 0 2px 0;">Loading...</p>
+                <p style="font-size:11px; color:var(--text-dim); margin:0;">Admin Telegram Username</p>
+            </div>
+            <button class="btn" style="background:linear-gradient(135deg,#0088cc,#006aaa); font-weight:700;"
+                onclick="openAdminTelegram()">
+                💬 Support
+            </button>
+        </div>
+
+        <!-- Email + Social Links Card -->
+        <div class="card c-blue" style="text-align:center;">
+            <h4 style="color:#7dd3fc; margin-bottom:6px;">Official Email Support 📧</h4>
+            <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Tap to copy our email address:</p>
+            <div id="email-copy-box" onclick="copyEmail()" style="background:rgba(56,189,248,0.06); padding:15px; border-radius:12px; color:#7dd3fc; border:1px dashed rgba(56,189,248,0.30); font-weight:bold; cursor:pointer;">
+                cdoternsupport@gmail.com
+                <div style="font-size:10px; margin-top:5px; color:var(--text-muted); font-weight:normal;">(Tap to Copy)</div>
+            </div>
+            <p id="copy-status" style="color:#2ecc71; font-size:12px; margin-top:10px; display:none; font-weight:bold;">Email Copied! ✅</p>
+
+            <div style="margin-top:6px; padding-top:14px; border-top:1px solid #1e293b;">
+                <p style="font-size:11px; color:#64748b; margin-bottom:12px;">Follow us on social media</p>
+                <div class="social-icons-row">
+                    <a href="https://www.instagram.com/cdotern_bot?igsh=MTUwdGVqczhiZTNjdA==" target="_blank" class="social-icon-link">
+                        <div class="social-icon-circle" style="background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+                                <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/>
+                            </svg>
+                        </div>
+                        <span class="social-icon-label">Instagram</span>
+                    </a>
+                    <a href="https://www.facebook.com/share/1DyrqPf6Gw/" target="_blank" class="social-icon-link">
+                        <div class="social-icon-circle" style="background:#1877f2;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+                                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                            </svg>
+                        </div>
+                        <span class="social-icon-label">Facebook</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ===================== BOTTOM NAV BAR ===================== -->
+    <div class="bottom-nav" style="
+        position: fixed; bottom: 0; left: 0; right: 0;
+        background: rgba(7,13,26,0.90);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border-top: 1px solid rgba(255,255,255,0.08);
+        display: flex; justify-content: space-around; align-items: center;
+        padding: 8px 0 14px 0; z-index: 999;
+    ">
+        <div class="nav-item active" onclick="switchTab('rewards', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
+            <span style="font-size:20px;">🏠</span><span>Home</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('tasks', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
+            <span style="font-size:20px;">✅</span><span>Tasks</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('leaderboard', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
+            <span style="font-size:20px;">🏆</span><span>Top</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('refer', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
+            <span style="font-size:20px;">👥</span><span>Refer</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('help', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
+            <span style="font-size:20px;">🎧</span><span>Support</span>
+        </div>
+    </div>
+
+    <div style="height: 70px;"></div>
+
+    <script>
+    // ============================================================
+    // PROMOTION TASKS — Frontend Logic
+    // ============================================================
+
+    async function loadPromoTasks() {
+        const container = document.getElementById('promo-tasks-list');
+        if (!container) return;
+        const userId = window.USER_ID;
+        if (!userId) {
+            container.innerHTML = '<p style="color:#475569; text-align:center; font-size:13px;">Open via Telegram bot.</p>';
             return;
         }
+        try {
+            const resp = await fetch(CONFIG.API_BASE_URL + '/get_promo_tasks?user_id=' + userId);
+            const data = await resp.json();
+            const tasks = data.tasks || [];
+            const completions = window._promoTaskCompletions || [];
 
-        list.innerHTML = tournaments.map(t => _renderTournamentCard(t)).join('');
-    } catch(e) {
-        list.innerHTML = `<p class="empty">❌ ${e.message || 'Network error'}</p>`;
+            if (!tasks.length) {
+                container.innerHTML = '<p style="color:#475569; text-align:center; font-size:13px;">No promotion tasks yet.</p>';
+                return;
+            }
+
+            container.innerHTML = '';
+            tasks.forEach(task => {
+                const isCompleted = completions.includes(task.task_id);
+                const card = document.createElement('div');
+                card.className = 'promo-task-card' + (isCompleted ? ' completed' : '');
+                card.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+                        <p style="font-size:13px; font-weight:700; color:#22c55e; margin:0;">${escapeHtml(task.title)}</p>
+                        <span style="font-size:12px; color:#f1c40f; font-weight:700; white-space:nowrap; margin-left:8px;">+${task.reward || 5} 🪙</span>
+                    </div>
+                    ${task.description ? `<p style="font-size:11px; color:#64748b; margin:0 0 8px 0;">${escapeHtml(task.description)}</p>` : ''}
+                    <button
+                        class="promo-btn"
+                        onclick="claimPromoTask('${task.task_id}')"
+                        ${isCompleted ? 'disabled' : ''}
+                    >
+                        ${isCompleted ? '✅ Completed' : '✅ Mark as Done & Claim'}
+                    </button>
+                `;
+                container.appendChild(card);
+            });
+        } catch (e) {
+            container.innerHTML = '<p style="color:#475569; text-align:center; font-size:13px;">Failed to load tasks.</p>';
+        }
     }
-}
 
-function _esc(str) {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+    async function claimPromoTask(taskId) {
+        const userId = window.USER_ID;
+        if (!userId) return showToast('Please open via Telegram bot.');
+        try {
+            const resp = await fetch(CONFIG.API_BASE_URL + '/claim_promo_task', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, task_id: taskId }),
+            });
+            const data = await resp.json();
+            if (data.status === 'success') {
+                showToast(data.message || 'Coins credited!', 'success');
+                if (!window._promoTaskCompletions) window._promoTaskCompletions = [];
+                window._promoTaskCompletions.push(taskId);
+                await loadPromoTasks();
+                await refreshBalance();
+            } else {
+                showToast(data.message || 'Failed to claim.');
+            }
+        } catch (e) {
+            showToast('Network error. Please try again.');
+        }
+    }
 
-function _statusBadge(status) {
-    const map = {
-        coming_soon:          { label:'🔜 Coming Soon',          cls:'coming_soon' },
-        registration_open:    { label:'✅ Registration Open',    cls:'registration_open' },
-        registration_closed:  { label:'🔒 Registration Closed',  cls:'registration_closed' },
-        match_live:           { label:'🔴 Match Live',           cls:'match_live' },
-        completed:            { label:'🏆 Completed',            cls:'completed' },
-    };
-    const s = map[status] || { label: status, cls: 'coming_soon' };
-    return `<span class="t-status-badge t-status-${s.cls}">${s.label}</span>`;
-}
+    function escapeHtml(text) {
+        if (!text) return '';
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
 
-function _renderTournamentCard(t) {
-    const tid    = _esc(t.tournament_id);
-    const tidRaw = t.tournament_id;
-    const regCnt = t.registered_count || 0;
-    const maxP   = t.max_players || 0;
-    const fee    = t.entry_fee || 0;
+    function openAdminTelegram() {
+        const username = (CONFIG.ADMIN_TELEGRAM || '').replace('@', '').trim();
+        if (!username) return showToast('Admin Telegram not configured.');
+        const url = 'https://t.me/' + username;
+        if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openTelegramLink) {
+            window.Telegram.WebApp.openTelegramLink(url);
+        } else {
+            window.open(url, '_blank');
+        }
+    }
 
-    return `
-    <div class="t-card" id="tcard-${tid}">
-        <div class="t-card-header">
-            <div>
-                <div class="t-card-title">🏆 ${_esc(t.title || 'Untitled')}</div>
-                <div class="t-card-tid">ID: ${tid}</div>
-            </div>
-            ${_statusBadge(t.status)}
-        </div>
+    // ============================================================
+    // YOUTUBE TASKS LOCK — controlled via CONFIG.YT_TASKS_ACTIVE
+    // ============================================================
+    function applyYtLockState() {
+        const section = document.getElementById('yt-tasks-section');
+        if (!section) return;
+        if (typeof CONFIG === 'undefined') return;
 
-        <div class="t-meta-row">
-            ${t.mode  ? `<span class="t-meta-pill">🎮 ${_esc(t.mode)}</span>` : ''}
-            ${t.map   ? `<span class="t-meta-pill">🗺️ ${_esc(t.map)}</span>`  : ''}
-            ${t.date  ? `<span class="t-meta-pill">📅 ${_esc(t.date)}</span>` : ''}
-            ${t.time  ? `<span class="t-meta-pill">⏰ ${_esc(t.time)}</span>` : ''}
-            <span class="t-meta-pill" style="color:${fee>0?'#f1c40f':'#4ade80'};">${fee > 0 ? `💰 ${fee} coins` : '🆓 Free'}</span>
-            <span class="t-meta-pill">👥 ${regCnt}${maxP>0?' / '+maxP:''} registered</span>
-        </div>
+        const isActive = CONFIG.YT_TASKS_ACTIVE !== false;
 
-        ${t.prize_pool ? `<div style="font-size:11px; color:#64748b; margin-bottom:8px;">🏅 ${_esc(t.prize_pool)}</div>` : ''}
+        if (getComputedStyle(section).position === 'static') {
+            section.style.position = 'relative';
+        }
 
-        <div class="t-actions">
-            <button class="btn-warn"    onclick="toggleSubPanel('${tidRaw}','status')">📋 Status</button>
-            <button class="btn-blue"    onclick="toggleSubPanel('${tidRaw}','room')">🔑 Room</button>
-            <button class="btn-purple"  onclick="toggleSubPanel('${tidRaw}','winners')">🏆 Winners</button>
-            <button class="btn-success" onclick="toggleSubPanel('${tidRaw}','regs')">👥 Registrations</button>
-            <button class="btn-danger"  onclick="deleteTournament('${tidRaw}')">🗑️ Delete</button>
-        </div>
+        const existing = section.querySelector('.lock-overlay');
+        if (existing) existing.remove();
 
-        <!-- Status Panel -->
-        <div class="t-sub-panel" id="tpanel-${tid}-status">
-            <label>Tournament Status Change karo:</label>
-            <select class="t-sub-input" id="tsel-${tid}-status" style="color:#e2e8f0; background:#1e293b;">
-                ${T_STATUSES.map(s => `<option value="${s.val}" ${t.status===s.val?'selected':''}>${s.label}</option>`).join('')}
-            </select>
-            <button class="btn-save" style="padding:8px;" onclick="setTournamentStatus('${tidRaw}')">✅ Update Status</button>
-        </div>
+        section.querySelectorAll('button, input').forEach(el => {
+            if (el.dataset.ytLockedDisabled === '1') {
+                el.disabled = false;
+                delete el.dataset.ytLockedDisabled;
+            }
+        });
+        section.style.pointerEvents = '';
+        section.style.filter = '';
+        section.style.userSelect = '';
 
-        <!-- Room Panel -->
-        <div class="t-sub-panel" id="tpanel-${tid}-room">
-            <label>Room ID</label>
-            <input class="t-sub-input" id="tinp-${tid}-room-id" placeholder="e.g. 123456" value="${_esc(t.room_id||'')}">
-            <label>Room Password</label>
-            <input class="t-sub-input" id="tinp-${tid}-room-pass" placeholder="e.g. abc123" value="${_esc(t.room_password||'')}">
-            <button class="btn-save" style="padding:8px;" onclick="setRoomCredentials('${tidRaw}')">🔑 Save Room Details</button>
-        </div>
+        if (!isActive) {
+            section.style.pointerEvents = 'none';
+            section.style.filter = 'blur(2px) grayscale(0.4)';
+            section.style.userSelect = 'none';
+            section.querySelectorAll('button, input').forEach(el => {
+                if (!el.disabled) {
+                    el.disabled = true;
+                    el.dataset.ytLockedDisabled = '1';
+                }
+            });
 
-        <!-- Winners Panel -->
-        <div class="t-sub-panel" id="tpanel-${tid}-winners">
-            <p style="font-size:11px; color:#64748b; margin-bottom:8px;">Top 3 winners — status automatically "Completed" ho jayega.</p>
-            ${[1,2,3].map(rank => `
-            <div style="background:#1e293b; border-radius:8px; padding:8px; margin-bottom:6px;">
-                <div style="font-size:11px; font-weight:700; color:#f1c40f; margin-bottom:6px;">${['🥇','🥈','🥉'][rank-1]} Rank ${rank}</div>
-                <input class="t-sub-input" id="twin-${tid}-name-${rank}" placeholder="Username / FF Nick">
-                <input class="t-sub-input" id="twin-${tid}-reward-${rank}" placeholder="Prize (e.g. 500 coins)">
-            </div>`).join('')}
-            <button class="btn-save" style="padding:8px;" onclick="publishWinners('${tidRaw}')">🏆 Publish Winners</button>
-        </div>
+            const overlay = document.createElement('div');
+            overlay.className = 'lock-overlay';
+            overlay.style.cssText =
+                'position:absolute;inset:0;display:flex;flex-direction:column;' +
+                'align-items:center;justify-content:center;' +
+                'background:rgba(15,23,42,0.85);border-radius:10px;' +
+                'z-index:9999;pointer-events:auto;';
+            overlay.innerHTML =
+                '<span style="font-size:42px;animation:lock-pulse 1.8s ease-in-out infinite;">🔒</span>' +
+                '<span style="font-size:13px;color:#f1c40f;margin-top:8px;font-weight:700;letter-spacing:0.5px;">YouTube tasks coming soon</span>';
+            section.appendChild(overlay);
+        }
+    }
 
-        <!-- Registrations Panel -->
-        <div class="t-sub-panel" id="tpanel-${tid}-regs">
-            <div id="tregs-${tid}"><p class="empty" style="padding:10px 0;">Click button to load...</p></div>
-            <button class="btn-save" style="padding:8px; margin-top:6px; background:#38bdf8;" onclick="loadRegistrations('${tidRaw}')">👥 Load Registrations</button>
-        </div>
-    </div>`;
-}
+    function applyYtLockStateWhenReady(attempts) {
+        attempts = attempts || 0;
+        if (typeof CONFIG !== 'undefined' && document.getElementById('yt-tasks-section')) {
+            applyYtLockState();
+            return;
+        }
+        if (attempts > 30) return;
+        setTimeout(function() { applyYtLockStateWhenReady(attempts + 1); }, 100);
+    }
 
-// Toggle sub-panel open/close
-function toggleSubPanel(tid, panel) {
-    const panelId  = `tpanel-${tid}-${panel}`;
-    const panelEl  = document.getElementById(panelId);
-    if (!panelEl) return;
-
-    // Close all panels of this card first
-    const card = document.getElementById(`tcard-${tid}`);
-    if (card) card.querySelectorAll('.t-sub-panel').forEach(p => {
-        if (p.id !== panelId) p.classList.remove('open');
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            const el = document.getElementById('admin-tg-username');
+            if (el && typeof CONFIG !== 'undefined' && CONFIG.ADMIN_TELEGRAM) {
+                const u = CONFIG.ADMIN_TELEGRAM.startsWith('@') ? CONFIG.ADMIN_TELEGRAM : '@' + CONFIG.ADMIN_TELEGRAM;
+                el.textContent = u;
+            }
+        }, 200);
+        applyYtLockStateWhenReady();
+        loadPromoTasks();
     });
 
-    panelEl.classList.toggle('open');
+    (function hookTabSwitchForLock() {
+        const tryHook = setInterval(function() {
+            if (typeof window.switchTab === 'function' && !window._ytLockHooked) {
+                const original = window.switchTab;
+                window.switchTab = function(tab, el) {
+                    const r = original.apply(this, arguments);
+                    if (tab === 'tasks') {
+                        setTimeout(applyYtLockStateWhenReady, 50);
+                    }
+                    return r;
+                };
+                window._ytLockHooked = true;
+                clearInterval(tryHook);
+            }
+        }, 200);
+        setTimeout(function() { clearInterval(tryHook); }, 5000);
+    })();
+    </script>
 
-    // Auto-load registrations when opened
-    if (panel === 'regs' && panelEl.classList.contains('open')) {
-        loadRegistrations(tid);
-    }
-}
+    <!-- ===== LOTTERY WINNER CELEBRATION POPUP ===== -->
+    <div id="winner-popup-overlay" style="display:none; position:fixed; inset:0; z-index:99999;
+        background:rgba(0,0,0,0.88); display:none; align-items:center; justify-content:center;
+        flex-direction:column; text-align:center; padding:24px;">
 
-// Change tournament status
-async function setTournamentStatus(tid) {
-    const statusEl = document.getElementById(`tsel-${tid}-status`);
-    if (!statusEl) return;
-    const status = statusEl.value;
-    try {
-        const res  = await fetch(`${API}/admin/tournament/status`, {
-            method:  'POST',
-            headers: authHeaders(),
-            body:    JSON.stringify({ tournament_id: tid, status })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            toast(`✅ Status updated!`, 'ok');
-            loadTournamentSection();
-        } else {
-            toast('❌ ' + (data.message || 'Failed'), 'err');
-        }
-    } catch(e) { toast('❌ Network error', 'err'); }
-}
+        <style>
+            @keyframes trophy-bounce {
+                0%,100% { transform: translateY(0) scale(1); }
+                30%      { transform: translateY(-18px) scale(1.12); }
+                60%      { transform: translateY(-8px) scale(1.06); }
+            }
+            @keyframes winner-glow {
+                0%,100% { text-shadow: 0 0 24px #f1c40f, 0 0 48px #f39c12; }
+                50%      { text-shadow: 0 0 48px #ffe066, 0 0 96px #f1c40f; }
+            }
+            @keyframes confetti-fall {
+                0%   { transform: translateY(-60px) rotate(0deg);   opacity:1; }
+                100% { transform: translateY(120vh) rotate(720deg); opacity:0; }
+            }
+            @keyframes winner-fadein {
+                from { opacity:0; transform:scale(0.7); }
+                to   { opacity:1; transform:scale(1);   }
+            }
+            #winner-popup-box {
+                animation: winner-fadein 0.55s cubic-bezier(.17,.67,.35,1.3) both;
+                background: linear-gradient(145deg, #1a1a2e, #16213e, #0f3460);
+                border: 2px solid #f1c40f;
+                border-radius: 24px;
+                padding: 36px 28px 32px;
+                max-width: 340px;
+                width: 100%;
+                position: relative;
+                box-shadow: 0 0 60px rgba(241,196,15,0.35), 0 8px 32px rgba(0,0,0,0.6);
+            }
+            #winner-trophy {
+                font-size: 72px;
+                display: block;
+                animation: trophy-bounce 1.4s ease-in-out infinite;
+                margin-bottom: 8px;
+            }
+            #winner-title {
+                font-size: 22px;
+                font-weight: 800;
+                color: #f1c40f;
+                animation: winner-glow 2s ease-in-out infinite;
+                letter-spacing: 1px;
+                margin: 8px 0 4px;
+            }
+            #winner-subtitle {
+                font-size: 15px;
+                color: #e2e8f0;
+                margin: 4px 0 16px;
+            }
+            #winner-prize-box {
+                background: linear-gradient(135deg, #f1c40f22, #f39c1211);
+                border: 1px solid #f1c40f55;
+                border-radius: 14px;
+                padding: 14px 20px;
+                margin: 12px 0 20px;
+            }
+            #winner-prize-coins {
+                font-size: 32px;
+                font-weight: 900;
+                color: #f1c40f;
+                display: block;
+            }
+            #winner-prize-label {
+                font-size: 13px;
+                color: #94a3b8;
+                margin-top: 2px;
+            }
+            #winner-close-btn {
+                background: linear-gradient(135deg, #f1c40f, #f39c12);
+                color: #1a1a2e;
+                border: none;
+                border-radius: 50px;
+                padding: 13px 40px;
+                font-size: 15px;
+                font-weight: 800;
+                cursor: pointer;
+                letter-spacing: 0.5px;
+                box-shadow: 0 4px 18px rgba(241,196,15,0.4);
+                transition: transform 0.15s, box-shadow 0.15s;
+                width: 100%;
+            }
+            #winner-close-btn:active { transform: scale(0.97); }
+            .confetti-piece {
+                position: fixed;
+                width: 10px; height: 10px;
+                border-radius: 2px;
+                top: -60px;
+                animation: confetti-fall linear forwards;
+                pointer-events: none;
+                z-index: 100000;
+            }
+        </style>
 
-// Set room credentials
-async function setRoomCredentials(tid) {
-    const roomId   = document.getElementById(`tinp-${tid}-room-id`)?.value.trim();
-    const roomPass = document.getElementById(`tinp-${tid}-room-pass`)?.value.trim();
-    if (!roomId || !roomPass) return toast('❌ Room ID aur Password dono bharo', 'err');
-    try {
-        const res  = await fetch(`${API}/admin/tournament/room`, {
-            method:  'POST',
-            headers: authHeaders(),
-            body:    JSON.stringify({ tournament_id: tid, room_id: roomId, room_password: roomPass })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            toast('✅ Room details saved!', 'ok');
-        } else {
-            toast('❌ ' + (data.message || 'Failed'), 'err');
-        }
-    } catch(e) { toast('❌ Network error', 'err'); }
-}
+        <div id="winner-popup-box">
+            <span id="winner-trophy">🏆</span>
+            <div id="winner-title">YOU WON THE LOTTERY!</div>
+            <div id="winner-subtitle">Congratulations! 🎉 You are today's lucky winner!</div>
+            <div id="winner-prize-box">
+                <span id="winner-prize-coins">+0 🪙</span>
+                <div id="winner-prize-label">Coins added to your balance</div>
+            </div>
+            <button id="winner-close-btn" onclick="closeWinnerPopup()">🎊 Claim My Prize!</button>
+        </div>
+    </div>
 
-// Publish winners
-async function publishWinners(tid) {
-    const winners = [];
-    for (let rank = 1; rank <= 3; rank++) {
-        const name   = document.getElementById(`twin-${tid}-name-${rank}`)?.value.trim();
-        const reward = document.getElementById(`twin-${tid}-reward-${rank}`)?.value.trim();
-        if (name) winners.push({ rank, username: name, reward: reward || '' });
-    }
-    if (!winners.length) return toast('❌ At least 1 winner ka naam bharo', 'err');
-    if (!confirm(`${winners.length} winner(s) publish karein? Tournament "Completed" ho jayega.`)) return;
-    try {
-        const res  = await fetch(`${API}/admin/tournament/winners`, {
-            method:  'POST',
-            headers: authHeaders(),
-            body:    JSON.stringify({ tournament_id: tid, winners })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            toast('🏆 Winners published!', 'ok');
-            loadTournamentSection();
-        } else {
-            toast('❌ ' + (data.message || 'Failed'), 'err');
-        }
-    } catch(e) { toast('❌ Network error', 'err'); }
-}
+    <!-- ===================== PREMIUM MODAL ===================== -->
+    <div id="premium-modal-overlay" onclick="hidePremiumModal()" style="
+        display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75);
+        z-index:3000; backdrop-filter:blur(4px);
+    "></div>
 
-// Load registrations
-async function loadRegistrations(tid) {
-    const el = document.getElementById(`tregs-${tid}`);
-    if (!el) return;
-    el.innerHTML = '<p class="empty" style="padding:8px 0;">Loading...</p>';
-    try {
-        const res  = await fetch(`${API}/admin/tournament/registrations?tournament_id=${encodeURIComponent(tid)}`, { headers: authHeaders() });
-        const data = await res.json();
-        if (data.status !== 'success') throw new Error(data.message || 'Failed');
-        const regs = data.data || [];
-        if (!regs.length) {
-            el.innerHTML = '<p class="empty" style="padding:8px 0;">Koi registration nahi hai.</p>';
-            return;
-        }
-        el.innerHTML = `
-            <p style="font-size:11px; color:#64748b; margin-bottom:6px;">Total: <b style="color:#e2e8f0;">${data.total}</b> registered</p>
-            <div style="overflow-x:auto;">
-            <table class="reg-table">
-                <thead><tr>
-                    <th>#</th><th>User ID</th><th>Username</th><th>FF UID</th><th>FF Nick</th><th>Fee</th><th>Date</th>
-                </tr></thead>
-                <tbody>
-                ${regs.map((r, i) => `
-                    <tr>
-                        <td>${i+1}</td>
-                        <td>${r.user_id}</td>
-                        <td>${r.username ? '@'+_esc(r.username) : '—'}</td>
-                        <td style="font-family:monospace; color:#f1c40f;">${_esc(r.ff_uid||'')}</td>
-                        <td>${_esc(r.ff_nickname||'')}</td>
-                        <td>${r.entry_fee_paid > 0 ? r.entry_fee_paid+' 🪙' : 'Free'}</td>
-                        <td style="color:#64748b;">${r.registered_at||'—'}</td>
-                    </tr>`).join('')}
-                </tbody>
-            </table>
-            </div>`;
-    } catch(e) {
-        el.innerHTML = `<p class="empty" style="padding:8px 0; color:#e74c3c;">❌ ${e.message}</p>`;
-    }
-}
+    <div id="premium-modal" style="
+        display:none; position:fixed; bottom:0; left:0; right:0;
+        background:linear-gradient(180deg,#0d1b2a 0%,#07111a 100%);
+        border-radius:24px 24px 0 0;
+        border-top:1px solid rgba(241,196,15,0.25);
+        z-index:3001; max-height:88vh; overflow-y:auto;
+        padding:0 0 32px 0;
+    ">
+        <!-- Handle -->
+        <div style="text-align:center;padding:10px 0 0;">
+            <div style="width:36px;height:4px;background:#334155;border-radius:4px;display:inline-block;"></div>
+        </div>
 
-// Delete tournament
-async function deleteTournament(tid) {
-    if (!confirm(`Tournament "${tid}" permanently delete karein?\n\nYeh action undo nahi ho sakti!`)) return;
-    try {
-        const res  = await fetch(`${API}/admin/tournament/${encodeURIComponent(tid)}`, {
-            method:  'DELETE',
-            headers: authHeaders(),
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            toast(`🗑️ Tournament "${tid}" deleted!`, 'ok');
-            loadTournamentSection();
-        } else {
-            toast('❌ ' + (data.message || 'Failed'), 'err');
-        }
-    } catch(e) { toast('❌ Network error', 'err'); }
-}
+        <!-- Header -->
+        <div style="padding:16px 20px 0; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <h3 style="color:#1D9BF0;margin:0;font-size:18px;display:flex;align-items:center;gap:7px;">
+                    <svg width="20" height="20" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="9" cy="9" r="9" fill="#1D9BF0"/>
+                        <path d="M5 9.5L7.5 12L13 6.5" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    Premium Membership
+                </h3>
+                <p style="font-size:12px;color:#64748b;margin:4px 0 0;">Earn more, withdraw faster!</p>
+            </div>
+            <button onclick="hidePremiumModal()" style="background:rgba(255,255,255,0.08);border:none;color:#94a3b8;width:32px;height:32px;border-radius:50%;font-size:18px;cursor:pointer;line-height:30px;">✕</button>
+        </div>
 
-// Create new tournament
-async function createTournament() {
-    const msgEl = document.getElementById('t-create-msg');
-    const title = document.getElementById('t-title').value.trim();
-    if (!title) {
-        msgEl.style.color = '#e74c3c';
-        msgEl.textContent = '❌ Title required hai.';
-        return;
-    }
+        <!-- Benefits list -->
+        <div style="margin:14px 20px 0; background:rgba(241,196,15,0.06); border:1px solid rgba(241,196,15,0.15); border-radius:14px; padding:14px;">
+            <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">✨ Premium Benefits</p>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px;">🎯</span><span style="font-size:13px;color:#e2e8f0;">Task reward <b style="color:#4ade80;">+25% bonus</b> coins</span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px;">📺</span><span style="font-size:13px;color:#e2e8f0;">Watch ads: <b style="color:#4ade80;">10 coins</b> (2x normal)</span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px;">🎡</span><span style="font-size:13px;color:#e2e8f0;">Spin wheel: <b style="color:#4ade80;">15 spins/day</b> (3x)</span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px;">💸</span><span style="font-size:13px;color:#e2e8f0;">Withdraw from <b style="color:#4ade80;">10,000 coins</b></span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px;">👥</span><span style="font-size:13px;color:#e2e8f0;">Only <b style="color:#4ade80;">2 referrals</b> needed</span></div>
+            </div>
+        </div>
 
-    const tid       = document.getElementById('t-id').value.trim() || '';
-    const mode      = document.getElementById('t-mode').value.trim() || 'Squad';
-    const map_      = document.getElementById('t-map').value.trim()  || 'Bermuda';
-    const date      = document.getElementById('t-date').value.trim();
-    const time      = document.getElementById('t-time').value.trim();
-    const entry_fee = parseInt(document.getElementById('t-fee').value)  || 0;
-    const max_p     = parseInt(document.getElementById('t-maxp').value) || 50;
-    const prize      = document.getElementById('t-prize').value.trim();
-    const prize1st   = document.getElementById('t-prize-1st')?.value.trim() || '';
-    const prize2nd   = document.getElementById('t-prize-2nd')?.value.trim() || '';
-    const prize3rd   = document.getElementById('t-prize-3rd')?.value.trim() || '';
+        <!-- Plan Cards -->
+        <div id="prem-plan-section" style="padding:0 20px;">
+            <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:16px 0 10px;">📦 Choose Your Plan</p>
+            <div style="display:flex;flex-direction:column;gap:10px;">
 
-    // Build prizes array from filled fields
-    const prizesArr = [];
-    if (prize1st) prizesArr.push({ rank: 1, label: '1st Place', prize: prize1st });
-    if (prize2nd) prizesArr.push({ rank: 2, label: '2nd Place', prize: prize2nd });
-    if (prize3rd) prizesArr.push({ rank: 3, label: '3rd Place', prize: prize3rd });
+                <!-- Weekly -->
+                <div id="plan-weekly" onclick="selectPlan('weekly')" style="
+                    border:2px solid rgba(241,196,15,0.2); border-radius:14px;
+                    padding:14px 16px; cursor:pointer; position:relative;
+                    background:rgba(241,196,15,0.04); transition:all 0.2s;
+                    display:flex; justify-content:space-between; align-items:center;
+                ">
+                    <div>
+                        <p style="font-size:14px;font-weight:800;color:#e2e8f0;margin:0;">📅 Weekly</p>
+                        <p style="font-size:11px;color:#64748b;margin:3px 0 0;">7 days — Best for trying out</p>
+                    </div>
+                    <div style="text-align:right;">
+                        <p style="font-size:20px;font-weight:800;color:#f1c40f;margin:0;">₹29</p>
+                        <p style="font-size:10px;color:#64748b;margin:0;">~₹4/day</p>
+                    </div>
+                </div>
 
-    msgEl.style.color   = '#94a3b8';
-    msgEl.textContent   = '⏳ Creating...';
+                <!-- Monthly (Recommended) -->
+                <div id="plan-monthly" onclick="selectPlan('monthly')" style="
+                    border:2px solid #f1c40f; border-radius:14px;
+                    padding:14px 16px; cursor:pointer; position:relative;
+                    background:rgba(241,196,15,0.08); transition:all 0.2s;
+                    display:flex; justify-content:space-between; align-items:center;
+                ">
+                    <div style="position:absolute;top:-10px;left:14px;background:linear-gradient(135deg,#f1c40f,#e67e22);border-radius:20px;padding:2px 10px;">
+                        <p style="font-size:10px;font-weight:800;color:#1e293b;margin:0;">⭐ POPULAR</p>
+                    </div>
+                    <div>
+                        <p style="font-size:14px;font-weight:800;color:#f1c40f;margin:0;">📆 Monthly</p>
+                        <p style="font-size:11px;color:#94a3b8;margin:3px 0 0;">30 days — Most value!</p>
+                    </div>
+                    <div style="text-align:right;">
+                        <p style="font-size:20px;font-weight:800;color:#f1c40f;margin:0;">₹79</p>
+                        <p style="font-size:10px;color:#64748b;margin:0;">~₹2.6/day</p>
+                    </div>
+                </div>
 
-    const body = { title, mode, map: map_, date, time, entry_fee, max_players: max_p, prize_pool: prize, prizes: prizesArr };
-    if (tid) body.tournament_id = tid;
+                <!-- Quarterly -->
+                <div id="plan-quarterly" onclick="selectPlan('quarterly')" style="
+                    border:2px solid rgba(241,196,15,0.2); border-radius:14px;
+                    padding:14px 16px; cursor:pointer; position:relative;
+                    background:rgba(241,196,15,0.04); transition:all 0.2s;
+                    display:flex; justify-content:space-between; align-items:center;
+                ">
+                    <div style="position:absolute;top:-10px;right:14px;background:linear-gradient(135deg,#22c55e,#16a34a);border-radius:20px;padding:2px 10px;">
+                        <p style="font-size:10px;font-weight:800;color:#fff;margin:0;">💰 BEST DEAL</p>
+                    </div>
+                    <div>
+                        <p style="font-size:14px;font-weight:800;color:#e2e8f0;margin:0;">🗓 Quarterly</p>
+                        <p style="font-size:11px;color:#64748b;margin:3px 0 0;">90 days — Save 16%</p>
+                    </div>
+                    <div style="text-align:right;">
+                        <p style="font-size:20px;font-weight:800;color:#f1c40f;margin:0;">₹199</p>
+                        <p style="font-size:10px;color:#64748b;margin:0;">~₹2.2/day</p>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-    try {
-        const res  = await fetch(`${API}/admin/tournament`, {
-            method:  'POST',
-            headers: authHeaders(),
-            body:    JSON.stringify(body)
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            msgEl.style.color = '#4ade80';
-            msgEl.textContent = `✅ Tournament "${data.tournament_id}" created!`;
-            toast('✅ Tournament created!', 'ok');
-            // Clear form
-            ['t-id','t-title','t-date','t-time','t-prize','t-prize-1st','t-prize-2nd','t-prize-3rd'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.value = '';
-            });
-            document.getElementById('t-fee').value  = '0';
-            document.getElementById('t-maxp').value = '50';
-            loadTournamentSection();
-        } else {
-            msgEl.style.color = '#e74c3c';
-            msgEl.textContent = '❌ ' + (data.message || 'Failed to create');
-            toast('❌ ' + (data.message || 'Failed'), 'err');
-        }
-    } catch(e) {
-        msgEl.style.color = '#e74c3c';
-        msgEl.textContent = '❌ Network error';
-        toast('❌ Network error', 'err');
-    }
-}
+        <!-- Payment Instructions (shown after plan selected) -->
+        <div id="prem-pay-section" style="display:none; padding:0 20px; margin-top:16px;">
+            <div style="background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.2); border-radius:14px; padding:16px;">
+                <p style="font-size:12px;font-weight:800;color:#4ade80;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 12px;">💳 Payment Steps</p>
 
-// ── Broadcast ──
-async function sendBroadcast() {
-    const msg = document.getElementById('bcast-msg').value.trim();
-    if (!msg) return toast('❌ Message is empty!', 'err');
-    const result = document.getElementById('bcast-result');
-    result.textContent = '⏳ Sending...';
-    try {
-        const res  = await fetch(`${API}/admin/broadcast`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ message: msg })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            toast('✅ Broadcast started!', 'ok');
-            result.textContent = `✅ ${data.message}`;
-            document.getElementById('bcast-msg').value = '';
-        } else {
-            result.textContent = '❌ ' + (data.message || 'Failed to send');
-            toast('❌ Failed', 'err');
-        }
-    } catch(e) { result.textContent = '❌ Network error'; toast('❌ Network error', 'err'); }
-}
+                <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">
+                    <span style="background:#4ade80;color:#0d1b2a;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;">1</span>
+                    <div style="flex:1;">
+                        <p style="font-size:13px;font-weight:700;color:#e2e8f0;margin:0;">Pay via UPI</p>
 
-// ── Direct Message ──
-async function sendDM() {
-    const uid      = document.getElementById('dm-uid').value.trim();
-    const msg      = document.getElementById('dm-msg').value.trim();
-    const resultEl = document.getElementById('dm-result');
-    if (!uid) return toast('❌ User ID daalo', 'err');
-    if (!msg) return toast('❌ Message khaali hai!', 'err');
-    resultEl.style.color = '#94a3b8';
-    resultEl.textContent = '⏳ Message bheja ja raha hai...';
-    try {
-        const res  = await fetch(`${API}/admin/send_dm`, {
-            method:  'POST',
-            headers: authHeaders(),
-            body:    JSON.stringify({ user_id: parseInt(uid), message: msg })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            resultEl.style.color = '#4ade80';
-            resultEl.textContent = '✅ ' + data.message;
-            document.getElementById('dm-msg').value = '';
-            toast('✅ Message bheja!', 'ok');
-        } else {
-            resultEl.style.color = '#f87171';
-            resultEl.textContent = '❌ ' + (data.message || 'Message fail ho gaya');
-            toast('❌ Failed', 'err');
-        }
-    } catch(e) {
-        resultEl.style.color = '#f87171';
-        resultEl.textContent = '❌ Network error';
-        toast('❌ Network error', 'err');
-    }
-}
-</script>
+                        <!-- QR Code -->
+                        <div id="prem-qr-wrap" style="margin-top:10px;text-align:center;display:none;">
+                            <div style="background:#fff;border-radius:14px;padding:10px;display:inline-block;box-shadow:0 0 20px rgba(241,196,15,0.2);">
+                                <img id="prem-qr-img" src="" alt="UPI QR Code" style="width:170px;height:170px;object-fit:contain;border-radius:8px;display:block;">
+                            </div>
+                            <p style="font-size:11px;color:#4ade80;margin:6px 0 0;font-weight:700;">📷 Scan QR or copy UPI ID below</p>
+                        </div>
+
+                        <!-- UPI ID row -->
+                        <div style="background:rgba(0,0,0,0.3);border-radius:10px;padding:10px 14px;margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
+                            <p id="prem-upi-display" style="font-size:14px;font-weight:800;color:#f1c40f;margin:0;letter-spacing:0.5px;word-break:break-all;">loading...</p>
+                            <button onclick="copyUpi()" style="background:rgba(241,196,15,0.15);border:1px solid rgba(241,196,15,0.3);color:#f1c40f;border-radius:8px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;margin-left:8px;">📋 Copy</button>
+                        </div>
+                        <p id="prem-amount-display" style="font-size:12px;color:#94a3b8;margin:4px 0 0;">Amount: loading...</p>
+                    </div>
+                </div>
+
+                <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">
+                    <span style="background:#4ade80;color:#0d1b2a;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;">2</span>
+                    <div>
+                        <p style="font-size:13px;font-weight:700;color:#e2e8f0;margin:0;">Take a Screenshot</p>
+                        <p style="font-size:11px;color:#64748b;margin:2px 0 0;">Save screenshot of the successful payment</p>
+                    </div>
+                </div>
+
+                <div style="display:flex;align-items:flex-start;gap:10px;">
+                    <span style="background:#4ade80;color:#0d1b2a;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;">3</span>
+                    <div>
+                        <p style="font-size:13px;font-weight:700;color:#e2e8f0;margin:0;">Send screenshot to the bot</p>
+                        <p style="font-size:11px;color:#64748b;margin:2px 0 0;">Admin will verify and activate your premium within 10–30 minutes</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Transaction ID input -->
+            <div style="margin-top:14px;">
+                <label style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.7px;display:block;margin-bottom:6px;">
+                    🧾 Transaction / UTR ID <span style="color:#ef4444;">*</span>
+                </label>
+                <div style="position:relative;">
+                    <input
+                        id="prem-txn-input"
+                        type="text"
+                        inputmode="numeric"
+                        placeholder="Enter 12-digit UTR or Transaction ID"
+                        maxlength="30"
+                        oninput="validateTxnInput()"
+                        style="
+                            width:100%; box-sizing:border-box;
+                            background:rgba(0,0,0,0.35);
+                            border:1.5px solid rgba(255,255,255,0.1);
+                            border-radius:12px; padding:12px 44px 12px 14px;
+                            font-size:14px; font-weight:700;
+                            color:#f1c40f; outline:none;
+                            letter-spacing:0.5px;
+                            transition:border-color 0.2s;
+                        "
+                    />
+                    <span id="prem-txn-tick" style="
+                        position:absolute; right:14px; top:50%;
+                        transform:translateY(-50%);
+                        font-size:16px; display:none;
+                    ">✅</span>
+                </div>
+                <p id="prem-txn-err" style="font-size:11px;color:#ef4444;margin:4px 0 0;display:none;">
+                    ⚠️ Please enter a valid Transaction / UTR ID before proceeding.
+                </p>
+            </div>
+
+            <button id="prem-pay-btn" onclick="openBotForPayment()" style="
+                width:100%; margin-top:12px;
+                background:linear-gradient(135deg,#f1c40f,#e67e22);
+                border:none; border-radius:14px;
+                padding:14px; font-size:15px; font-weight:800;
+                color:#1e293b; cursor:pointer;
+                box-shadow:0 4px 20px rgba(241,196,15,0.3);
+            ">✅ I've Paid — Open Bot to Send Screenshot</button>
+
+            <button onclick="resetPremiumModal()" style="
+                width:100%; margin-top:8px;
+                background:transparent; border:1px solid rgba(255,255,255,0.1);
+                border-radius:14px; padding:10px; font-size:13px;
+                color:#64748b; cursor:pointer;
+            ">← Choose a Different Plan</button>
+        </div>
+
+    </div>
+
+    <!-- Cache-bust query param: bump v=N every time you deploy a change -->
+    <script src="config.js?v=4"></script>
+    <script src="script.js?v=7"></script>
+
 </body>
 </html>
