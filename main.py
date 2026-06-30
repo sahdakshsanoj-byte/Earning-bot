@@ -410,6 +410,110 @@ def _cleanup_rate_cache() -> None:
 
 
 # ============================================================
+# 5b. USER DATA / PREMIUM / REFERRAL TTL CACHE
+# — Reduces MongoDB reads when many users are online
+# ============================================================
+
+USER_CACHE_TTL    = 15   # seconds — /get_user served from cache
+PREMIUM_CACHE_TTL = 60   # seconds — premium status cache
+REFERRAL_CACHE_TTL= 30   # seconds — referral list cache
+
+_user_cache:     dict = {}   # user_id -> (ts, response_dict)
+_premium_cache:  dict = {}   # user_id -> (ts, premium_dict)
+_referral_cache: dict = {}   # user_id -> (ts, referral_str)
+
+_user_cache_lock     = threading.Lock()
+_premium_cache_lock  = threading.Lock()
+_referral_cache_lock = threading.Lock()
+
+
+# ── Getters ──────────────────────────────────────────────────
+
+def _get_user_cache(user_id: int):
+    with _user_cache_lock:
+        entry = _user_cache.get(user_id)
+        if entry and time.time() - entry[0] < USER_CACHE_TTL:
+            return entry[1]
+    return None
+
+
+def _set_user_cache(user_id: int, data: dict):
+    with _user_cache_lock:
+        _user_cache[user_id] = (time.time(), data)
+
+
+def _get_premium_cache(user_id: int):
+    with _premium_cache_lock:
+        entry = _premium_cache.get(user_id)
+        if entry and time.time() - entry[0] < PREMIUM_CACHE_TTL:
+            return entry[1]
+    return None
+
+
+def _set_premium_cache(user_id: int, data: dict):
+    with _premium_cache_lock:
+        _premium_cache[user_id] = (time.time(), data)
+
+
+def _get_referral_cache(user_id: int):
+    with _referral_cache_lock:
+        entry = _referral_cache.get(user_id)
+        if entry and time.time() - entry[0] < REFERRAL_CACHE_TTL:
+            return entry[1]
+    return None
+
+
+def _set_referral_cache(user_id: int, data: str):
+    with _referral_cache_lock:
+        _referral_cache[user_id] = (time.time(), data)
+
+
+# ── Invalidation (call after any DB write for a user) ────────
+
+def _invalidate_user_cache(user_id: int):
+    """Remove cached data for a user so next request fetches fresh from DB."""
+    with _user_cache_lock:
+        _user_cache.pop(user_id, None)
+    with _premium_cache_lock:
+        _premium_cache.pop(user_id, None)
+    with _referral_cache_lock:
+        _referral_cache.pop(user_id, None)
+
+
+def _clear_all_caches():
+    """Flush every in-memory cache — use via /cache_clear admin command."""
+    with _user_cache_lock:
+        _user_cache.clear()
+    with _premium_cache_lock:
+        _premium_cache.clear()
+    with _referral_cache_lock:
+        _referral_cache.clear()
+    _bust_feature_cache()
+    logger.info("All in-memory caches cleared by admin.")
+
+
+def _cache_stats() -> dict:
+    """Return current cache sizes for /server_stats command."""
+    now = time.time()
+    with _user_cache_lock:
+        u_total = len(_user_cache)
+        u_live  = sum(1 for ts, _ in _user_cache.values() if now - ts < USER_CACHE_TTL)
+    with _premium_cache_lock:
+        p_live = sum(1 for ts, _ in _premium_cache.values() if now - ts < PREMIUM_CACHE_TTL)
+    with _referral_cache_lock:
+        r_live = sum(1 for ts, _ in _referral_cache.values() if now - ts < REFERRAL_CACHE_TTL)
+    with _rate_cache_lock:
+        rate_keys = len(_rate_cache)
+    return {
+        "user_cache_total": u_total,
+        "user_cache_live":  u_live,
+        "premium_live":     p_live,
+        "referral_live":    r_live,
+        "rate_keys":        rate_keys,
+    }
+
+
+# ============================================================
 # 5a-2. TASK IDEMPOTENCY LOCK
 # ── Ek hi task submit request ek waqt mein process ho —
 # ── double-tap / network retry se duplicate reward nahi milega
@@ -937,25 +1041,34 @@ def is_premium(user_id: int) -> bool:
 
 
 def get_premium_info(user_id: int) -> dict:
-    """Returns premium status dict for a user — used in API responses."""
+    """Returns premium status dict for a user — served from cache when possible."""
+    cached = _get_premium_cache(user_id)
+    if cached is not None:
+        return cached
     try:
         u = users_col.find_one(
             {"user_id": user_id},
             {"premium": 1, "premium_expiry": 1, "premium_plan": 1},
         )
         if not u or not u.get("premium"):
-            return {"premium": False}
+            result = {"premium": False}
+            _set_premium_cache(user_id, result)
+            return result
         expiry = u.get("premium_expiry")
         if expiry and datetime.utcnow() > expiry:
             users_col.update_one({"user_id": user_id}, {"$set": {"premium": False}})
-            return {"premium": False}
+            result = {"premium": False}
+            _set_premium_cache(user_id, result)
+            return result
         days_left = max(0, (expiry - datetime.utcnow()).days) if expiry else 9999
-        return {
+        result = {
             "premium":   True,
             "expiry":    expiry.strftime("%d %b %Y") if expiry else "Lifetime",
             "days_left": days_left,
             "plan":      u.get("premium_plan", "Standard"),
         }
+        _set_premium_cache(user_id, result)
+        return result
     except Exception:
         return {"premium": False}
 # ─────────────────────────────────────────────────────────────────────────
@@ -1102,11 +1215,16 @@ def get_leaderboard() -> str:
 
 
 def get_referral_list(user_id: int) -> str:
+    cached = _get_referral_cache(user_id)
+    if cached is not None:
+        return cached
     try:
         refs = list(
             users_col.find({"referred_by": str(user_id)}, {"user_id": 1, "_id": 0})
         )
-        return ",".join(str(r["user_id"]) for r in refs) if refs else ""
+        result = ",".join(str(r["user_id"]) for r in refs) if refs else ""
+        _set_referral_cache(user_id, result)
+        return result
     except Exception as exc:
         logger.error("get_referral_list error for %s: %s", user_id, exc)
         return ""
@@ -1325,6 +1443,12 @@ def home():
 def get_user_data_api(user_id: int):
     if is_rate_limited(f"getuser_{user_id}", 3):
         return jsonify({"status": "error", "message": "Too many requests. Slow down."}), 429
+
+    # Serve from in-memory cache if fresh (reduces MongoDB load under high traffic)
+    cached_resp = _get_user_cache(user_id)
+    if cached_resp is not None:
+        return jsonify(cached_resp)
+
     try:
         user = users_col.find_one({"user_id": user_id})
         if not user:
@@ -1356,7 +1480,7 @@ def get_user_data_api(user_id: int):
 
         promo_task_completions = user.get("promo_task_completions", [])
 
-        return jsonify({
+        resp = {
             "status":                 "success",
             "coins":                  user.get("coins", 0),
             "leaderboard":            get_leaderboard_cached(),
@@ -1374,7 +1498,10 @@ def get_user_data_api(user_id: int):
             "pending_winner_popup":   user.get("pending_winner_popup", False),
             "pending_winner_prize":   user.get("pending_winner_prize", 0),
             "premium_info":           get_premium_info(user_id),
-        })
+        }
+        # Cache response — invalidated whenever user data is written
+        _set_user_cache(user_id, resp)
+        return jsonify(resp)
     except Exception as exc:
         logger.error("get_user error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
@@ -1582,6 +1709,7 @@ def claim_daily_api(user_id: int):
                 },
             },
         )
+        _invalidate_user_cache(user_id)
         return jsonify({
             "status":  "success",
             "message": f"Day {streak_day} streak! +{reward} coins added! {tier}",
@@ -1656,6 +1784,7 @@ def claim_allcomplete_bonus_api(user_id: int):
             {"user_id": user_id},
             {"$inc": {"coins": ALL_TASKS_BONUS}, "$set": {"allcomplete_bonus_date": today}},
         )
+        _invalidate_user_cache(user_id)
         logger.info("All-tasks bonus of %s coins credited to user %s", ALL_TASKS_BONUS, user_id)
         return jsonify({
             "status":  "success",
@@ -1770,6 +1899,8 @@ def withdraw_api():
         {"$inc": {"coins": -requested_amount}},
         return_document=True,
     )
+    if result is not None:
+        _invalidate_user_cache(user_id)
     if result is None:
         user = users_col.find_one({"user_id": user_id})
         if not user:
@@ -1984,6 +2115,7 @@ def verify_task_api():
             return jsonify({"status": "error", "message": "Task already completed."}), 400
 
         _release_task_lock(_idem_key)
+        _invalidate_user_cache(user_id)
         clear_task_fail_counter(user_id, task_id)
         # Referral commission — non-blocking, 10% to sponsor
         _fire_commission(user_id, reward, "task", f"task_{user_id}_{task_id}_{today}_{correct_code}")
@@ -2103,6 +2235,7 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
                 },
             },
         )
+        _invalidate_user_cache(user_id)
         # Referral commission — non-blocking, 10% to sponsor
         _fire_commission(user_id, _ad_reward, "ad", ad_event_id)
         _prem_tag = " 👑 (Premium 2x!)" if _ad_reward > AD_COIN_REWARD else ""
@@ -2186,6 +2319,7 @@ def claim_channel_api():
                 "$set": {f"channel_claims.{channel_id}": True},
             },
         )
+        _invalidate_user_cache(user_id)
         return jsonify({
             "status":  "success",
             "message": f"{reward} coins credited for joining the channel!",
@@ -2248,6 +2382,7 @@ def claim_promo_task_api():
             {"user_id": user_id},
             {"$inc": {"coins": reward}, "$addToSet": {"promo_task_completions": task_id}},
         )
+        _invalidate_user_cache(user_id)
         return jsonify({
             "status":  "success",
             "message": f"{reward} coins added for completing the promotion task!",
@@ -2694,6 +2829,7 @@ def admin_add_coins():
     if amount <= 0:
         return jsonify({"status": "error", "message": "Amount must be positive"}), 400
     users_col.update_one({"user_id": uid}, {"$inc": {"coins": amount}})
+    _invalidate_user_cache(uid)
     try:
         bot.send_message(uid, f"\U0001f381 Admin has gifted you *{amount} coins*!", parse_mode="Markdown")
     except Exception:
@@ -5781,6 +5917,64 @@ def server_health(message):
         bot.reply_to(message, f"\u274c Health check failed: {exc}")
 
 
+@bot.message_handler(commands=["server_stats"])
+def server_stats_cmd(message):
+    """Show in-memory cache sizes + DB pool + CPU/RAM summary."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        cs   = _cache_stats()
+        cpu  = psutil.cpu_percent(interval=0.5)
+        mem  = psutil.virtual_memory()
+        pool = client.options.pool_options.max_pool_size
+
+        def sig(pct):
+            if pct < 60: return "\U0001f7e2"
+            if pct < 85: return "\U0001f7e1"
+            return "\U0001f534"
+
+        text = (
+            "\u26a1 *Server Performance Stats*\n\n"
+            "\U0001f5c3\ufe0f *In-Memory Cache*\n"
+            f"  \U0001f464 User cache: `{cs['user_cache_live']}/{cs['user_cache_total']}` live entries (TTL {USER_CACHE_TTL}s)\n"
+            f"  \U0001f451 Premium cache: `{cs['premium_live']}` entries (TTL {PREMIUM_CACHE_TTL}s)\n"
+            f"  \U0001f91d Referral cache: `{cs['referral_live']}` entries (TTL {REFERRAL_CACHE_TTL}s)\n"
+            f"  \u23f3 Rate-limit keys: `{cs['rate_keys']}`\n\n"
+            "\U0001f5c2\ufe0f *MongoDB*\n"
+            f"  Max pool size: `{pool}`\n\n"
+            f"{sig(cpu)} *CPU:* `{cpu:.1f}%`\n"
+            f"{sig(mem.percent)} *RAM:* `{mem.percent:.1f}%` "
+            f"(`{mem.used//1024//1024} MB / {mem.total//1024//1024} MB`)\n\n"
+            "Use /cache\\_clear to flush all caches\n"
+            "Use /health for full server health"
+        )
+        bot.reply_to(message, text, parse_mode="Markdown")
+    except Exception as exc:
+        bot.reply_to(message, f"\u274c Stats failed: {exc}")
+
+
+@bot.message_handler(commands=["cache_clear"])
+def cache_clear_cmd(message):
+    """Flush all in-memory caches immediately."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        _clear_all_caches()
+        bot.reply_to(
+            message,
+            "\u2705 *Cache Cleared!*\n\n"
+            "All in-memory caches flushed:\n"
+            "\U0001f464 User data cache\n"
+            "\U0001f451 Premium cache\n"
+            "\U0001f91d Referral cache\n"
+            "\u2699\ufe0f Feature config cache\n\n"
+            "Next requests will fetch fresh data from MongoDB.",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        bot.reply_to(message, f"\u274c Cache clear failed: {exc}")
+
+
 @bot.message_handler(commands=["approve"])
 def approve_withdrawal(message):
     if int(message.from_user.id) != ADMIN_ID:
@@ -6021,7 +6215,8 @@ def cmd_search_user(message):
                 lines = [f"\U0001f50d *{len(users_found)} users found for* `{query_raw}`:\n"]
                 for u in users_found:
                     status = "\U0001f6ab" if u.get("blocked") else "\u2705"
-                    lines.append(f"{status} `{u.get('user_id', '?')}` \u2014 {u.get('username') or '\u2014'} | \U0001f4b0{u.get('coins', 0)}")
+                    _uname = u.get('username') or '—'
+                    lines.append(f"{status} `{u.get('user_id', '?')}` \u2014 {_uname} | \U0001f4b0{u.get('coins', 0)}")
                 lines.append("\n_Use /searchuser <ID> to get full details._")
                 return bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
 
@@ -6206,8 +6401,8 @@ def set_lottery_command(message):
         f"\U0001f3b0 *Lottery Updated!*\n\n"
         f"\U0001f3ab Ticket Price: `{new_price}` \U0001fa99\n"
         f"\U0001f3c6 Prize: `{new_prize}` \U0001fa99\n"
-        f"\U0001f4ca Status: `{'ACTIVE \u2705' if active_flag else 'DISABLED \u274c'}`\n\n"
-        f"_Note: Today's existing round keeps its locked-in values. New settings apply from next round (00:00 UTC)._",
+        f"\U0001f4ca Status: `{'ACTIVE ✅' if active_flag else 'DISABLED ❌'}`\n\n"
+        "_Note: Today's existing round keeps its locked-in values. New settings apply from next round (00:00 UTC)._",
         parse_mode="Markdown",
     )
 
@@ -6241,7 +6436,7 @@ def lottery_stats_command(message):
         f"\U0001f465 Tickets Sold: `{len(participants)}`\n"
         f"\U0001f4b5 Pool Collected: `{pool}` \U0001fa99\n"
         f"\U0001f4c8 Net Burn (pool - prize): `{profit}` \U0001fa99\n"
-        f"\U0001f3b2 Drawn: `{'YES \u2705' if rdoc.get('drawn') else 'NO \u23f3'}`"
+        f"\U0001f3b2 Drawn: `{'YES ✅' if rdoc.get('drawn') else 'NO ⏳'}`"
         f"{last_line}",
         parse_mode="Markdown",
     )
@@ -7176,6 +7371,7 @@ def cmd_set_premium(message):
             "premium_set_at":  datetime.utcnow(),
         }},
     )
+    _invalidate_user_cache(target_uid)
 
     display_name = target_user.get("first_name") or target_user.get("username") or str(target_uid)
     plan_info    = PREMIUM_PLANS.get(plan, {"label": plan.capitalize()})
@@ -7409,6 +7605,8 @@ def run_bot() -> None:
                     types.BotCommand("setbalance",       "💰 Set user balance"),
                     types.BotCommand("addpromo",         "🎟 Add promo code"),
                     types.BotCommand("delpromo",         "🗑 Delete promo code"),
+                    types.BotCommand("server_stats",     "⚡ Cache & server stats"),
+                    types.BotCommand("cache_clear",      "🗑 Flush all in-memory caches"),
                 ]
                 bot.set_my_commands(
                     admin_commands,
