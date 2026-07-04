@@ -295,7 +295,7 @@ SPIN_WEIGHTS = [15, 30, 25, 15, 8,   4,   2,   1  ]
 MINING_ADS_REQUIRED   = 2  # Mining shuru karne ke liye 2 ads dekhne honge
 MINING_COOLDOWN_SECS  = 60  # 1 minute baad hi dubara mine kar sakte ho
 MINING_DURATION_HOURS = 1  # 1 ghante ki mining session
-MINING_REWARD         = 10 # 1 session = 10 coins
+MINING_REWARD         = 30 # 1 session = 10 coins
 MINING_TOKEN_TTL      = 300
 
 # --- 💣 Bomb Box Challenge ---
