@@ -1,4 +1,4 @@
-// ============================================================
+    // ============================================================
 // SCRIPT.JS — Daksh Grand Earn (Clean Rewrite)
 // ============================================================
 
@@ -429,6 +429,8 @@ async function fetchLiveData() {
             loadSpinStatus();
             loadMiningStatus();
             loadBombBoxStatus();
+            loadWebTasksStatus();
+            loadPremiumCardStatus();
 
             // Update withdraw minimum check with premium dynamic value
             window._dynamicMinWithdraw = isPremium ? 10000 : MIN_WITHDRAW_COINS;
@@ -1231,6 +1233,48 @@ function _startBombBoxCooldown(seconds) {
             loadBombBoxStatus();
         } else tick();
     }, 1000);
+}
+
+// ============================================================
+// 🌐 WEB TASKS LOCK
+// ============================================================
+async function loadWebTasksStatus() {
+    if (!userId) return;
+    const card = document.getElementById('web-tasks-card');
+    if (!card) return;
+    try {
+        const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
+        const cfg    = await cfgRes.json();
+        if (!cfg.web_tasks_active) {
+            _applyFeatureLock(card, 'web-tasks-lock-overlay', '🌐 Web Tasks Coming Soon!');
+        } else {
+            _removeFeatureLock(card, 'web-tasks-lock-overlay');
+        }
+    } catch (e) { /* ignore */ }
+}
+
+// ============================================================
+// 💎 PREMIUM CARD LOCK
+// ============================================================
+async function loadPremiumCardStatus() {
+    if (!userId) return;
+    const card = document.getElementById('premium-buy-card');
+    if (!card) return;
+    try {
+        const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
+        const cfg    = await cfgRes.json();
+        if (!cfg.premium_active) {
+            if (card.style.position !== 'relative') card.style.position = 'relative';
+            card.style.overflow = 'hidden';
+            _applyFeatureLock(card, 'premium-lock-overlay', '💎 Premium Coming Soon!');
+            card.style.pointerEvents = 'none';
+            card.style.cursor = 'default';
+        } else {
+            _removeFeatureLock(card, 'premium-lock-overlay');
+            card.style.pointerEvents = '';
+            card.style.cursor = 'pointer';
+        }
+    } catch (e) { /* ignore */ }
 }
 
 async function loadBombBoxStatus() {
@@ -2909,6 +2953,14 @@ function _renderTournament(t, winners) {
             ${t.entry_fee == 0 ? `<span style="background:rgba(74,222,128,0.10);border:1px solid rgba(74,222,128,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#4ade80;font-weight:700;">🆓 Free Entry</span>` : `<span style="background:rgba(241,196,15,0.10);border:1px solid rgba(241,196,15,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#f1c40f;font-weight:700;">💰 ${t.entry_fee} 🪙 Entry</span>`}
         </div>
     </div>`;
+
+    // ── Description (if set)
+    if (t.description && t.description.trim()) {
+        html += `
+    <div style="margin:10px 16px 0;padding:10px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);border-radius:10px;">
+        <p style="font-size:12px;color:#94a3b8;margin:0;line-height:1.6;">${_esc(t.description)}</p>
+    </div>`;
+    }
 
     // ── Stats grid
     html += `
