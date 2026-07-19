@@ -12,15 +12,15 @@
            DESIGN SYSTEM — Glassmorphism + Unified Palette
            ═══════════════════════════════════════════════════════ */
         :root {
-            --glass-bg:       rgba(255,255,255,0.045);
-            --glass-border:   rgba(255,255,255,0.09);
-            --glass-blur:     blur(16px);
-            --card-radius:    18px;
-            --card-shadow:    0 4px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
-            --gold:           #f1c40f;
-            --text-primary:   #e2e8f0;
-            --text-muted:     #94a3b8;
-            --text-dim:       #64748b;
+            --glass-bg:       rgba(255,255,255,0.025);
+            --glass-border:   rgba(255,255,255,0.055);
+            --glass-blur:     blur(14px);
+            --card-radius:    16px;
+            --card-shadow:    0 4px 24px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04);
+            --gold:           #d4a017;
+            --text-primary:   #c9d1d9;
+            --text-muted:     #6e7e96;
+            --text-dim:       #3d4a5c;
         }
 
         /* ── Glass Card base — overrides all inline card styles ── */
@@ -867,65 +867,18 @@
                     <span style="font-size:12px; color:#94a3b8;">Watch All 10 Ads <span id="allbonus-ads-count" style="color:#f1c40f;">(0/10)</span></span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <span id="check-yt" style="font-size:16px;">⬜</span>
-                    <span style="font-size:12px; color:#94a3b8;">All 3 YouTube Tasks <span id="allbonus-yt-count" style="color:#f1c40f;">(0/3)</span></span>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px;">
                     <span id="check-web" style="font-size:16px;">⬜</span>
                     <span style="font-size:12px; color:#94a3b8;">All 3 Website Tasks <span id="allbonus-web-count" style="color:#f1c40f;">(0/3)</span></span>
                 </div>
             </div>
             <button id="allbonus-btn" class="btn" onclick="claimAllBonus()"
                 style="background:rgba(34,197,94,0.12); border:1px solid rgba(34,197,94,0.25); font-weight:700; color:#4ade80;" disabled>
-                🏅 Complete All Tasks (0/4)
+                🏅 Complete All Tasks (0/3)
             </button>
         </div>
 
-        <!-- YouTube Tasks -->
-        <div id="yt-tasks-section" style="position:relative;">
-        <div class="task-section-label">
-            <p class="tsl-title" style="color:#f87171;">📺 YouTube Tasks</p>
-            <p class="tsl-sub">+5 coins each • Max 3 per day</p>
-        </div>
-
-        <div class="card task-item" data-task="yt1">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <p style="font-size:13px; font-weight:600; margin:0;">Task 1: Watch & Verify</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+5 🪙</span>
-            </div>
-            <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt1', 'yt')">▶ Watch Video 1</button>
-            <div class="task-input-row">
-                <input type="text" id="yt-1" placeholder="Enter Code">
-                <button class="btn-sm" onclick="verifyTask('yt1', 'yt-1')">Verify</button>
-            </div>
-        </div>
-
-        <div class="card task-item" data-task="yt2">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <p style="font-size:13px; font-weight:600; margin:0;">Task 2: Watch & Verify</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+5 🪙</span>
-            </div>
-            <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt2', 'yt')">▶ Watch Video 2</button>
-            <div class="task-input-row">
-                <input type="text" id="yt-2" placeholder="Enter Code">
-                <button class="btn-sm" onclick="verifyTask('yt2', 'yt-2')">Verify</button>
-            </div>
-        </div>
-
-        <div class="card task-item" data-task="yt3">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <p style="font-size:13px; font-weight:600; margin:0;">Task 3: Watch & Verify</p>
-                <span style="font-size:12px; color:#f1c40f; font-weight:700;">+5 🪙</span>
-            </div>
-            <button class="btn-sm" style="background:#ff0000; width:100%; margin-bottom:8px;" onclick="openTask('yt3', 'yt')">▶ Watch Video 3</button>
-            <div class="task-input-row">
-                <input type="text" id="yt-3" placeholder="Enter Code">
-                <button class="btn-sm" onclick="verifyTask('yt3', 'yt-3')">Verify</button>
-            </div>
-        </div>
-        </div><!-- /#yt-tasks-section -->
-
         <!-- Website Tasks -->
+        <div id="web-tasks-card" style="position:relative; overflow:hidden;">
         <div class="task-section-label">
             <p class="tsl-title" style="color:#60a5fa;">🌐 Website Tasks</p>
             <p class="tsl-sub">+3 coins each • Max 3 per day</p>
@@ -966,6 +919,7 @@
                 <button class="btn-sm" onclick="verifyTask('web3', 'web-3')">Verify</button>
             </div>
         </div>
+        </div><!-- /#web-tasks-card -->
 
         <!-- Telegram Channels -->
         <div class="task-section-label">
