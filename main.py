@@ -4751,6 +4751,7 @@ def admin_create_tournament_api():
                 "entry_fee":      int(data.get("entry_fee", 0)),
                 "max_players":    int(data.get("max_players", 50)),
                 "prize_pool":     sanitize_text(data.get("prize_pool", ""), max_length=200),
+                "description":    sanitize_text(data.get("description", ""), max_length=600),
                 "prizes":         data.get("prizes", []),
                 "status":         data.get("status", "coming_soon") if existing else "coming_soon",
                 "active":         True,
@@ -5623,14 +5624,20 @@ def feature_status_command(message):
         return
     try:
         cfg = get_feature_config()
-        spin_s   = "\u2705 Unlocked" if cfg.get("spin_active")   else "\U0001f512 Locked"
-        mining_s = "\u2705 Unlocked" if cfg.get("mining_active") else "\U0001f512 Locked"
+        spin_s      = "✅ Unlocked" if cfg.get("spin_active")      else "🔒 Locked"
+        mining_s    = "✅ Unlocked" if cfg.get("mining_active")    else "🔒 Locked"
+        bomb_s      = "✅ Unlocked" if cfg.get("bomb_box_active")  else "🔒 Locked"
+        webtasks_s  = "✅ Unlocked" if cfg.get("web_tasks_active") else "🔒 Locked"
+        premium_s   = "✅ Unlocked" if cfg.get("premium_active")   else "🔒 Locked"
         bot.reply_to(
             message,
-            f"\U0001f3a1 *Feature Status*\n\n"
-            f"\U0001f3a1 Spin Wheel:  {spin_s}\n"
-            f"\u26cf\ufe0f Coin Mining: {mining_s}\n\n"
-            f"Use /togglespin or /togglemining to change.",
+            f"🎡 *Feature Status*\n\n"
+            f"🎡 Spin Wheel:    {spin_s}\n"
+            f"⛏️ Coin Mining:   {mining_s}\n"
+            f"💣 Bomb Box:      {bomb_s}\n"
+            f"🌐 Web Tasks:     {webtasks_s}\n"
+            f"💎 Premium Card:  {premium_s}\n\n"
+            f"Commands: /togglespin /togglemining /togglebomb /togglewebtasks /togglepremium",
             parse_mode="Markdown",
         )
     except Exception as exc:
@@ -5879,6 +5886,64 @@ def toggle_bomb_box(message):
     except Exception as exc:
         logger.error("togglebomb error: %s", exc)
         bot.reply_to(message, "⚠️ Error toggling Bomb Box. Check logs.")
+
+
+# ============================================================
+# 🌐 /togglewebtasks — Admin command (lock/unlock Web Tasks)
+# ============================================================
+
+@bot.message_handler(commands=["togglewebtasks"])
+def toggle_web_tasks(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        cfg     = config_col.find_one({"_id": "feature_config"}) or {}
+        current = bool(cfg.get("web_tasks_active", True))
+        new_val = not current
+        config_col.update_one(
+            {"_id": "feature_config"},
+            {"$set": {"web_tasks_active": new_val}},
+            upsert=True,
+        )
+        _bust_feature_cache()
+        status = "🟢 *ACTIVE*" if new_val else "🔴 *LOCKED*"
+        bot.reply_to(
+            message,
+            f"🌐 Web Tasks are now {status}\n\nToggle again with /togglewebtasks",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logger.error("togglewebtasks error: %s", exc)
+        bot.reply_to(message, "⚠️ Error toggling Web Tasks. Check logs.")
+
+
+# ============================================================
+# 💎 /togglepremium — Admin command (lock/unlock Premium Card)
+# ============================================================
+
+@bot.message_handler(commands=["togglepremium"])
+def toggle_premium_card(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        cfg     = config_col.find_one({"_id": "feature_config"}) or {}
+        current = bool(cfg.get("premium_active", True))
+        new_val = not current
+        config_col.update_one(
+            {"_id": "feature_config"},
+            {"$set": {"premium_active": new_val}},
+            upsert=True,
+        )
+        _bust_feature_cache()
+        status = "🟢 *ACTIVE*" if new_val else "🔴 *LOCKED*"
+        bot.reply_to(
+            message,
+            f"💎 Premium Card is now {status}\n\nToggle again with /togglepremium",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logger.error("togglepremium error: %s", exc)
+        bot.reply_to(message, "⚠️ Error toggling Premium Card. Check logs.")
 
 
 @bot.message_handler(commands=["health"])
@@ -6696,14 +6761,15 @@ def cmd_create_tournament(message):
         return bot.reply_to(
             message,
             "📋 *Usage:*\n"
-            "`/createtournament Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool`\n\n"
-            "*Mode options:* `Solo` / `Duo` / `Squad`\n\n"
+            "`/createtournament Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool | Description`\n\n"
+            "*Mode options:* `Solo` / `Duo` / `Squad`\n"
+            "*Description:* Max 100 words (optional — tournament ka brief info)\n\n"
             "*Examples:*\n"
-            "Solo: `/createtournament FF Solo Cup | Solo | Kalahari | 20 Jun 2026 | 7:00 PM | 0 | 100 | 5000 Coins`\n"
-            "Duo:  `/createtournament FF Duo War | Duo | Bermuda | 21 Jun 2026 | 8:00 PM | 50 | 50 | 8000 Coins`\n"
-            "Squad: `/createtournament FF Grand Finals | Squad | Bermuda | 5 Jun 2026 | 8:00 PM | 0 | 50 | 5000 Coins`\n\n"
+            "Solo: `/createtournament FF Solo Cup | Solo | Kalahari | 20 Jun 2026 | 7:00 PM | 0 | 100 | 5000 Coins | India ka sabse bada solo tournament!`\n"
+            "Squad: `/createtournament FF Grand Finals | Squad | Bermuda | 5 Jun 2026 | 8:00 PM | 0 | 50 | 5000 Coins | Join karo aur jito GP codes!`\n\n"
             "⚠️ EntryFee aur MaxPlayers number mein dena hai.\n"
-            "💡 Individual prizes baad mein set karo: `/setprizes <tid> 1st:5000 Coins | 2nd:3000 Coins | 3rd:1000 Coins`",
+            "💡 Description 9th field hai — optional hai, chhod sakte ho.\n"
+            "💡 Individual prizes: `/setprizes <tid> 1st:5000 Coins | 2nd:3000 Coins | 3rd:1000 Coins`",
             parse_mode="Markdown",
         )
 
@@ -6711,13 +6777,21 @@ def cmd_create_tournament(message):
     if len(fields) < 8:
         return bot.reply_to(
             message,
-            "❌ *8 fields chahiye, `|` se alag karo:*\n"
-            "`Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool`\n\n"
+            "❌ *8 fields minimum chahiye, `|` se alag karo:*\n"
+            "`Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool`\n"
+            "*(Description 9th optional field hai)*\n\n"
             "*Mode:* `Solo` / `Duo` / `Squad`",
             parse_mode="Markdown",
         )
 
     title, mode, map_, date, t_time, entry_fee_str, max_p_str, prize_pool = fields[:8]
+    description = fields[8] if len(fields) >= 9 else ""
+    # Limit description to 100 words
+    if description:
+        words = description.split()
+        if len(words) > 100:
+            description = " ".join(words[:100]) + "..."
+        description = sanitize_text(description, max_length=600)
 
     # Validate mode
     mode_clean = mode.strip().capitalize()
@@ -6759,6 +6833,7 @@ def cmd_create_tournament(message):
                 "entry_fee":     entry_fee,
                 "max_players":   max_players,
                 "prize_pool":    sanitize_text(prize_pool, max_length=200),
+                "description":   description,
                 "prizes":        [],
                 "status":        "coming_soon",
                 "active":        True,
@@ -6778,6 +6853,7 @@ def cmd_create_tournament(message):
             f"👥 *Max Players:* {max_players}\n"
             f"🏅 *Prize Pool:* {prize_pool}\n\n"
             f"📌 *Status:* Coming Soon\n"
+            f"📝 *Description:* {description[:80] + '...' if description and len(description) > 80 else description or '—'}\n"
             f"🆔 *ID:* `{tid}`\n\n"
             f"*Next steps:*\n"
             f"• Individual prizes: `/setprizes {tid} 1st:5000 Coins | 2nd:3000 Coins | 3rd:1000 Coins`\n"
