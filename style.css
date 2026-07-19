@@ -1,63 +1,107 @@
 /* ============================================================
    STYLE.CSS — Daksh Grand Earn
+   DARK THEME — Premium Midnight Edition
    ============================================================ */
 
 :root {
-    --bg:       #0f172a;
-    --card-bg:  #1e293b;
-    --gold:     #f1c40f;
-    --text:     #e2e8f0;
-    --muted:    #94a3b8;
-    --border:   #334155;
-    --primary:  #6366f1;
-    --success:  #22c55e;
-    --danger:   #e74c3c;
-    --purple:   #a855f7;
-    --cyan:     #38bdf8;
-    --red:      #ff0000;
-    --blue:     #3498db;
+    /* ── Core Backgrounds ── */
+    --bg:           #060810;
+    --card-bg:      #0d1017;
+    --card-bg2:     #111520;
+
+    /* ── Brand Colors ── */
+    --gold:         #d4a017;
+    --gold-dim:     rgba(212,160,23,0.15);
+    --gold-border:  rgba(212,160,23,0.22);
+
+    /* ── Text ── */
+    --text:         #c9d1d9;
+    --text-primary: #c9d1d9;
+    --text-muted:   #6e7e96;
+    --text-dim:     #3d4a5c;
+    --muted:        #6e7e96;
+
+    /* ── Borders ── */
+    --border:       #1a2030;
+
+    /* ── Accent Colors (muted) ── */
+    --primary:      #3a4a6b;
+    --primary-btn:  #2d3d5a;
+    --success:      #1f6b3a;
+    --success-text: #3dbd6e;
+    --danger:       #6b1f1f;
+    --danger-text:  #c0392b;
+    --purple:       #4a2d6b;
+    --cyan:         #1a3d4a;
+
+    /* ── Glass System ── */
+    --glass-bg:     rgba(255,255,255,0.025);
+    --glass-border: rgba(255,255,255,0.055);
+    --glass-blur:   blur(14px);
+    --card-radius:  16px;
+    --card-shadow:  0 4px 24px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
+/* ── Reset ── */
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    font-family: 'Segoe UI', sans-serif;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
 body {
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
-    padding-bottom: 70px;
+    padding-bottom: 72px;
 }
 
-/* ---- HEADER ---- */
+/* ============================================================
+   HEADER
+   ============================================================ */
 .header {
-    background: var(--card-bg);
+    background: rgba(6,8,16,0.95);
     border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
     z-index: 100;
+    backdrop-filter: blur(10px);
 }
 
-/* ---- CARDS ---- */
+/* ============================================================
+   CARDS — Glass Dark
+   ============================================================ */
 .card {
-    background: var(--card-bg);
-    border-radius: 16px;
-    padding: 18px;
-    margin: 12px 14px;
-    border: 1px solid var(--border);
+    background:              var(--glass-bg) !important;
+    backdrop-filter:         var(--glass-blur) !important;
+    -webkit-backdrop-filter: var(--glass-blur) !important;
+    border:                  1px solid var(--glass-border) !important;
+    border-radius:           var(--card-radius) !important;
+    padding:                 16px 18px !important;
+    margin-bottom:           10px;
+    box-shadow:              var(--card-shadow) !important;
+    position:                relative;
+    overflow:                hidden;
 }
 
+/* Shimmer top edge */
+.card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
+    pointer-events: none;
+}
+
+/* ── Balance Card ── */
 .balance-card {
-    background: linear-gradient(135deg, #1e3a5f, #0f172a);
-    border: 1px solid #2563eb44;
+    background: linear-gradient(145deg, rgba(212,160,23,0.05), rgba(6,8,16,0.6)) !important;
+    border-color: var(--gold-border) !important;
     text-align: center;
 }
 
 .balance-card p {
-    color: var(--muted);
+    color: var(--text-muted);
     font-size: 13px;
     margin-bottom: 4px;
 }
@@ -71,28 +115,45 @@ body {
 .card h4 {
     font-size: 15px;
     margin-bottom: 8px;
-    color: var(--text);
+    color: var(--text-primary);
 }
 
 .card p {
     font-size: 13px;
-    color: var(--muted);
+    color: var(--text-muted);
     margin-bottom: 10px;
 }
 
-/* ---- PARTNER CARD (Sponsor Slot with code verify) ---- */
-.partner-card {
-    background: linear-gradient(135deg, #1a1a2e, #16213e);
-    border: 1px solid var(--purple);
-    border-radius: 12px;
-    padding: 14px;
-    margin-bottom: 8px;
+/* ── Accent Tints ── */
+.c-gold   { border-color: rgba(212,160,23,0.20) !important;  background: rgba(212,160,23,0.03) !important; }
+.c-purple { border-color: rgba(100,60,160,0.20) !important;  background: rgba(100,60,160,0.03) !important; }
+.c-amber  { border-color: rgba(180,100,10,0.20) !important;  background: rgba(180,100,10,0.03) !important; }
+.c-red    { border-color: rgba(160,40,40,0.22)  !important;  background: rgba(160,40,40,0.03)  !important; }
+.c-blue   { border-color: rgba(30,100,160,0.20) !important;  background: rgba(30,100,160,0.03) !important; }
+.c-green  { border-color: rgba(20,100,60,0.20)  !important;  background: rgba(20,100,60,0.03)  !important; }
+
+/* ── Section Header Card ── */
+.section-header-card {
+    background: linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)) !important;
+    border-color: rgba(255,255,255,0.07) !important;
+    padding: 14px 18px !important;
 }
 
-/* ---- SIMPLE SPONSOR CARD (no code) ---- */
+/* ── Partner Card ── */
+.partner-card {
+    background: rgba(100,60,160,0.05);
+    border: 1px solid rgba(100,60,160,0.18);
+    border-radius: 14px;
+    padding: 14px;
+    margin-bottom: 8px;
+    position: relative;
+    overflow: hidden;
+}
+
+/* ── Sponsor Card (no code) ── */
 .sponsor-card {
-    background: linear-gradient(135deg, #0f2027, #1a2a3a);
-    border: 1px solid var(--cyan);
+    background: rgba(30,100,160,0.05);
+    border: 1px solid rgba(30,100,160,0.15);
     border-radius: 12px;
     padding: 14px;
     margin-bottom: 8px;
@@ -101,44 +162,75 @@ body {
     gap: 12px;
 }
 
-/* ---- SPONSOR LOCKED SLOT ---- */
-.lock-overlay {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    background: rgba(15, 23, 42, 0.80);
+/* ── Promo Task Card ── */
+.promo-task-card {
+    background: rgba(20,100,60,0.04);
+    border: 1px solid rgba(20,100,60,0.16);
+    border-radius: 14px;
+    padding: 14px;
+    margin-bottom: 8px;
+    position: relative;
+}
+.promo-task-card.completed { border-color: rgba(30,40,56,0.5); opacity: 0.55; }
+.promo-task-card .promo-btn {
+    background: linear-gradient(135deg, #1a5c33, #14452a);
+    color: #3dbd6e;
+    border: 1px solid rgba(61,189,110,0.25);
     border-radius: 10px;
-    z-index: 10;
-    pointer-events: none;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 8px;
 }
+.promo-task-card .promo-btn:disabled { background: #0d1017; color: #3d4a5c; cursor: not-allowed; opacity: 0.65; }
 
-.lock-icon {
-    font-size: 28px;
-    animation: lock-pulse 1.8s ease-in-out infinite;
-    display: block;
-}
-
-.lock-label {
-    font-size: 11px;
-    color: #64748b;
-    margin-top: 4px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-}
-
+/* ============================================================
+   LOCK OVERLAY
+   ============================================================ */
 @keyframes lock-pulse {
-    0%,100% { transform: scale(1);   opacity: 1; }
-    50%      { transform: scale(1.2); opacity: 0.5; }
+    0%,100% { transform: scale(1) rotate(0deg);    }
+    25%      { transform: scale(1.10) rotate(-6deg); }
+    75%      { transform: scale(1.10) rotate(6deg);  }
 }
 
-/* ---- AD COUNTER BADGE ---- */
+.lock-overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(4,6,12,0.90);
+    backdrop-filter: blur(8px);
+    border-radius: var(--card-radius);
+    z-index: 10;
+    pointer-events: all;
+    cursor: default;
+}
+
+.lock-icon  { font-size: 28px; animation: lock-pulse 1.8s ease-in-out infinite; display: block; }
+.lock-label { font-size: 11px; color: var(--text-dim); margin-top: 4px; font-weight: 600; letter-spacing: 0.5px; }
+
+/* ── Lottery Lock ── */
+.lottery-lock-overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(4,6,12,0.90);
+    backdrop-filter: blur(8px);
+    border-radius: var(--card-radius);
+    z-index: 10; pointer-events: all; cursor: default;
+}
+.lottery-lock-icon  { font-size: 36px; animation: lock-pulse 1.6s ease-in-out infinite; display: block; }
+.lottery-lock-label { font-size: 13px; color: #b0a0d0; margin-top: 8px; font-weight: 700; letter-spacing: 0.5px; }
+.lottery-lock-sub   { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+
+/* ============================================================
+   AD COUNTER BADGE
+   ============================================================ */
 .ad-counter-badge {
     display: inline-block;
-    background: rgba(241, 196, 15, 0.12);
-    border: 1px solid var(--gold);
+    background: rgba(212,160,23,0.07);
+    border: 1px solid rgba(212,160,23,0.20);
     border-radius: 20px;
     padding: 3px 14px;
     font-size: 12px;
@@ -147,35 +239,39 @@ body {
     margin-bottom: 8px;
 }
 
-/* ---- BUTTONS ---- */
+/* ============================================================
+   BUTTONS
+   ============================================================ */
 .btn {
     width: 100%;
     padding: 13px;
     border: none;
     border-radius: 10px;
-    background: var(--primary);
-    color: white;
+    background: var(--primary-btn);
+    color: var(--text-primary);
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.07);
     transition: opacity 0.2s, transform 0.1s;
 }
 
-.btn:active  { opacity: 0.85; transform: scale(0.98); }
+.btn:active  { opacity: 0.80; transform: scale(0.98); }
 
 .btn:disabled {
-    background: #334155;
-    color: #64748b;
+    background: #0d1017;
+    color: var(--text-dim);
     cursor: not-allowed;
     transform: none;
+    border-color: var(--border);
 }
 
 .btn-sm {
     padding: 8px 12px;
-    border: none;
+    border: 1px solid rgba(255,255,255,0.07);
     border-radius: 8px;
-    background: var(--primary);
-    color: white;
+    background: var(--primary-btn);
+    color: var(--text-primary);
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
@@ -183,30 +279,34 @@ body {
 }
 
 .btn-sm:active  { opacity: 0.8; }
-
 .btn-sm:disabled {
-    background: #334155;
-    color: #64748b;
+    background: #0d1017;
+    color: var(--text-dim);
     cursor: not-allowed;
+    border-color: var(--border);
 }
 
-/* ---- INPUTS ---- */
+/* ============================================================
+   INPUTS
+   ============================================================ */
 input[type="text"],
 textarea {
     width: 100%;
     padding: 11px;
     border-radius: 8px;
     border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text);
+    background: rgba(255,255,255,0.03);
+    color: var(--text-primary);
     font-size: 13px;
     margin-bottom: 8px;
     outline: none;
+    transition: border-color 0.2s;
 }
 
 input[type="text"]:focus,
 textarea:focus {
-    border-color: var(--primary);
+    border-color: rgba(212,160,23,0.35);
+    background: rgba(212,160,23,0.03);
 }
 
 textarea {
@@ -214,24 +314,25 @@ textarea {
     resize: none;
 }
 
-/* ---- BOTTOM NAV BAR ---- */
+/* ============================================================
+   BOTTOM NAV
+   ============================================================ */
 .bottom-nav {
     position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: var(--card-bg);
+    bottom: 0; left: 0; right: 0;
+    background: rgba(6,8,16,0.97);
     border-top: 1px solid var(--border);
     display: flex;
     justify-content: space-around;
     padding: 8px 0 12px;
     z-index: 100;
+    backdrop-filter: blur(10px);
 }
 
 .nav-item {
     background: none;
     border: none;
-    color: var(--muted);
+    color: var(--text-dim);
     font-size: 11px;
     cursor: pointer;
     display: flex;
@@ -250,22 +351,26 @@ textarea {
 }
 
 .nav-item.active span:first-child {
-    filter: drop-shadow(0 0 4px rgba(241, 196, 15, 0.6));
+    filter: drop-shadow(0 0 4px rgba(212,160,23,0.5));
 }
 
-/* ---- TAB CONTENT ---- */
+/* ============================================================
+   TAB CONTENT
+   ============================================================ */
 .tab-content  { display: none; }
 .active-tab   { display: block; }
 
-/* ---- TOAST NOTIFICATION ---- */
+/* ============================================================
+   TOAST
+   ============================================================ */
 #toast {
     position: fixed;
     bottom: 80px;
     left: 50%;
     transform: translateX(-50%);
-    background: var(--card-bg);
+    background: #0d1017;
     border: 1px solid var(--border);
-    color: var(--text);
+    color: var(--text-primary);
     padding: 12px 22px;
     border-radius: 30px;
     font-size: 13px;
@@ -280,10 +385,12 @@ textarea {
 }
 
 #toast.show    { opacity: 1; }
-#toast.success { border-color: var(--success); color: var(--success); }
-#toast.error   { border-color: var(--danger);  color: var(--danger);  }
+#toast.success { border-color: rgba(61,189,110,0.40); color: var(--success-text); }
+#toast.error   { border-color: rgba(192,57,43,0.40);  color: #c0392b; }
 
-/* ---- LEADERBOARD ---- */
+/* ============================================================
+   LEADERBOARD
+   ============================================================ */
 .lb-item {
     display: flex;
     justify-content: space-between;
@@ -296,10 +403,12 @@ textarea {
 .lb-item:last-child { border-bottom: none; }
 
 .lb-rank  { font-size: 18px; width: 32px; }
-.lb-user  { flex: 1; padding: 0 8px; color: var(--muted); }
+.lb-user  { flex: 1; padding: 0 8px; color: var(--text-muted); }
 .lb-coins { color: var(--gold); font-weight: 700; }
 
-/* ---- HISTORY ---- */
+/* ============================================================
+   HISTORY
+   ============================================================ */
 .history-item {
     padding: 10px 0;
     border-bottom: 1px solid var(--border);
@@ -313,11 +422,15 @@ textarea {
     margin-top: 3px;
 }
 
-/* ---- CHANNEL CLAIM BUTTON ---- */
+/* ============================================================
+   CHANNEL CLAIM BUTTON
+   ============================================================ */
 .ch-claim-btn { transition: background 0.3s, opacity 0.3s; }
-.ch-claim-btn:disabled { cursor: not-allowed; opacity: 0.85; }
+.ch-claim-btn:disabled { cursor: not-allowed; opacity: 0.75; }
 
-/* ---- TASK ITEM ---- */
+/* ============================================================
+   TASK ITEMS
+   ============================================================ */
 .task-item {
     margin: 15px 0;
     padding-bottom: 10px;
@@ -325,7 +438,7 @@ textarea {
 }
 
 .task-item.done {
-    opacity: 0.5;
+    opacity: 0.4;
     pointer-events: none;
 }
 
@@ -340,21 +453,263 @@ textarea {
     margin-bottom: 0;
 }
 
-/* ---- SECTION GAP ---- */
+/* ── Task Section Labels ── */
+.task-section-label { padding: 8px 4px 4px 4px; }
+.task-section-label .tsl-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 2px 0; color: var(--text-muted); }
+.task-section-label .tsl-sub   { font-size: 11px; color: var(--text-dim); margin: 0; }
+
+/* ============================================================
+   SECTION GAP / REFER / SPINNER
+   ============================================================ */
 .section-gap { height: 18px; }
 
-/* ---- REFER LIST ---- */
 .refer-item {
     padding: 6px 0;
     border-bottom: 1px solid var(--border);
     font-size: 13px;
-    color: var(--muted);
+    color: var(--text-muted);
 }
 
-/* ---- SPINNER ---- */
 .spinner {
     text-align: center;
     padding: 20px;
-    color: var(--muted);
+    color: var(--text-dim);
     font-size: 13px;
 }
+
+/* ============================================================
+   SOCIAL ICONS
+   ============================================================ */
+.social-icons-row { display: flex; justify-content: center; gap: 20px; margin-top: 18px; }
+.social-icon-link  { display: flex; flex-direction: column; align-items: center; gap: 6px; text-decoration: none; }
+.social-icon-circle {
+    width: 48px; height: 48px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.2s, opacity 0.2s;
+}
+.social-icon-circle:active { transform: scale(0.92); opacity: 0.80; }
+.social-icon-label { font-size: 11px; color: var(--text-dim); font-weight: 500; }
+
+/* ============================================================
+   CHANNEL PROGRESS
+   ============================================================ */
+.channel-progress-label { font-size: 11px; color: var(--text-dim); text-align: center; margin-bottom: 10px; }
+
+/* ============================================================
+   SPIN WHEEL
+   ============================================================ */
+.spin-segment-row { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; margin: 10px 0 6px; }
+.spin-segment {
+    background: rgba(212,160,23,0.06);
+    border: 1px solid rgba(212,160,23,0.18);
+    border-radius: 8px; padding: 4px 10px; font-size: 12px; color: var(--gold); font-weight: 700;
+}
+.spin-segment.miss { color: var(--text-dim); border-color: rgba(26,32,48,0.8); background: rgba(26,32,48,0.4); }
+
+@keyframes spinResultPop {
+    from { opacity: 0; transform: scale(0.6) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.spin-wheel-wrap   { display: flex; flex-direction: column; align-items: center; margin: 8px 0 10px; }
+.spin-pointer-wrap { position: relative; display: inline-block; }
+.spin-pointer {
+    position: absolute; top: -4px; left: 50%; transform: translateX(-50%);
+    width: 0; height: 0;
+    border-left: 10px solid transparent; border-right: 10px solid transparent;
+    border-top: 22px solid var(--gold); z-index: 5;
+    filter: drop-shadow(0 0 5px rgba(212,160,23,0.5));
+}
+#spin-wheel-canvas { border-radius: 50%; display: block; }
+
+/* ============================================================
+   MINING
+   ============================================================ */
+.mining-progress-bar-wrap {
+    background: rgba(20,28,44,0.7);
+    border-radius: 20px; height: 6px; overflow: hidden; margin-top: 6px;
+}
+.mining-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #8a6010, #c47e0a);
+    border-radius: 20px; width: 0%; transition: width 0.5s;
+}
+@keyframes miningGlow {
+    0%,100% { box-shadow: 0 0 0 0 rgba(180,120,10,0.0); }
+    50%      { box-shadow: 0 0 10px 3px rgba(180,120,10,0.18); }
+}
+.mining-active-glow { animation: miningGlow 2s ease-in-out infinite; }
+
+/* ============================================================
+   GAME INFO STRIP
+   ============================================================ */
+.game-info-strip {
+    display: flex; gap: 0; justify-content: center;
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 12px; padding: 9px 12px; margin-bottom: 10px;
+}
+.game-info-strip > div { text-align: center; flex: 1; }
+.game-info-strip .divider { width: 1px; background: rgba(255,255,255,0.06); margin: 0 2px; flex: none; }
+.game-info-strip .lbl { font-size: 10px; color: var(--text-dim); margin: 0; }
+.game-info-strip .val { font-size: 14px; font-weight: 700; color: var(--text-primary); margin: 0; }
+
+/* ============================================================
+   WITHDRAW INNER / NOTICE BOXES
+   ============================================================ */
+.withdraw-inner {
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; padding: 12px; margin-bottom: 10px;
+}
+
+.notice-green {
+    background: rgba(20,100,60,0.06);
+    border-left: 3px solid rgba(61,189,110,0.35);
+    border-radius: 0 10px 10px 0;
+    padding: 10px 14px; margin-bottom: 10px;
+}
+.notice-red {
+    background: rgba(160,40,40,0.06);
+    border: 1px solid rgba(160,40,40,0.22);
+    border-radius: 10px; padding: 12px 14px;
+}
+
+/* ============================================================
+   TOURNAMENT HUB MODAL
+   ============================================================ */
+#tournament-modal {
+    display: none; position: fixed; inset: 0; z-index: 99000;
+    background: rgba(0,0,0,0.94); backdrop-filter: blur(12px);
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+#tournament-modal.open { display: block; }
+
+@keyframes t-slide-in {
+    from { opacity:0; transform: translateY(40px) scale(0.96); }
+    to   { opacity:1; transform: translateY(0) scale(1); }
+}
+#tournament-hub-box {
+    animation: t-slide-in 0.4s cubic-bezier(.17,.67,.35,1.2) both;
+    background: linear-gradient(160deg, #060810 0%, #08101a 50%, #060810 100%);
+    border: 1px solid rgba(212,160,23,0.15);
+    border-radius: 22px;
+    margin: 16px;
+    padding: 0;
+    overflow: hidden;
+    box-shadow: 0 0 60px rgba(212,160,23,0.06), 0 24px 64px rgba(0,0,0,0.9);
+}
+
+.t-header-band {
+    background: linear-gradient(135deg, rgba(212,160,23,0.07), rgba(80,40,130,0.07));
+    border-bottom: 1px solid rgba(212,160,23,0.12);
+    padding: 18px 20px 14px;
+    position: relative;
+}
+.t-close-btn {
+    position: absolute; top: 14px; right: 16px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 50%; width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 16px; color: var(--text-muted);
+    transition: background 0.2s;
+}
+.t-close-btn:active { background: rgba(255,255,255,0.10); }
+
+@keyframes live-pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(192,57,43,0.5); }
+    50%      { box-shadow: 0 0 0 7px rgba(192,57,43,0); }
+}
+@keyframes reg-glow {
+    0%,100% { box-shadow: 0 0 0 0 rgba(61,189,110,0.4); }
+    50%      { box-shadow: 0 0 0 6px rgba(61,189,110,0); }
+}
+
+.t-status-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 12px; border-radius: 20px;
+    font-size: 11px; font-weight: 800; letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
+.t-status-badge.coming-soon { background:rgba(60,70,90,0.25); color:#6e7e96; border:1px solid rgba(60,70,90,0.4); }
+.t-status-badge.reg-open    { background:rgba(20,80,50,0.25);  color:#3dbd6e; border:1px solid rgba(61,189,110,0.25); animation: reg-glow 1.8s ease infinite; }
+.t-status-badge.reg-closed  { background:rgba(120,70,20,0.20); color:#b87030; border:1px solid rgba(180,112,48,0.25); }
+.t-status-badge.match-live  { background:rgba(120,30,30,0.22); color:#c05050; border:1px solid rgba(192,57,43,0.28); animation: live-pulse 1.4s ease infinite; }
+.t-status-badge.completed   { background:rgba(212,160,23,0.10); color:var(--gold); border:1px solid var(--gold-border); }
+
+.t-stats-grid {
+    display: grid; grid-template-columns: repeat(3,1fr); gap: 8px;
+    padding: 14px 16px;
+}
+.t-stat-tile {
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; padding: 10px 6px; text-align: center;
+}
+.t-stat-tile .t-lbl { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin: 0; }
+.t-stat-tile .t-val { font-size: 16px; font-weight: 800; color: var(--text-primary); margin: 2px 0 0; }
+
+.t-prize-card {
+    display: flex; align-items: center; gap: 12px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
+}
+.t-prize-medal { font-size: 26px; flex-shrink: 0; }
+.t-prize-name  { font-size: 13px; font-weight: 700; color: var(--text-primary); margin: 0; }
+.t-prize-reward{ font-size: 11px; color: var(--text-muted); margin: 2px 0 0; }
+
+.t-winner-card {
+    display: flex; align-items: center; gap: 12px;
+    border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
+    position: relative; overflow: hidden;
+}
+.t-winner-card.rank-1 { background: rgba(212,160,23,0.06); border: 1px solid rgba(212,160,23,0.20); }
+.t-winner-card.rank-2 { background: rgba(100,110,130,0.06); border: 1px solid rgba(100,110,130,0.18); }
+.t-winner-card.rank-3 { background: rgba(130,80,30,0.06);  border: 1px solid rgba(150,90,40,0.18); }
+
+.t-input {
+    width: 100%; box-sizing: border-box;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; padding: 11px 14px;
+    color: var(--text-primary); font-size: 13px; outline: none;
+    margin-bottom: 10px;
+}
+.t-input:focus { border-color: rgba(212,160,23,0.30); }
+.t-input::placeholder { color: var(--text-dim); }
+
+.t-reg-btn {
+    width: 100%; padding: 13px;
+    background: linear-gradient(135deg, #8a6010, #6b4a0a);
+    color: #f0d070; font-weight: 800; font-size: 14px;
+    border: 1px solid rgba(212,160,23,0.25);
+    border-radius: 12px; cursor: pointer;
+    letter-spacing: 0.3px;
+    transition: opacity 0.2s, transform 0.15s;
+}
+.t-reg-btn:active  { transform: scale(0.97); opacity: 0.9; }
+.t-reg-btn:disabled { background: #0d1017; color: var(--text-dim); cursor: not-allowed; border-color: var(--border); }
+
+.t-registered-badge {
+    background: rgba(20,80,50,0.12);
+    border: 1px solid rgba(61,189,110,0.18);
+    border-radius: 12px; padding: 14px; text-align: center; margin-bottom: 10px;
+}
+
+.t-lock-overlay {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 40px 20px; text-align: center;
+}
+.t-lock-icon  { font-size: 48px; animation: lock-pulse 1.8s ease-in-out infinite; display: block; margin-bottom: 12px; }
+.t-lock-title { font-size: 18px; font-weight: 800; color: var(--text-primary); margin: 0 0 6px; }
+.t-lock-sub   { font-size: 13px; color: var(--text-dim); margin: 0; }
+
+@keyframes trophy-live-pulse {
+    0%,100% { filter: drop-shadow(0 0 0px rgba(212,160,23,0.5)); }
+    50%      { filter: drop-shadow(0 0 7px rgba(212,160,23,0.7)); }
+}
+#tournament-trophy-btn.has-active { animation: trophy-live-pulse 2s ease-in-out infinite; }
+
+.t-body { padding: 0 16px 20px; }
