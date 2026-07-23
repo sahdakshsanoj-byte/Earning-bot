@@ -296,6 +296,8 @@ MINING_ADS_REQUIRED   = 2  # Mining shuru karne ke liye 2 ads dekhne honge
 MINING_COOLDOWN_SECS  = 60  # 1 minute baad hi dubara mine kar sakte ho
 MINING_DURATION_HOURS = 1  # 1 ghante ki mining session
 MINING_REWARD         = 30 # 1 session = 10 coins
+MINING_LEVEL_REWARDS  = {1: 30, 2: 50, 3: 75}   # coins per level
+MINING_LEVEL_COSTS    = {2: 200, 3: 500}         # upgrade cost in coins
 MINING_TOKEN_TTL      = 300
 
 # --- 💣 Bomb Box Challenge ---
@@ -2984,6 +2986,20 @@ def _do_broadcast(msg: str) -> None:
     logger.info("Broadcast complete: %s sent, %s failed", sent, failed)
 
 
+def _do_broadcast_photo(photo_url: str, caption: str) -> None:
+    """Sabhi users ko ek image + caption bhejo."""
+    user_ids = [u["user_id"] for u in users_col.find({}, {"user_id": 1})]
+    sent = failed = 0
+    for uid in user_ids:
+        try:
+            bot.send_photo(uid, photo_url, caption=caption, parse_mode="Markdown")
+            sent += 1
+        except Exception:
+            failed += 1
+        time.sleep(0.05)
+    logger.info("Photo broadcast complete: %s sent, %s failed", sent, failed)
+
+
 @app.route("/admin/broadcast", methods=["POST"])
 def admin_broadcast():
     if not check_admin_token(request):
@@ -3929,6 +3945,45 @@ def start_mining_api(user_id: int):
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
+
+@app.route("/upgrade_mining/<int:user_id>", methods=["POST"])
+def upgrade_mining_api(user_id: int):
+    """User apna mining level upgrade kare."""
+    if user_id <= 0:
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+    try:
+        user = users_col.find_one({"user_id": user_id}, {"coins": 1, "mining_level": 1, "blocked": 1})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Account blocked."}), 403
+        current_level = int(user.get("mining_level", 1))
+        next_level    = current_level + 1
+        if next_level > 3:
+            return jsonify({"status": "error", "message": "Already at max mining level (Level 3)! 🏆"}), 400
+        cost = MINING_LEVEL_COSTS.get(next_level)
+        if not cost:
+            return jsonify({"status": "error", "message": "Invalid level."}), 400
+        coins = int(user.get("coins", 0))
+        if coins < cost:
+            return jsonify({"status": "error", "message": f"Not enough coins! Level {next_level} costs {cost} coins. You have {coins}."}), 400
+        users_col.update_one(
+            {"user_id": user_id},
+            {"$inc": {"coins": -cost}, "$set": {"mining_level": next_level}},
+        )
+        reward = MINING_LEVEL_REWARDS.get(next_level, MINING_REWARD)
+        logger.info("User %s upgraded mining to level %s (cost %s coins)", user_id, next_level, cost)
+        return jsonify({
+            "status":      "success",
+            "message":     f"⚡ Mining upgraded to *Level {next_level}*! Now earn *{reward} coins* per session!",
+            "new_level":   next_level,
+            "new_reward":  reward,
+            "coins_spent": cost,
+        })
+    except Exception as exc:
+        logger.error("upgrade_mining_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
 @app.route("/collect_mining/<int:user_id>", methods=["POST"])
 def collect_mining_api(user_id: int):
     """
@@ -3947,7 +4002,7 @@ def collect_mining_api(user_id: int):
     try:
         user = users_col.find_one(
             {"user_id": user_id},
-            {"blocked": 1, "mining_start_time": 1}
+            {"blocked": 1, "mining_start_time": 1, "mining_level": 1}
         )
         if not user:
             return jsonify({"status": "error", "message": "User not found."}), 404
@@ -3976,11 +4031,13 @@ def collect_mining_api(user_id: int):
                 "data":    {"remaining_seconds": remaining},
             }), 400
 
+        mining_level  = int(user.get("mining_level", 1))
+        actual_reward = MINING_LEVEL_REWARDS.get(mining_level, MINING_REWARD)
         now = datetime.utcnow()
         users_col.update_one(
             {"user_id": user_id},
             {
-                "$inc": {"coins": MINING_REWARD},
+                "$inc": {"coins": actual_reward},
                 "$set": {
                     "mining_start_time":   "",
                     "last_mining_collect": now.isoformat(),
@@ -3989,13 +4046,14 @@ def collect_mining_api(user_id: int):
                 },
             },
         )
-        logger.info("User %s collected mining reward: %s coins", user_id, MINING_REWARD)
+        logger.info("User %s collected mining reward: %s coins (level %s)", user_id, actual_reward, mining_level)
         # Referral commission — non-blocking, 10% to sponsor
-        _fire_commission(user_id, MINING_REWARD, "game", f"mining_{user_id}_{now.strftime('%Y%m%d%H%M%S')}")
+        _fire_commission(user_id, actual_reward, "game", f"mining_{user_id}_{now.strftime('%Y%m%d%H%M%S')}")
         return jsonify({
             "status":  "success",
-            "message": f"\u26cf\ufe0f Mining complete! *{MINING_REWARD} coins* added to your balance! \U0001fa99",
-            "reward":  MINING_REWARD,
+            "message": f"⛏️ Mining complete! *{actual_reward} coins* added to your balance! 🪙",
+            "reward":  actual_reward,
+            "mining_level": mining_level,
         })
     except Exception as exc:
         logger.error("collect_mining_api error for %s: %s", user_id, exc)
@@ -4921,6 +4979,22 @@ def admin_set_feature():
     status = "UNLOCKED \u2705" if active else "LOCKED \U0001f512"
     logger.info("Admin set %s → %s", feature, status)
     return jsonify({"status": "success", "message": f"{label} is now {status}"})
+
+
+@app.route("/admin/broadcast_photo", methods=["POST"])
+def admin_broadcast_photo():
+    """Admin: image + caption sabhi users ko bhejo."""
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data      = request.json or {}
+    photo_url = (data.get("photo_url") or "").strip()
+    caption   = (data.get("caption") or "").strip()
+    if not photo_url:
+        return jsonify({"status": "error", "message": "photo_url required"}), 400
+    total = users_col.count_documents({})
+    Thread(target=_do_broadcast_photo, args=(photo_url, caption), daemon=True).start()
+    return jsonify({"status": "success", "message": f"Photo broadcast started for ~{total} users."})
+
 
 
 # ============================================================
@@ -5887,6 +5961,39 @@ def toggle_bomb_box(message):
         logger.error("togglebomb error: %s", exc)
         bot.reply_to(message, "⚠️ Error toggling Bomb Box. Check logs.")
 
+
+
+# ============================================================
+# 📸 /broadcastphoto — Admin: image ke saath broadcast
+# ============================================================
+
+@bot.message_handler(commands=["broadcastphoto"])
+def cmd_broadcast_photo(message):
+    """Admin: /broadcastphoto <image_url> | <caption>
+    Example: /broadcastphoto https://i.imgur.com/xyz.jpg | 🎉 Special Event aaya hai!
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    text  = message.text or ""
+    parts = text.split(None, 1)
+    if len(parts) < 2 or "|" not in parts[1]:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:*\n`/broadcastphoto <image_url> | <caption>`\n\nExample:\n`/broadcastphoto https://i.imgur.com/xyz.jpg | 🎉 Special event!`",
+            parse_mode="Markdown",
+        )
+    photo_url, caption = parts[1].split("|", 1)
+    photo_url = photo_url.strip()
+    caption   = caption.strip()
+    if not photo_url.startswith("http"):
+        return bot.reply_to(message, "❌ Valid image URL chahiye (http/https se shuru hona chahiye).")
+    total = users_col.count_documents({})
+    Thread(target=_do_broadcast_photo, args=(photo_url, caption), daemon=True).start()
+    bot.reply_to(
+        message,
+        f"📸 *Photo broadcast started!*\n👥 Sending to ~{total} users...",
+        parse_mode="Markdown",
+    )
 
 # ============================================================
 # 🌐 /togglewebtasks — Admin command (lock/unlock Web Tasks)
@@ -7134,6 +7241,24 @@ def cmd_set_winners(message):
             f"⚠️ Coins manually dene ke liye:\n`/addcoins <user_id> <amount>`",
             parse_mode="Markdown",
         )
+        # Auto-announce to all registered participants
+        try:
+            regs = tournament_registrations_col.find({"tournament_id": tid}, {"user_id": 1})
+            announce_msg = (
+                f"🏆 *{t.get('title', 'Tournament')} — Results!*\n\n"
+                f"{winners_text}\n\n"
+                f"🎉 Congrats to all winners! Stay tuned for more tournaments."
+            )
+            for reg in regs:
+                try:
+                    bot.send_message(reg["user_id"], announce_msg, parse_mode="Markdown")
+                    time.sleep(0.05)
+                except Exception:
+                    pass
+            logger.info("Tournament results announced to all registered users: %s", tid)
+        except Exception as ann_exc:
+            logger.warning("Tournament announcement failed: %s", ann_exc)
+
         logger.info("Admin published winners for tournament: %s", tid)
     except Exception as exc:
         logger.error("cmd_set_winners error: %s", exc)
