@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+      <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -685,6 +685,15 @@
             <p style="color:var(--text-muted); font-size:13px; margin-top:2px;">Tasks reset every day. Complete and earn!</p>
         </div>
 
+        <!-- 💎 VIP TASKS SECTION (Premium only) -->
+        <div id="vip-tasks-section" style="display:none;">
+            <div class="task-section-label">
+                <p class="tsl-title" style="background:linear-gradient(135deg,#1a78c2,#1D9BF0);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">💎 VIP Exclusive Tasks</p>
+                <p class="tsl-sub" style="color:#1D9BF0;">Premium members only • Higher rewards</p>
+            </div>
+            <div id="vip-tasks-list"></div>
+        </div>
+
         <!-- ══════════════════════════════════════════════════ -->
         <!-- 🎡 SPIN WHEEL CARD                                 -->
         <!-- ══════════════════════════════════════════════════ -->
@@ -773,6 +782,18 @@
                 disabled>
                 ⛏️ Collect 30 Coins!
             </button>
+
+            <!-- Mining Speed Upgrade -->
+            <div id="mining-upgrade-section" style="margin-top:10px; border-top:1px solid rgba(255,255,255,0.07); padding-top:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span style="font-size:12px; color:#fcd34d; font-weight:700;">⚡ Mining Speed</span>
+                    <span id="mining-level-badge" style="font-size:11px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); border-radius:20px; padding:2px 10px; color:#fcd34d;">Level 1 • 30🪙</span>
+                </div>
+                <button id="mining-upgrade-btn" class="btn" onclick="upgradeMining()"
+                    style="background:linear-gradient(135deg,#1e3a5f,#2563eb); color:#fff; font-size:12px; font-weight:700; padding:8px;">
+                    ⬆️ Upgrade to Level 2 — 200 Coins
+                </button>
+            </div>
         </div>
 
         <!-- ══════════════════════════════════════════════════ -->
@@ -1085,6 +1106,75 @@
     </div>
 
     <!-- ===================== HELP TAB ===================== -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- 👤 PROFILE TAB                                      -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <div id="profile" class="tab-content" style="display:none; padding-bottom:16px;">
+
+        <!-- Avatar + Name -->
+        <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px; padding:16px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px;">
+            <div id="profile-avatar" style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#1a78c2,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:#fff;flex-shrink:0;">?</div>
+            <div style="flex:1; min-width:0;">
+                <p id="profile-username" style="font-size:15px;font-weight:800;color:#e2e8f0;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Loading...</p>
+                <p id="profile-userid" style="font-size:11px;color:#6e7e96;margin:3px 0 0;">ID: —</p>
+                <div id="profile-premium-badge" style="margin-top:5px; display:none;"></div>
+            </div>
+        </div>
+
+        <!-- Stats Grid -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
+            <div class="card" style="text-align:center; padding:14px 10px;">
+                <p style="font-size:22px; font-weight:800; color:#f1c40f; margin:0;" id="profile-coins">—</p>
+                <p style="font-size:11px; color:#6e7e96; margin:4px 0 0;">🪙 Coins</p>
+            </div>
+            <div class="card" style="text-align:center; padding:14px 10px;">
+                <p style="font-size:22px; font-weight:800; color:#60a5fa; margin:0;" id="profile-referrals">—</p>
+                <p style="font-size:11px; color:#6e7e96; margin:4px 0 0;">👥 Referrals</p>
+            </div>
+            <div class="card" style="text-align:center; padding:14px 10px;">
+                <p style="font-size:22px; font-weight:800; color:#f97316; margin:0;" id="profile-streak">—</p>
+                <p style="font-size:11px; color:#6e7e96; margin:4px 0 0;">🔥 Streak Days</p>
+            </div>
+            <div class="card" style="text-align:center; padding:14px 10px;">
+                <p style="font-size:22px; font-weight:800; color:#a78bfa; margin:0;" id="profile-ads">—</p>
+                <p style="font-size:11px; color:#6e7e96; margin:4px 0 0;">📺 Ads Today</p>
+            </div>
+        </div>
+
+        <!-- Rank Card -->
+        <div class="card" style="margin-bottom:12px; padding:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <p style="font-size:12px; color:#6e7e96; margin:0;">🏅 Your Rank</p>
+                    <p id="profile-rank-label" style="font-size:18px; font-weight:800; color:#f1c40f; margin:4px 0 0;">—</p>
+                </div>
+                <span id="profile-rank-emoji" style="font-size:40px;">🥉</span>
+            </div>
+            <div style="margin-top:10px; height:6px; background:rgba(255,255,255,0.06); border-radius:10px; overflow:hidden;">
+                <div id="profile-rank-bar" style="height:100%; width:0%; background:linear-gradient(90deg,#f1c40f,#f39c12); border-radius:10px; transition:width 0.6s ease;"></div>
+            </div>
+            <p id="profile-rank-sub" style="font-size:11px; color:#6e7e96; margin:5px 0 0; text-align:right;"></p>
+        </div>
+
+        <!-- Mining Level Card -->
+        <div class="card" style="margin-bottom:12px; padding:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <p style="font-size:12px; color:#6e7e96; margin:0;">⛏️ Mining Level</p>
+                    <p id="profile-mining-level" style="font-size:18px; font-weight:800; color:#fcd34d; margin:4px 0 0;">Level 1</p>
+                </div>
+                <span style="font-size:36px;">⛏️</span>
+            </div>
+            <p id="profile-mining-reward" style="font-size:12px; color:#94a3b8; margin:6px 0 0;">Earning 30 coins per session</p>
+        </div>
+
+        <!-- Support link in profile -->
+        <div class="card" style="text-align:center; padding:14px; cursor:pointer;" onclick="switchTab('help', document.querySelector('.nav-item'))">
+            <p style="font-size:14px; font-weight:700; color:#38bdf8; margin:0;">🎧 Go to Support</p>
+        </div>
+
+    </div>
+
     <div id="help" class="tab-content" style="display:none;">
 
         <div class="card c-gold" style="padding:0 !important; overflow:hidden !important;">
@@ -1196,8 +1286,8 @@
         <div class="nav-item" onclick="switchTab('refer', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
             <span style="font-size:20px;">👥</span><span>Refer</span>
         </div>
-        <div class="nav-item" onclick="switchTab('help', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
-            <span style="font-size:20px;">🎧</span><span>Support</span>
+        <div class="nav-item" onclick="switchTab('profile', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
+            <span style="font-size:20px;">👤</span><span>Profile</span>
         </div>
     </div>
 
