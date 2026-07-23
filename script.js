@@ -431,6 +431,8 @@ async function fetchLiveData() {
             loadBombBoxStatus();
             loadWebTasksStatus();
             loadPremiumCardStatus();
+            loadVipTasks();
+            loadProfileTab();
 
             // Update withdraw minimum check with premium dynamic value
             window._dynamicMinWithdraw = isPremium ? 10000 : MIN_WITHDRAW_COINS;
@@ -1072,6 +1074,7 @@ async function loadMiningStatus() {
         } else if (data.is_mining) {
             // Mining in progress
             if (statusEl)   statusEl.innerText  = '⛏️ Mining in progress...';
+            if (typeof _updateMiningUpgradeUI === 'function') _updateMiningUpgradeUI(data.mining_level || 1);
             if (collectBtn) { collectBtn.style.display = ''; collectBtn.innerText = 'Mining...'; }
             _startMiningCountdown(data.remaining_seconds, statusEl, collectBtn, () => loadMiningStatus());
 
@@ -1094,6 +1097,7 @@ async function loadMiningStatus() {
                 watchBtn.innerText     = `📺 Watch Ad ${data.ads_done || 0}/${data.ads_required || 2}`;
             }
             if (statusEl) statusEl.innerText = `Watch ${adsLeft} more ad${adsLeft !== 1 ? 's' : ''} to start mining!`;
+            if (typeof _updateMiningUpgradeUI === 'function') _updateMiningUpgradeUI(data.mining_level || 1);
             if (adsEl)    adsEl.innerText    = `${data.ads_done || 0}/${data.ads_required || 2} ads watched`;
         }
     } catch (e) { /* silent */ }
@@ -1275,6 +1279,188 @@ async function loadPremiumCardStatus() {
             card.style.cursor = 'pointer';
         }
     } catch (e) { /* ignore */ }
+}
+
+// ============================================================
+// 💎 VIP TASKS
+// ============================================================
+async function loadVipTasks() {
+    if (!userId) return;
+    const section = document.getElementById('vip-tasks-section');
+    const list    = document.getElementById('vip-tasks-list');
+    if (!section || !list) return;
+
+    const isPrem = !!(userData && userData.premium_info && userData.premium_info.premium);
+    if (!isPrem) { section.style.display = 'none'; return; }
+    section.style.display = 'block';
+
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_vip_tasks?user_id=${userId}`);
+        const data = await res.json();
+        const tasks   = data.tasks   || [];
+        const claimed = data.claimed || [];
+
+        if (!tasks.length) {
+            list.innerHTML = '<p style="color:#475569;text-align:center;font-size:13px;padding:10px 0;">No VIP tasks available yet.</p>';
+            return;
+        }
+        list.innerHTML = '';
+        tasks.forEach(task => {
+            const done = claimed.includes(task.task_id);
+            const card = document.createElement('div');
+            card.className = 'promo-task-card' + (done ? ' completed' : '');
+            card.style.border = '1px solid rgba(29,155,240,0.3)';
+            card.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                    <p style="font-size:13px;font-weight:700;color:#38bdf8;margin:0;">💎 ${task.title}</p>
+                    <span style="font-size:12px;color:#f1c40f;font-weight:700;white-space:nowrap;margin-left:8px;">+${task.reward||20} 🪙</span>
+                </div>
+                <button class="promo-btn" onclick="claimVipTask('${task.task_id}')" ${done ? 'disabled' : ''}
+                    style="background:${done ? '' : 'linear-gradient(135deg,#1a78c2,#1D9BF0)'};">
+                    ${done ? '✅ Claimed' : '💎 Claim Reward'}
+                </button>`;
+            list.appendChild(card);
+        });
+    } catch(e) {
+        list.innerHTML = '<p style="color:#475569;text-align:center;font-size:13px;">Failed to load VIP tasks.</p>';
+    }
+}
+
+async function claimVipTask(taskId) {
+    if (!userId) return showToast('User ID not found!', 'error');
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_vip_task`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({user_id: userId, task_id: taskId}),
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(data.message || '✅ VIP Task claimed!', 'success');
+            setTimeout(loadVipTasks, 800);
+            setTimeout(fetchLiveData, 1000);
+        } else {
+            showToast(data.message || 'Error claiming task.', 'error');
+        }
+    } catch(e) { showToast('⚠️ Server error.', 'error'); }
+}
+
+// ============================================================
+// ⚡ MINING SPEED UPGRADE
+// ============================================================
+async function upgradeMining() {
+    if (!userId) return showToast('User ID not found!', 'error');
+    const btn = document.getElementById('mining-upgrade-btn');
+    if (btn) { btn.disabled = true; btn.innerText = '⏳ Upgrading...'; }
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/upgrade_mining/${userId}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(data.message || '⚡ Mining upgraded!', 'success');
+            setTimeout(() => { loadMiningStatus(); fetchLiveData(); }, 800);
+        } else {
+            showToast(data.message || 'Upgrade failed.', 'error');
+            if (btn) { btn.disabled = false; btn.innerText = btn.innerText.replace('⏳ Upgrading...', '⬆️ Upgrade'); }
+        }
+    } catch(e) {
+        showToast('⚠️ Server error.', 'error');
+        if (btn) { btn.disabled = false; }
+    }
+}
+
+function _updateMiningUpgradeUI(level) {
+    const badge = document.getElementById('mining-level-badge');
+    const btn   = document.getElementById('mining-upgrade-btn');
+    const REWARDS = {1:30, 2:50, 3:75};
+    const COSTS   = {2:200, 3:500};
+    const reward  = REWARDS[level] || 30;
+    if (badge) badge.innerText = `Level ${level} • ${reward}🪙`;
+    if (btn) {
+        if (level >= 3) {
+            btn.innerText   = '🏆 Max Level Reached!';
+            btn.disabled    = true;
+            btn.style.background = 'rgba(255,255,255,0.05)';
+            btn.style.color      = '#6e7e96';
+        } else {
+            const nextLvl  = level + 1;
+            const cost     = COSTS[nextLvl] || 500;
+            const nextRew  = REWARDS[nextLvl] || 75;
+            btn.innerText  = `⬆️ Upgrade to Level ${nextLvl} (${nextRew}🪙) — ${cost} Coins`;
+            btn.disabled   = false;
+            btn.style.background = 'linear-gradient(135deg,#1e3a5f,#2563eb)';
+            btn.style.color      = '#fff';
+        }
+    }
+    // Update profile tab too
+    const plv = document.getElementById('profile-mining-level');
+    const prw = document.getElementById('profile-mining-reward');
+    if (plv) plv.innerText = `Level ${level}`;
+    if (prw) prw.innerText = `Earning ${reward} coins per session`;
+}
+
+// ============================================================
+// 👤 PROFILE TAB
+// ============================================================
+const _RANK_TIERS = [
+    { min:0,      max:999,   label:'🥉 Beginner',    emoji:'🥉', color:'#94a3b8' },
+    { min:1000,   max:4999,  label:'🥈 Bronze',       emoji:'🥈', color:'#cd7f32' },
+    { min:5000,   max:14999, label:'🥇 Silver',       emoji:'🥇', color:'#94a3b8' },
+    { min:15000,  max:39999, label:'💎 Gold',         emoji:'💎', color:'#f1c40f' },
+    { min:40000,  max:99999, label:'👑 Platinum',     emoji:'👑', color:'#38bdf8' },
+    { min:100000, max:Infinity, label:'🌟 Legend',   emoji:'🌟', color:'#a78bfa' },
+];
+
+function loadProfileTab() {
+    if (!userData || userData.status !== 'success') return;
+    const d        = userData;
+    const coins    = d.coins || 0;
+    const refCount = getRefCount(d.referrals);
+    const streak   = d.streak_day || 0;
+    const ads      = d.ads_today  || 0;
+    const premInfo = d.premium_info || {};
+    const isPrem   = !!premInfo.premium;
+    const uname    = d.username || d.first_name || 'User';
+    const uid      = userId || '—';
+
+    // Avatar
+    const av = document.getElementById('profile-avatar');
+    if (av) av.innerText = uname.charAt(0).toUpperCase() || '?';
+
+    // Name + ID
+    const un = document.getElementById('profile-username');
+    if (un) un.innerText = uname;
+    const ui = document.getElementById('profile-userid');
+    if (ui) ui.innerText = `ID: ${uid}`;
+
+    // Premium badge
+    const pb = document.getElementById('profile-premium-badge');
+    if (pb) {
+        if (isPrem) {
+            pb.innerHTML = `<span style="display:inline-flex;align-items:center;gap:5px;background:linear-gradient(135deg,#1a78c2,#1D9BF0);color:#fff;font-size:11px;font-weight:800;padding:3px 10px;border-radius:20px;">✔ PREMIUM · ${premInfo.days_left||0}d left</span>`;
+            pb.style.display = 'block';
+        } else {
+            pb.innerHTML = `<span style="font-size:11px;color:#6e7e96;">Free Account</span>`;
+            pb.style.display = 'block';
+        }
+    }
+
+    // Stats
+    const pc = document.getElementById('profile-coins');     if (pc) pc.innerText = coins.toLocaleString();
+    const pr = document.getElementById('profile-referrals'); if (pr) pr.innerText = refCount;
+    const ps = document.getElementById('profile-streak');    if (ps) ps.innerText = streak;
+    const pa = document.getElementById('profile-ads');       if (pa) pa.innerText = ads;
+
+    // Rank
+    const tier = _RANK_TIERS.find(t => coins >= t.min && coins <= t.max) || _RANK_TIERS[0];
+    const nextTier = _RANK_TIERS[_RANK_TIERS.indexOf(tier) + 1];
+    const rl = document.getElementById('profile-rank-label'); if (rl) { rl.innerText = tier.label; rl.style.color = tier.color; }
+    const re = document.getElementById('profile-rank-emoji'); if (re) re.innerText = tier.emoji;
+    const rb = document.getElementById('profile-rank-bar');
+    if (rb) {
+        const pct = nextTier ? Math.min(((coins - tier.min) / (nextTier.min - tier.min)) * 100, 100) : 100;
+        rb.style.width = pct + '%';
+    }
+    const rs = document.getElementById('profile-rank-sub');
+    if (rs) rs.innerText = nextTier ? `${(nextTier.min - coins).toLocaleString()} coins to ${nextTier.label}` : '🌟 Max Rank Achieved!';
 }
 
 async function loadBombBoxStatus() {
@@ -2704,32 +2890,9 @@ function applyReferralLock() {
         }
     }
 
-    // ── CASE 1: Withdraw lock — referrals not yet completed ───────────────────────
+    // ── CASE 1: Referrals not yet completed ───────────────────────────────────
     if (lockActive) {
-        if (withdrawTab && !withdrawTab.querySelector('.refer-lock-overlay')) {
-            const ov = document.createElement('div');
-            ov.className = 'refer-lock-overlay';
-            ov.style.cssText = [
-                'position:absolute', 'inset:0', 'display:flex', 'flex-direction:column',
-                'align-items:center', 'justify-content:center',
-                'background:rgba(10,15,30,0.93)', 'backdrop-filter:blur(6px)',
-                'border-radius:16px', 'z-index:9999', 'pointer-events:all', 'cursor:default',
-            ].join(';');
-            ov.innerHTML =
-                '<span style="font-size:52px;animation:lock-pulse 1.8s ease-in-out infinite;display:block;">🔒</span>' +
-                '<span style="font-size:16px;color:#f1c40f;font-weight:800;margin-top:14px;letter-spacing:0.5px;">5 Referrals Required</span>' +
-                `<span style="font-size:13px;color:#94a3b8;margin-top:6px;">You have <b style="color:#e2e8f0;">${refCount}/5</b> referrals</span>` +
-                `<span style="font-size:12px;color:#64748b;margin-top:4px;">Invite ${5 - refCount} more friend${5 - refCount > 1 ? 's' : ''} to unlock withdrawal</span>`;
-            ov.addEventListener('click', e => e.stopPropagation());
-            withdrawTab.appendChild(ov);
-        } else if (withdrawTab) {
-            const existing = withdrawTab.querySelector('.refer-lock-overlay');
-            if (existing) {
-                const spans = existing.querySelectorAll('span');
-                if (spans[2]) spans[2].innerHTML = `You have <b style="color:#e2e8f0;">${refCount}/5</b> referrals`;
-                if (spans[3]) spans[3].textContent = `Invite ${5 - refCount} more friend${5 - refCount > 1 ? 's' : ''} to unlock withdrawal`;
-            }
-        }
+        _removeWithdrawLock(withdrawTab); // ensure no stale overlay
         if (refBox)  { refBox.style.borderColor = '#e74c3c'; refBox.style.opacity = '1'; }
         if (refText) { refText.style.color = '#e74c3c'; }
         if (helpRef) helpRef.innerHTML = '• Referral Requirement: <b style="color:#f1c40f;">5 Users</b>';
