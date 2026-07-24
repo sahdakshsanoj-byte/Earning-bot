@@ -1462,6 +1462,20 @@ def get_user_data_api(user_id: int):
         ads_date  = user.get("ads_date", "")
         ads_today = user.get("ads_today", 0) if ads_date == today else 0
 
+        # Spin ads aaj kitne dekhe
+        spins_date       = user.get("spins_date",       "")
+        spins_today      = user.get("spins_today",      0) if spins_date  == today else 0
+
+        # Mining ads aaj kitne dekhe
+        m_ads_date       = user.get("mining_ads_date",  "")
+        m_ads_today      = user.get("mining_ads_count", 0) if m_ads_date  == today else 0
+
+        # Sab ads ka aaj ka total (earn + spin + mining)
+        total_ads_today  = ads_today + spins_today + m_ads_today
+
+        # User ne lifetime mein kitne tournaments join kiye
+        tournament_count = tournament_registrations_col.count_documents({"user_id": user_id})
+
         task_completions = user.get("task_completions", {})
         live_task_codes  = get_live_task_codes()
         completed_today  = []
@@ -1493,6 +1507,8 @@ def get_user_data_api(user_id: int):
             "streak_day":             user.get("streak_day", 0),
             "referred_by":            user.get("referred_by", ""),
             "ads_today":              ads_today,
+            "total_ads_today":        total_ads_today,
+            "tournament_count":       tournament_count,
             "ads_date":               ads_date,
             "channel_claims":         user.get("channel_claims", {}),
             "promo_task_completions": promo_task_completions,
