@@ -634,6 +634,10 @@ function _applyFeatureLock(card, overlayClass, label) {
         '<span style="font-size:36px;animation:lock-pulse 1.6s ease-in-out infinite;display:block;">🔒</span>' +
         '<span style="font-size:13px;color:#e8d5ff;margin-top:8px;font-weight:700;letter-spacing:0.5px;">' + label + '</span>' +
         '<span style="font-size:11px;color:#94a3b8;margin-top:3px;">Coming Soon</span>';
+    // Click/touch ko parent card tak bubble hone se rokta hai — warna
+    // parent ka onclick (jaise showPremiumModal) lock ke bawajood fire ho jaata tha.
+    ov.addEventListener('click',      function(e) { e.stopPropagation(); });
+    ov.addEventListener('touchstart', function(e) { e.stopPropagation(); }, { passive: true });
     card.appendChild(ov);
 }
 
