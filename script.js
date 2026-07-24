@@ -1395,6 +1395,13 @@ function _updateMiningUpgradeUI(level) {
     const prw = document.getElementById('profile-mining-reward');
     if (plv) plv.innerText = `Level ${level}`;
     if (prw) prw.innerText = `Earning ${reward} coins per session`;
+
+    // Mining level dots update
+    const dots = document.querySelectorAll('#profile-mining-dots .mining-lvl-dot');
+    dots.forEach((dot, i) => {
+        if (i < level) dot.classList.add('on');
+        else           dot.classList.remove('on');
+    });
 }
 
 // ============================================================
@@ -1415,7 +1422,8 @@ function loadProfileTab() {
     const coins    = d.coins || 0;
     const refCount = getRefCount(d.referrals);
     const streak   = d.streak_day || 0;
-    const ads      = d.ads_today  || 0;
+    // total_ads_today = earn + spin + mining ads (main.py sends this after patch)
+    const ads      = (d.total_ads_today != null ? d.total_ads_today : d.ads_today) || 0;
     const premInfo = d.premium_info || {};
     const isPrem   = !!premInfo.premium;
     const uname    = d.username || d.first_name || 'User';
@@ -1461,6 +1469,18 @@ function loadProfileTab() {
     }
     const rs = document.getElementById('profile-rank-sub');
     if (rs) rs.innerText = nextTier ? `${(nextTier.min - coins).toLocaleString()} coins to ${nextTier.label}` : '🌟 Max Rank Achieved!';
+
+    // Mining level dots
+    const mDots = document.querySelectorAll('#profile-mining-dots .mining-lvl-dot');
+    const mLvl  = parseInt(d.mining_level) || 1;
+    mDots.forEach((dot, i) => {
+        if (i < mLvl) dot.classList.add('on');
+        else          dot.classList.remove('on');
+    });
+
+    // Tournament participation count
+    const pt = document.getElementById('profile-tournaments');
+    if (pt) pt.innerText = d.tournament_count != null ? d.tournament_count : '—';
 }
 
 async function loadBombBoxStatus() {
@@ -3737,6 +3757,20 @@ function openBotForPayment() {
         window.open(botUrl, '_blank');
     }
     showToast('📤 Bot opened — send your screenshot!', 'ok');
+}
+
+// ============================================================
+// 💎 PREMIUM CARD CLICK — modal sirf tab khule jab premium nahi ho
+// ============================================================
+function handlePremiumCardClick() {
+    const isPrem = !!(userData && userData.premium_info && userData.premium_info.premium);
+    if (isPrem) {
+        // Already premium — buy modal mat kholo, sirf info toast dikhao
+        const info = userData.premium_info || {};
+        showToast(`✅ Premium Active · ${info.plan || 'Standard'} · ${info.days_left || 0} days left`, 'success');
+        return;
+    }
+    showPremiumModal();
 }
 
 // Update premium card on home tab based on user's premium status
