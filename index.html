@@ -414,7 +414,7 @@
         </div>
 
         <!-- Premium Buy Card -->
-        <div id="premium-buy-card" onclick="showPremiumModal()" style="
+        <div id="premium-buy-card" onclick="handlePremiumCardClick()" style="
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
             border: 1px solid rgba(241,196,15,0.35);
             border-radius: 16px;
@@ -1253,7 +1253,7 @@
         </div>
 
         <!-- ── Stats Row ── -->
-        <div class="pf-block" style="display:flex; gap:8px; margin-bottom:12px;">
+        <div class="pf-block" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">
             <div class="pf-stat-tile">
                 <p style="font-size:22px;font-weight:800;color:#60a5fa;margin:0;" id="profile-referrals">—</p>
                 <p style="font-size:10px;color:#64748b;margin:5px 0 0;font-weight:600;">👥 Referrals</p>
@@ -1265,6 +1265,10 @@
             <div class="pf-stat-tile">
                 <p style="font-size:22px;font-weight:800;color:#a78bfa;margin:0;" id="profile-ads">—</p>
                 <p style="font-size:10px;color:#64748b;margin:5px 0 0;font-weight:600;">📺 Ads Today</p>
+            </div>
+            <div class="pf-stat-tile">
+                <p style="font-size:22px;font-weight:800;color:#34d399;margin:0;" id="profile-tournaments">—</p>
+                <p style="font-size:10px;color:#64748b;margin:5px 0 0;font-weight:600;">🏆 Tournaments</p>
             </div>
         </div>
 
@@ -1497,7 +1501,7 @@
                 card.innerHTML = `
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
                         <p style="font-size:13px; font-weight:700; color:#22c55e; margin:0;">${escapeHtml(task.title)}</p>
-                        <span style="font-size:12px; color:#f1c40f; font-weight:700; white-space:nowrap; margin-left:8px;">+${task.reward || 5} 🪙</span>
+                        <span style="font-size:12px; color:#f1c40f; font-weight:700; white-space:nowrap; margin-left:8px;">+${task.rewar�d || 5} 🪙</span>
                     </div>
                     ${task.description ? `<p style="font-size:11px; color:#64748b; margin:0 0 8px 0;">${escapeHtml(task.description)}</p>` : ''}
                     <button
@@ -1691,7 +1695,7 @@
                 display: block;
                 animation: trophy-bounce 1.4s ease-in-out infinite;
                 margin-bottom: 8px;
-            }
+�            }
             #winner-title {
                 font-size: 22px;
                 font-weight: 800;
@@ -1841,7 +1845,7 @@
                     </div>
                     <div>
                         <p style="font-size:14px;font-weight:800;color:#f1c40f;margin:0;">📆 Monthly</p>
-                        <p style="font-size:11px;color:#94a3b8;margin:3px 0 0;">30 days — Most value!</p>
+                        <p style="font-size:11px;c�olor:#94a3b8;margin:3px 0 0;">30 days — Most value!</p>
                     </div>
                     <div style="text-align:right;">
                         <p style="font-size:20px;font-weight:800;color:#f1c40f;margin:0;">₹79</p>
@@ -1970,49 +1974,11 @@
     </div>
 
     <!-- Cache-bust query param: bump v=N every time you deploy a change -->
-    <script src="config.js?v=4"></script>
+ �   <script src="config.js?v=4"></script>
     <script src="script.js?v=7"></script>
 
-    <!-- ── Mining Dots Patch — profile tab mein level dots auto-update ── -->
-    <script>
-    (function patchMiningDots() {
-        function updateMiningDots(level) {
-            const dots = document.querySelectorAll('#profile-mining-dots .mining-lvl-dot');
-            dots.forEach(function(dot, i) {
-                if (i < level) {
-                    dot.classList.add('on');
-                } else {
-                    dot.classList.remove('on');
-                }
-            });
-        }
-
-        // Patch loadProfileTab to also update dots
-        var tryPatch = setInterval(function() {
-            if (typeof loadProfileTab === 'function' && typeof _updateMiningUpgradeUI === 'function') {
-                clearInterval(tryPatch);
-
-                // Patch _updateMiningUpgradeUI
-                var origUpgrade = _updateMiningUpgradeUI;
-                window._updateMiningUpgradeUI = function(level) {
-                    origUpgrade.apply(this, arguments);
-                    updateMiningDots(level || 1);
-                };
-
-                // Patch loadProfileTab
-                var origLoad = loadProfileTab;
-                window.loadProfileTab = function() {
-                    origLoad.apply(this, arguments);
-                    if (window.userData && window.userData.status === 'success') {
-                        var lvl = parseInt(window.userData.mining_level) || 1;
-                        updateMiningDots(lvl);
-                    }
-                };
-            }
-        }, 150);
-        setTimeout(function() { clearInterval(tryPatch); }, 8000);
-    })();
-    </script>
+    <!-- All profile patches (mining dots, premium lock, ads count, tournaments)
+         are handled directly in script.js — no inline patch needed. -->
 
 </body>
 </html>
