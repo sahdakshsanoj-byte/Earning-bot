@@ -1506,6 +1506,7 @@ def get_user_data_api(user_id: int):
             "last_claim":             user.get("last_claim_ts", ""),
             "streak_day":             user.get("streak_day", 0),
             "referred_by":            user.get("referred_by", ""),
+            "mining_level":           int(user.get("mining_level", 1)),
             "ads_today":              ads_today,
             "total_ads_today":        total_ads_today,
             "tournament_count":       tournament_count,
@@ -4124,6 +4125,9 @@ def get_mining_status_api(user_id: int):
             except ValueError:
                 pass
 
+        mining_level  = int(user.get("mining_level", 1))
+        actual_reward = MINING_LEVEL_REWARDS.get(mining_level, MINING_REWARD)
+
         return jsonify({
             "status":              "success",
             "mining_active":       cfg.get("mining_active", True),
@@ -4133,7 +4137,8 @@ def get_mining_status_api(user_id: int):
             "cooldown_remaining":  cooldown_remaining,
             "ads_done":            ads_done,
             "ads_required":        MINING_ADS_REQUIRED,
-            "reward":              MINING_REWARD,
+            "mining_level":        mining_level,
+            "reward":              actual_reward,
         })
     except Exception as exc:
         logger.error("get_mining_status error for %s: %s", user_id, exc)
