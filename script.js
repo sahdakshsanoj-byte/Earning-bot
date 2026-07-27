@@ -1006,10 +1006,13 @@ function _startMiningCountdown(seconds, labelEl, collectBtn, onDone) {
         if (secs <= 0) {
             clearInterval(_miningInterval);
             _miningInterval = null;
-            if (labelEl)    labelEl.innerText    = '✅ Mining Complete! Collect your reward!';
+            if (labelEl) labelEl.innerText = '✅ Mining Complete! Collect your reward!';
             if (collectBtn) {
+                // Reward dynamically from userData (updated by /get_user on load)
+                const lvlRew = {1:30, 2:50, 3:75};
+                const doneReward = lvlRew[parseInt(userData && userData.mining_level) || 1] || 30;
                 collectBtn.disabled  = false;
-                collectBtn.innerText = '⛏️ Collect 10 Coins!';
+                collectBtn.innerText = `⛏️ Collect ${doneReward} Coins!`;
                 collectBtn.style.background = 'linear-gradient(135deg,#22c55e,#16a34a)';
             }
             if (typeof onDone === 'function') onDone();
@@ -1064,21 +1067,34 @@ async function loadMiningStatus() {
         if (watchBtn)   { watchBtn.style.display   = 'none';  watchBtn.disabled  = false; }
         if (collectBtn) { collectBtn.style.display  = 'none';  collectBtn.disabled = true; }
 
+        // Level & reward — dynamic based on user's current mining level
+        const mLevel  = data.mining_level || 1;
+        const mReward = data.reward || 30;
+
+        // Update header badge, description & info strip with live values
+        const rateBadge = document.getElementById('mining-rate-badge');
+        const descRew   = document.getElementById('mining-desc-reward');
+        const infoRew   = document.getElementById('mining-info-reward');
+        if (rateBadge) rateBadge.innerText = `+${mReward} 🪙/hr`;
+        if (descRew)   descRew.innerText   = `${mReward} coins!`;
+        if (infoRew)   infoRew.innerText   = `${mReward} Coins`;
+
         if (data.collect_ready) {
             // Mining done — ready to collect
             if (_miningInterval) { clearInterval(_miningInterval); _miningInterval = null; }
-            if (statusEl)   statusEl.innerText   = '✅ Mining Complete! Collect your reward!';
+            if (statusEl)   statusEl.innerText = '✅ Mining Complete! Collect your reward!';
             if (collectBtn) {
-                collectBtn.style.display  = '';
-                collectBtn.disabled       = false;
-                collectBtn.innerText      = '⛏️ Collect 10 Coins!';
+                collectBtn.style.display    = '';
+                collectBtn.disabled         = false;
+                collectBtn.innerText        = `⛏️ Collect ${mReward} Coins!`;
                 collectBtn.style.background = 'linear-gradient(135deg,#22c55e,#16a34a)';
             }
+            if (typeof _updateMiningUpgradeUI === 'function') _updateMiningUpgradeUI(mLevel);
 
         } else if (data.is_mining) {
             // Mining in progress
-            if (statusEl)   statusEl.innerText  = '⛏️ Mining in progress...';
-            if (typeof _updateMiningUpgradeUI === 'function') _updateMiningUpgradeUI(data.mining_level || 1);
+            if (statusEl)   statusEl.innerText = '⛏️ Mining in progress...';
+            if (typeof _updateMiningUpgradeUI === 'function') _updateMiningUpgradeUI(mLevel);
             if (collectBtn) { collectBtn.style.display = ''; collectBtn.innerText = 'Mining...'; }
             _startMiningCountdown(data.remaining_seconds, statusEl, collectBtn, () => loadMiningStatus());
 
@@ -1091,6 +1107,7 @@ async function loadMiningStatus() {
             }
             if (statusEl) statusEl.innerText = 'Cooldown active. Please wait before mining again.';
             _startCooldownCountdown(data.cooldown_remaining, watchBtn, statusEl);
+            if (typeof _updateMiningUpgradeUI === 'function') _updateMiningUpgradeUI(mLevel);
 
         } else {
             // Idle — show watch ad button
@@ -1101,7 +1118,7 @@ async function loadMiningStatus() {
                 watchBtn.innerText     = `📺 Watch Ad ${data.ads_done || 0}/${data.ads_required || 2}`;
             }
             if (statusEl) statusEl.innerText = `Watch ${adsLeft} more ad${adsLeft !== 1 ? 's' : ''} to start mining!`;
-            if (typeof _updateMiningUpgradeUI === 'function') _updateMiningUpgradeUI(data.mining_level || 1);
+            if (typeof _updateMiningUpgradeUI === 'function') _updateMiningUpgradeUI(mLevel);
             if (adsEl)    adsEl.innerText    = `${data.ads_done || 0}/${data.ads_required || 2} ads watched`;
         }
     } catch (e) { /* silent */ }
@@ -1166,7 +1183,9 @@ async function watchMiningAd() {
         const data = await res.json();
 
         if (data.status === 'mining_started') {
-            showToast('⛏️ Mining started! Come back in 1 hour to collect 10 coins!', 'success');
+            const lvlRewards = {1:30, 2:50, 3:75};
+            const startReward = lvlRewards[data.mining_level || 1] || 30;
+            showToast(`⛏️ Mining started! Come back in 1 hour to collect ${startReward} coins!`, 'success');
         } else if (data.status === 'ad_counted') {
             showToast(data.message || 'Ad counted! Watch more to start mining.', 'success');
         } else {
@@ -1202,11 +1221,11 @@ async function collectMining() {
             loadMiningStatus();
         } else {
             showToast(data.message || 'Could not collect.', 'error');
-            if (btn) { btn.disabled = false; btn.innerText = '⛏️ Collect 10 Coins!'; }
+            if (btn) { btn.disabled = false; loadMiningStatus(); }
         }
     } catch (e) {
         showToast('⚠️ Error! Please retry.', 'error');
-        if (btn) { btn.disabled = false; btn.innerText = '⛏️ Collect 10 Coins!'; }
+        if (btn) { btn.disabled = false; loadMiningStatus(); }
     } finally {
         _pendingRequests.delete('collectMining');
     }
