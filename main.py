@@ -340,9 +340,16 @@ def get_feature_config() -> dict:
             "spin_active":      bool(doc.get("spin_active",      True)),
             "mining_active":    bool(doc.get("mining_active",    True)),
             "bomb_box_active":  bool(doc.get("bomb_box_active",  True)),
+            # BUG FIX #1: web_tasks_active aur premium_active pehle missing the
+            # is wajah se frontend mein dono hamesha LOCKED dikhte the
+            "web_tasks_active": bool(doc.get("web_tasks_active", True)),
+            "premium_active":   bool(doc.get("premium_active",   True)),
         }
     except Exception:
-        merged = {"spin_active": True, "mining_active": True, "bomb_box_active": True}
+        merged = {
+            "spin_active": True, "mining_active": True, "bomb_box_active": True,
+            "web_tasks_active": True, "premium_active": True,  # BUG FIX #1
+        }
     _feature_cfg_cache      = merged
     _feature_cfg_cache_time = now
     return merged
@@ -1163,7 +1170,14 @@ def record_group_code_violation(chat_id: int, user_id: int) -> int:
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
-CORS(app, origins=[FRONTEND_URL], supports_credentials=False)
+# BUG FIX #2: Telegram Web (web.telegram.org) pehle block hota tha
+CORS(app, origins=[
+    FRONTEND_URL,
+    "https://web.telegram.org",
+    "https://webk.telegram.org",
+    "https://webz.telegram.org",
+    "null",   # kuch mobile webviews null origin bhejte hain
+], supports_credentials=False)
 
 
 # ============================================================
@@ -1320,6 +1334,9 @@ def award_referral_commission(earner_id: int, coins_earned: int, source: str, ev
             return
 
         users_col.update_one({"user_id": sponsor_id}, {"$inc": {"coins": commission}})
+        # BUG FIX #3: commission milne ke baad sponsor ka user cache clear karo
+        # warna 15 seconds tak purana (stale) balance dikhta tha
+        _invalidate_user_cache(sponsor_id)
         logger.info(
             "Commission: sponsor=%s earner=%s coins_earned=%s commission=%s source=%s",
             sponsor_id, earner_id, coins_earned, commission, source,
@@ -1991,6 +2008,11 @@ def get_history_api(user_id: int):
             .sort("timestamp", -1)
             .limit(10)
         )
+        # BUG FIX #4: MongoDB datetime objects ko ISO string mein convert karo
+        # warna JSON serialization fail ho sakta tha
+        for h in history:
+            if "timestamp" in h and hasattr(h["timestamp"], "isoformat"):
+                h["timestamp"] = h["timestamp"].isoformat()
         return jsonify({"status": "success", "data": {"history": history}})
     except Exception as exc:
         logger.error("get_history error for %s: %s", user_id, exc)
@@ -3801,8 +3823,9 @@ def mining_ad_token_api(user_id: int):
         user = users_col.find_one(
             {"user_id": user_id},
             {"blocked": 1, "mining_start_time": 1, "mining_ads_count": 1,
-             "mining_ads_date": 1, "last_mining_collect": 1}
-        )
+             "mining_ads_date": 1, "last_mining_collect": 1,
+             "mining_level": 1}   # BUG FIX A: ye field projection mein nahi thi
+        )                          # is wajah se level 3 upgrade ke baad bhi hamesha 1 return hota tha
         if not user:
             return jsonify({"status": "error", "message": "User not found."}), 404
         if user.get("blocked"):
@@ -3988,6 +4011,9 @@ def upgrade_mining_api(user_id: int):
             {"user_id": user_id},
             {"$inc": {"coins": -cost}, "$set": {"mining_level": next_level}},
         )
+        # BUG FIX B: upgrade ke baad user cache clear karo
+        # warna profile section aur userData mein purana mining_level dikhta tha
+        _invalidate_user_cache(user_id)
         reward = MINING_LEVEL_REWARDS.get(next_level, MINING_REWARD)
         logger.info("User %s upgraded mining to level %s (cost %s coins)", user_id, next_level, cost)
         return jsonify({
@@ -4085,8 +4111,9 @@ def get_mining_status_api(user_id: int):
         user = users_col.find_one(
             {"user_id": user_id},
             {"blocked": 1, "mining_start_time": 1, "mining_ads_count": 1,
-             "mining_ads_date": 1, "last_mining_collect": 1}
-        )
+             "mining_ads_date": 1, "last_mining_collect": 1,
+             "mining_level": 1}   # BUG FIX A: ye field projection mein nahi thi
+        )                          # is wajah se level 3 upgrade ke baad bhi hamesha 1 return hota tha
         if not user:
             return jsonify({"status": "error", "message": "User not found."}), 404
 
