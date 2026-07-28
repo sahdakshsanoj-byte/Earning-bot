@@ -603,7 +603,8 @@ async function buyLotteryTicket() {
         const data = await res.json();
         if (data.status === 'success') {
             showToast(data.message || '🎫 Ticket purchased!', 'success');
-            if (typeof refreshBalance === 'function') refreshBalance();
+            // BUG FIX #5: fetchLiveData() se poora balance aur UI update hota hai
+            fetchLiveData();
         } else {
             showToast(data.message || 'Could not buy ticket.', 'error');
         }
@@ -2765,7 +2766,7 @@ function switchTab(tabId, el) {
 
     if (tabId === 'leaderboard') refreshLeaderboard();
     if (tabId === 'history')     loadHistory();
-    if (tabId === 'refer')       loadReferralDashboard();
+    if (tabId === 'refer')       loadReferralDashboard(true);  // BUG FIX #6: force refresh — active status hamesha fresh dikhega
 
     // Re-apply referral lock on tab switch (for both rewards and refer tabs)
     if (tabId === 'rewards' || tabId === 'refer') setTimeout(applyReferralLock, 50);
