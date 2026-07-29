@@ -123,9 +123,13 @@ try:
     lottery_col                   = db["lottery"]
     bomb_box_col                  = db["bomb_box_games"]
     referral_commissions_col      = db["referral_commissions"]
+    vip_tasks_col                 = db["vip_tasks"]        # VIP-only tasks (new)
+    rupee_withdrawals_col         = db["rupee_withdrawals"]  # Rupee withdrawals
     tournaments_col               = db["tournaments"]
     tournament_registrations_col  = db["tournament_registrations"]
     tournament_winners_col        = db["tournament_winners"]
+    tournament_rounds_col         = db["tournament_rounds"]   # Rounds per tournament
+    tournament_results_col        = db["tournament_results"]  # Per-team per-round results
 
     try:
         rate_col.create_index("expires_at", expireAfterSeconds=0)
@@ -153,6 +157,9 @@ try:
             [("chat_id", 1), ("user_id", 1)], unique=True, **_idx_opts
         )
         promo_tasks_col.create_index("task_id", unique=True, **_idx_opts)
+        vip_tasks_col.create_index("task_id", unique=True, **_idx_opts)   # VIP tasks index
+        rupee_withdrawals_col.create_index("user_id", **_idx_opts)
+        rupee_withdrawals_col.create_index("status", **_idx_opts)
         # Tournament indexes
         tournaments_col.create_index("active", **_idx_opts)
         tournaments_col.create_index("status", **_idx_opts)
@@ -162,6 +169,16 @@ try:
         tournament_registrations_col.create_index("user_id", **_idx_opts)
         tournament_registrations_col.create_index("tournament_id", **_idx_opts)
         tournament_winners_col.create_index("tournament_id", **_idx_opts)
+        # Tournament rounds & results indexes
+        tournament_rounds_col.create_index(
+            [("tournament_id", 1), ("round_no", 1)], unique=True, **_idx_opts
+        )
+        tournament_rounds_col.create_index("tournament_id", **_idx_opts)
+        tournament_results_col.create_index(
+            [("tournament_id", 1), ("round_no", 1), ("team_id", 1)], unique=True, **_idx_opts
+        )
+        tournament_results_col.create_index("tournament_id", **_idx_opts)
+        tournament_results_col.create_index("team_id", **_idx_opts)
         # Referral commissions indexes
         referral_commissions_col.create_index("event_id", unique=True, **_idx_opts)
         referral_commissions_col.create_index("sponsor_id", **_idx_opts)
@@ -260,6 +277,75 @@ TOURNAMENT_STATE_LABELS = {
     "match_live":           "Match Live",
     "completed":            "Completed",
 }
+
+# Placement Points table (BGMI/FF standard)
+PLACEMENT_POINTS = {1: 12, 2: 9, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 3, 9: 2, 10: 1, 11: 1, 12: 1}
+
+def get_placement_points(rank: int) -> int:
+    """Rank se placement points return karo."""
+    return PLACEMENT_POINTS.get(int(rank), 0)
+
+
+def format_team_id(counter: int) -> str:
+    """Integer counter ko T001 format mein convert karo."""
+    return f"T{counter:03d}"
+
+
+def calculate_tournament_leaderboard(tid: str) -> list:
+    """
+    Ek tournament ka complete leaderboard calculate karo.
+    Returns: list of dicts sorted by (total_points DESC, total_kills DESC)
+    Each dict: {team_id, team_name, total_kills, total_points, rounds: {1: pts, 2: pts, ...}}
+    """
+    try:
+        # All results for this tournament
+        results = list(tournament_results_col.find(
+            {"tournament_id": tid}, {"_id": 0}
+        ))
+        if not results:
+            return []
+
+        # Get total_rounds from tournament
+        t = tournaments_col.find_one({"tournament_id": tid}, {"total_rounds": 1})
+        total_rounds = int(t.get("total_rounds", 1)) if t else 1
+
+        # Aggregate by team_id
+        teams: dict = {}
+        for r in results:
+            team_id   = r.get("team_id", "")
+            team_name = r.get("team_name", "—")
+            rnd_no    = int(r.get("round_no", 1))
+            kills     = int(r.get("kills", 0))
+            total_pts = int(r.get("total_points", 0))
+            rank      = int(r.get("rank", 99))
+
+            if team_id not in teams:
+                teams[team_id] = {
+                    "team_id":     team_id,
+                    "team_name":   team_name,
+                    "total_kills": 0,
+                    "total_points": 0,
+                    "best_rank":   rank,
+                    "rounds":      {},
+                }
+            teams[team_id]["total_kills"]  += kills
+            teams[team_id]["total_points"] += total_pts
+            teams[team_id]["rounds"][rnd_no] = total_pts
+            if rank < teams[team_id]["best_rank"]:
+                teams[team_id]["best_rank"] = rank
+
+        board = sorted(
+            teams.values(),
+            key=lambda x: (-x["total_points"], -x["total_kills"], x["best_rank"]),
+        )
+        for i, row in enumerate(board, 1):
+            row["position"] = i
+        return board
+    except Exception as exc:
+        import logging as _l
+        _l.getLogger(__name__).error("calculate_tournament_leaderboard error for %s: %s", tid, exc)
+        return []
+
 
 COMMISSION_RATE          = 0.10   # 10% commission on eligible earnings
 COMMISSION_DAILY_LIMIT   = 200    # Max commission coins a sponsor earns per day
@@ -1388,6 +1474,7 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
                 "user_id":                user_id,
                 "username":               username,
                 "coins":                  0,
+                "rupees":                 0.0,   # INR wallet balance
                 "referred_by":            None,
                 "referral_count":         0,
                 "task_completions":       {},
@@ -1523,6 +1610,7 @@ def get_user_data_api(user_id: int):
             "last_claim":             user.get("last_claim_ts", ""),
             "streak_day":             user.get("streak_day", 0),
             "referred_by":            user.get("referred_by", ""),
+            "rupees":                 round(float(user.get("rupees", 0.0)), 2),
             "mining_level":           int(user.get("mining_level", 1)),
             "ads_today":              ads_today,
             "total_ads_today":        total_ads_today,
@@ -1852,8 +1940,6 @@ def withdraw_api():
 
     METHOD_ALIASES = {
         "upi":           "upi",
-        "usdt":          "usdt_trc20",
-        "usdt_trc20":    "usdt_trc20",
         "google":        "google_redeem",
         "google_redeem": "google_redeem",
     }
@@ -1884,13 +1970,6 @@ def withdraw_api():
             return jsonify({
                 "status":  "error",
                 "message": "Invalid UPI ID format. (Example: name@upi)",
-            }), 400
-    elif method == "usdt_trc20":
-        trc20_pattern = re.compile(r"^T[A-Za-z0-9]{33}$")
-        if not payment_address or not trc20_pattern.match(payment_address):
-            return jsonify({
-                "status":  "error",
-                "message": "Invalid TRC20 address. Must start with T and be 34 characters.",
             }), 400
     elif method == "google_redeem":
         payment_address = "via_telegram"
@@ -2497,6 +2576,223 @@ def admin_remove_promo_task():
         logger.error("admin_remove_promo_task error: %s", exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
+
+
+
+
+# ============================================================
+# ₹ RUPEE WALLET — Withdraw & History
+# ============================================================
+
+@app.route("/withdraw_rupees", methods=["POST"])
+def withdraw_rupees_api():
+    """User apna rupee balance withdraw kare (UPI ya Google Play)."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"status": "error", "message": "No data received."}), 400
+
+    try:
+        user_id = int(data.get("user_id", 0))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+
+    method_raw      = sanitize_text(data.get("method", "upi")).lower().strip()
+    payment_address = sanitize_text(data.get("payment_address", "") or data.get("upi_id", ""), max_length=256)
+
+    METHOD_MAP = {"upi": "upi", "google": "google_redeem", "google_redeem": "google_redeem"}
+    method = METHOD_MAP.get(method_raw)
+    if not method:
+        return jsonify({"status": "error", "message": "Invalid method. Use UPI or Google Play."}), 400
+
+    try:
+        amount = round(float(data.get("amount", 0)), 2)
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid amount."}), 400
+
+    MIN_RUPEE_WITHDRAW = 10.0
+    MAX_RUPEE_WITHDRAW = 10000.0
+
+    if amount < MIN_RUPEE_WITHDRAW:
+        return jsonify({"status": "error", "message": f"Minimum rupee withdrawal is ₹{MIN_RUPEE_WITHDRAW}."}), 400
+    if amount > MAX_RUPEE_WITHDRAW:
+        return jsonify({"status": "error", "message": f"Maximum rupee withdrawal is ₹{MAX_RUPEE_WITHDRAW}."}), 400
+
+    if method == "upi":
+        upi_pattern = re.compile(r"^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$")
+        if not payment_address or not upi_pattern.match(payment_address):
+            return jsonify({"status": "error", "message": "Invalid UPI ID. Example: name@paytm"}), 400
+    elif method == "google_redeem":
+        payment_address = "via_telegram"
+
+    if is_rate_limited(f"rupeewd_{user_id}", 10):
+        return jsonify({"status": "error", "message": "Please wait before retrying."}), 429
+
+    # One pending rupee withdrawal at a time
+    _pending = rupee_withdrawals_col.find_one({"user_id": user_id, "status": "Pending ⏳"})
+    if _pending:
+        return jsonify({"status": "error", "message": "Ek withdrawal already pending hai. Approve/reject hone ka wait karo."}), 400
+
+    # Deduct rupees atomically
+    result = users_col.find_one_and_update(
+        {"user_id": user_id, "rupees": {"$gte": amount}, "blocked": {"$ne": True}},
+        {"$inc": {"rupees": -amount}},
+        return_document=True,
+    )
+    if result is None:
+        user = users_col.find_one({"user_id": user_id}, {"rupees": 1, "blocked": 1})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Account blocked."}), 403
+        return jsonify({"status": "error", "message": f"Insufficient rupee balance. You have ₹{round(user.get('rupees', 0), 2)}."}), 400
+
+    _invalidate_user_cache(user_id)
+
+    METHOD_LABELS = {"upi": "🏦 UPI", "google_redeem": "🎁 Google Play"}
+    method_label = METHOD_LABELS.get(method, method)
+
+    now_utc    = datetime.utcnow()
+    IST_OFFSET = timedelta(hours=5, minutes=30)
+    now_ist    = now_utc + IST_OFFSET
+    withdrawal = {
+        "user_id":         user_id,
+        "method":          method,
+        "payment_address": payment_address,
+        "amount":          amount,
+        "status":          "Pending ⏳",
+        "timestamp":       now_utc,
+        "date":            now_ist.strftime("%d %b %Y, %I:%M %p IST"),
+        "type":            "rupee",
+    }
+    rupee_withdrawals_col.insert_one(withdrawal)
+
+    addr_display = payment_address if payment_address != "via_telegram" else "Telegram DM"
+    tg_username  = result.get("username") or ""
+    uname_line   = f"Username: @{tg_username}\n" if tg_username else ""
+
+    try:
+        bot.send_message(
+            ADMIN_ID,
+            f"💸 *New Rupee Withdrawal Request*\n\n"
+            f"User ID: `{user_id}`\n"
+            f"{uname_line}"
+            f"Method: {method_label}\n"
+            f"Address: `{addr_display}`\n"
+            f"Amount: *₹{amount:.2f}*\n"
+            f"Remaining Rupees: ₹{round(result.get('rupees', 0) - amount, 2)}\n"
+            f"Date: {withdrawal['date']}\n\n"
+            f"Approve: `/approverupee {user_id}`\n"
+            f"Reject:  `/rejectrupee {user_id}`",
+            parse_mode="Markdown",
+        )
+    except Exception as notify_exc:
+        logger.warning("Admin notify failed for rupee withdrawal: %s", notify_exc)
+
+    return jsonify({"status": "success", "message": f"₹{amount:.2f} withdrawal request submitted!"})
+
+
+@app.route("/get_rupee_history/<int:user_id>", methods=["GET"])
+def get_rupee_history_api(user_id: int):
+    if is_rate_limited(f"rupee_history_{user_id}", 5):
+        return jsonify({"status": "error", "message": "Please wait before refreshing."}), 429
+    try:
+        history = list(
+            rupee_withdrawals_col.find({"user_id": user_id}, {"_id": 0})
+            .sort("timestamp", -1)
+            .limit(15)
+        )
+        for h in history:
+            if "timestamp" in h and hasattr(h["timestamp"], "isoformat"):
+                h["timestamp"] = h["timestamp"].isoformat()
+        return jsonify({"status": "success", "data": {"history": history}})
+    except Exception as exc:
+        logger.error("get_rupee_history error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+# ============================================================
+# 💎 VIP TASKS — API endpoints
+# ============================================================
+
+@app.route("/get_vip_tasks", methods=["GET"])
+def get_vip_tasks_api():
+    """Premium users ke liye VIP tasks list + their claimed tasks."""
+    try:
+        user_id = int(request.args.get("user_id", 0))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+
+    if not user_id:
+        return jsonify({"status": "error", "message": "user_id required."}), 400
+
+    try:
+        # Premium check
+        if not is_premium(user_id):
+            return jsonify({"status": "error", "message": "Premium membership required."}), 403
+
+        tasks   = list(vip_tasks_col.find({"active": True}, {"_id": 0}))
+        user    = users_col.find_one({"user_id": user_id}, {"vip_task_completions": 1, "_id": 0})
+        claimed = (user or {}).get("vip_task_completions", [])
+
+        return jsonify({"status": "success", "tasks": tasks, "claimed": claimed})
+    except Exception as exc:
+        logger.error("get_vip_tasks error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/claim_vip_task", methods=["POST"])
+def claim_vip_task_api():
+    """VIP task claim karo aur coins receive karo."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"status": "error", "message": "No data received."}), 400
+
+    try:
+        user_id = int(data.get("user_id", 0))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+
+    task_id = sanitize_text(data.get("task_id", "")).strip()
+    if not user_id or not task_id:
+        return jsonify({"status": "error", "message": "user_id and task_id required."}), 400
+
+    if is_rate_limited(f"vip_task_{user_id}_{task_id}", 15):
+        return jsonify({"status": "error", "message": "Please wait before retrying."}), 429
+
+    try:
+        # Premium check
+        if not is_premium(user_id):
+            return jsonify({"status": "error", "message": "Premium membership required."}), 403
+
+        user = users_col.find_one({"user_id": user_id}, {"blocked": 1, "vip_task_completions": 1})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+        if user.get("blocked"):
+            return jsonify({"status": "error", "message": "Account blocked."}), 403
+
+        already_claimed = user.get("vip_task_completions", [])
+        if task_id in already_claimed:
+            return jsonify({"status": "error", "message": "You have already claimed this VIP task!"}), 400
+
+        task = vip_tasks_col.find_one({"task_id": task_id, "active": True})
+        if not task:
+            return jsonify({"status": "error", "message": "VIP task not found or no longer active."}), 404
+
+        reward = int(task.get("reward", 20))
+        users_col.update_one(
+            {"user_id": user_id},
+            {"$inc": {"coins": reward}, "$addToSet": {"vip_task_completions": task_id}},
+        )
+        _invalidate_user_cache(user_id)
+        logger.info("User %s claimed VIP task %s for %s coins", user_id, task_id, reward)
+        return jsonify({
+            "status":  "success",
+            "message": f"💎 +{reward} coins for completing VIP task!",
+            "reward":  reward,
+        })
+    except Exception as exc:
+        logger.error("claim_vip_task error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
 
 # ============================================================
 # SPONSOR CLICK TRACKING
@@ -4766,19 +5062,183 @@ def tournament_register_api():
             logger.info("Tournament fee deducted: user=%s fee=%s tournament=%s", user_id, entry_fee, tid)
 
         reg_doc["entry_fee_paid"] = entry_fee
+
+        # Auto-assign unique Team ID (T001, T002, ...) per tournament using atomic counter
+        updated_t = tournaments_col.find_one_and_update(
+            {"tournament_id": tid},
+            {"$inc": {"team_id_counter": 1}},
+            return_document=True,
+            projection={"team_id_counter": 1},
+        )
+        counter = int((updated_t or {}).get("team_id_counter", 1))
+        team_id = format_team_id(counter)
+        reg_doc["team_id"] = team_id
+
         tournament_registrations_col.insert_one(reg_doc)
-        logger.info("Tournament reg: user=%s type=%s tournament=%s fee=%s", user_id, "squad" if is_squad else "solo", tid, entry_fee)
+        logger.info("Tournament reg: user=%s type=%s tournament=%s fee=%s team_id=%s", user_id, "squad" if is_squad else "solo", tid, entry_fee, team_id)
 
         fee_msg  = f" {entry_fee} coins deducted as entry fee." if entry_fee > 0 else ""
         type_msg = "🎉 Duo registered!" if is_duo else "🎉 Squad registered!" if is_squad else "🎉 Registration successful!"
         return jsonify({
-            "status":  "success",
-            "message": f"{type_msg}{fee_msg} Good luck in the tournament!",
+            "status":   "success",
+            "message":  f"{type_msg}{fee_msg} Good luck in the tournament!",
+            "team_id":  team_id,
         })
     except pymongo.errors.DuplicateKeyError:
         return jsonify({"status": "error", "message": "You are already registered!"}), 400
     except Exception as exc:
         logger.error("tournament_register_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+
+# ============================================================
+# 📊 TOURNAMENT LEADERBOARD + ROUNDS — API Endpoints
+# ============================================================
+
+@app.route("/tournament/<string:tid>/leaderboard", methods=["GET"])
+def tournament_leaderboard_api(tid: str):
+    """Tournament ka full leaderboard return karo (per-round breakdown included)."""
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"_id": 0})
+        if not t:
+            return jsonify({"status": "error", "message": "Tournament not found."}), 404
+        board = calculate_tournament_leaderboard(tid)
+        total_rounds = int(t.get("total_rounds", 1))
+        return jsonify({
+            "status":       "success",
+            "tournament_id": tid,
+            "title":        t.get("title", ""),
+            "total_rounds": total_rounds,
+            "current_round": int(t.get("current_round", 0)),
+            "leaderboard":  board,
+        })
+    except Exception as exc:
+        logger.error("tournament_leaderboard_api error for %s: %s", tid, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/tournament/<string:tid>/rounds", methods=["GET"])
+def tournament_rounds_api(tid: str):
+    """Tournament ke saare rounds ki list return karo."""
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"_id": 0})
+        if not t:
+            return jsonify({"status": "error", "message": "Tournament not found."}), 404
+        rounds = list(
+            tournament_rounds_col.find(
+                {"tournament_id": tid}, {"_id": 0}
+            ).sort("round_no", 1)
+        )
+        for r in rounds:
+            for k in ("started_at", "ended_at"):
+                if r.get(k) and hasattr(r[k], "isoformat"):
+                    r[k] = r[k].isoformat()
+            # Hide room credentials unless round is live
+            if r.get("status") != "live":
+                r.pop("room_id",       None)
+                r.pop("room_password", None)
+        return jsonify({
+            "status":        "success",
+            "tournament_id": tid,
+            "total_rounds":  int(t.get("total_rounds", 1)),
+            "current_round": int(t.get("current_round", 0)),
+            "rounds":        rounds,
+        })
+    except Exception as exc:
+        logger.error("tournament_rounds_api error for %s: %s", tid, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/admin/tournament/round/room", methods=["POST"])
+def admin_set_round_room_api():
+    """Admin API: Specific round ke liye Room ID & Password set karo.
+    Body: { tournament_id, round_no, room_id, room_password }
+    """
+    if not check_admin_token(request):
+        return jsonify({"status": "error", "message": "Unauthorized."}), 401
+    data     = request.get_json(silent=True) or {}
+    tid      = sanitize_text(data.get("tournament_id", ""), 50)
+    room_id  = sanitize_text(data.get("room_id", ""), 50)
+    room_pwd = sanitize_text(data.get("room_password", ""), 50)
+    try:
+        round_no_val = int(data.get("round_no", 0))
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "round_no must be an integer."}), 400
+    if not tid or not room_id or not room_pwd or round_no_val < 1:
+        return jsonify({
+            "status":  "error",
+            "message": "tournament_id, round_no, room_id, room_password sab required hain.",
+        }), 400
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return jsonify({"status": "error", "message": "Tournament not found."}), 404
+        tournament_rounds_col.update_one(
+            {"tournament_id": tid, "round_no": round_no_val},
+            {"$set": {"room_id": room_id, "room_password": room_pwd}},
+            upsert=True,
+        )
+        logger.info("Admin API: set round room for %s round %d", tid, round_no_val)
+        return jsonify({"status": "success", "message": f"Round {round_no_val} room credentials set."})
+    except Exception as exc:
+        logger.error("admin_set_round_room_api error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/tournament/<string:tid>/rounds/<int:round_no>", methods=["GET"])
+def tournament_single_round_api(tid: str, round_no: int):
+    """Specific round ki details return karo — room credentials sirf live round mein dikhenge."""
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"_id": 0})
+        if not t:
+            return jsonify({"status": "error", "message": "Tournament not found."}), 404
+        r = tournament_rounds_col.find_one(
+            {"tournament_id": tid, "round_no": round_no}, {"_id": 0}
+        )
+        if not r:
+            return jsonify({"status": "error", "message": "Round not found."}), 404
+        for k in ("started_at", "ended_at"):
+            if r.get(k) and hasattr(r[k], "isoformat"):
+                r[k] = r[k].isoformat()
+        if r.get("status") != "live":
+            r.pop("room_id",       None)
+            r.pop("room_password", None)
+        return jsonify({
+            "status":        "success",
+            "tournament_id": tid,
+            "round":         r,
+            "total_rounds":  int(t.get("total_rounds", 1)),
+            "current_round": int(t.get("current_round", 0)),
+        })
+    except Exception as exc:
+        logger.error("tournament_single_round_api error for %s round %d: %s", tid, round_no, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/tournament/<string:tid>/results/<int:round_no>", methods=["GET"])
+def tournament_round_results_api(tid: str, round_no: int):
+    """Ek specific round ke saare team results return karo."""
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"_id": 0})
+        if not t:
+            return jsonify({"status": "error", "message": "Tournament not found."}), 404
+        results = list(
+            tournament_results_col.find(
+                {"tournament_id": tid, "round_no": round_no}, {"_id": 0}
+            ).sort("rank", 1)
+        )
+        for r in results:
+            if r.get("recorded_at") and hasattr(r["recorded_at"], "isoformat"):
+                r["recorded_at"] = r["recorded_at"].isoformat()
+        return jsonify({
+            "status":        "success",
+            "tournament_id": tid,
+            "round_no":      round_no,
+            "results":       results,
+        })
+    except Exception as exc:
+        logger.error("tournament_round_results_api error: %s", exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
@@ -5674,13 +6134,20 @@ def admin_panel_command(message):
         "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
         "\U0001f3c6 *Tournament*\n"
         "\u2022 /createtournament `Title|Mode|Map|Date|Time|Fee|MaxP|Prize` \u2014 Create\n"
-        "\u2022 /tournamentstatus `<status>` \u2014 Status change karo\n"
+        "\u2022 /listtournaments \u2014 Saare active tournaments + rounds progress\n"
+        "\u2022 /tournamentinfo `<id>` \u2014 Tournament details + per-round room info\n"
+        "\u2022 /tournamentstatus `<id> <status>` \u2014 Status change karo\n"
         "  Statuses: `coming_soon` \u2022 `registration_open` \u2022 `registration_closed` \u2022 `match_live` \u2022 `completed`\n"
-        "\u2022 /setroomid `RoomID | Password` \u2014 Room ID & Password set karo \U0001f511\n"
-        "\u2022 /tournamentinfo \u2014 Active tournament ki details\n"
-        "\u2022 /tournamentregs \u2014 Registered players list\n"
-        "\u2022 /setwinners `Nick:Reward | Nick:Reward | Nick:Reward` \u2014 Winners set karo\n"
-        "\u2022 /canceltournament \u2014 Tournament cancel karo\n"
+        "\u2022 /setroomid `<id> RoomID | Password` \u2014 Global room (sab rounds) \U0001f511\n"
+        "\u2022 /setroundroom `<id> <round_no> RoomID | Password` \u2014 Per-round room \U0001f511\n"
+        "\u2022 /roundinfo `<id> <round_no>` \u2014 Specific round ki full details\n"
+        "\u2022 /startround `<id>` \u2014 Agla round start karo\n"
+        "\u2022 /endround `<id>` \u2014 Current round khatam karo\n"
+        "\u2022 /nextround `<id>` \u2014 Next round pe jao\n"
+        "\u2022 /finishtournament `<id>` \u2014 Tournament finish karo\n"
+        "\u2022 /tournamentregs `<id>` \u2014 Registered players list\n"
+        "\u2022 /setwinners `<id> Nick:Reward | Nick:Reward | Nick:Reward` \u2014 Winners set karo\n"
+        "\u2022 /canceltournament `<id>` \u2014 Tournament cancel karo\n"
     )
     bot.reply_to(message, text, parse_mode="Markdown")
 
@@ -6916,14 +7383,14 @@ def cmd_create_tournament(message):
         return bot.reply_to(
             message,
             "📋 *Usage:*\n"
-            "`/createtournament Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool | Description`\n\n"
+            "`/createtournament Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool | Rounds | Description`\n\n"
             "*Mode options:* `Solo` / `Duo` / `Squad`\n"
-            "*Description:* Max 100 words (optional — tournament ka brief info)\n\n"
+            "*Rounds:* Number of rounds (1-10) — e.g. `3`\n"
+            "*Description:* Max 100 words (optional)\n\n"
             "*Examples:*\n"
-            "Solo: `/createtournament FF Solo Cup | Solo | Kalahari | 20 Jun 2026 | 7:00 PM | 0 | 100 | 5000 Coins | India ka sabse bada solo tournament!`\n"
-            "Squad: `/createtournament FF Grand Finals | Squad | Bermuda | 5 Jun 2026 | 8:00 PM | 0 | 50 | 5000 Coins | Join karo aur jito GP codes!`\n\n"
-            "⚠️ EntryFee aur MaxPlayers number mein dena hai.\n"
-            "💡 Description 9th field hai — optional hai, chhod sakte ho.\n"
+            "1-Round: `/createtournament FF Solo Cup | Solo | Kalahari | 20 Jun 2026 | 7:00 PM | 0 | 100 | 5000 Coins | 1 | Grand finale!`\n"
+            "3-Round: `/createtournament FF Grand Finals | Squad | Bermuda | 5 Jun 2026 | 8:00 PM | 0 | 50 | 5000 Coins | 3 | 3 epic rounds!`\n\n"
+            "⚠️ EntryFee, MaxPlayers aur Rounds sirf number mein dena hai.\n"
             "💡 Individual prizes: `/setprizes <tid> 1st:5000 Coins | 2nd:3000 Coins | 3rd:1000 Coins`",
             parse_mode="Markdown",
         )
@@ -6933,14 +7400,25 @@ def cmd_create_tournament(message):
         return bot.reply_to(
             message,
             "❌ *8 fields minimum chahiye, `|` se alag karo:*\n"
-            "`Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool`\n"
-            "*(Description 9th optional field hai)*\n\n"
-            "*Mode:* `Solo` / `Duo` / `Squad`",
+            "`Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool | Rounds | Description`\n\n"
+            "*Mode:* `Solo` / `Duo` / `Squad` | *Rounds:* 1-10",
             parse_mode="Markdown",
         )
 
     title, mode, map_, date, t_time, entry_fee_str, max_p_str, prize_pool = fields[:8]
-    description = fields[8] if len(fields) >= 9 else ""
+    # Rounds is 9th field, description is 10th (both optional, backward-compat)
+    if len(fields) >= 9:
+        rounds_str = fields[8].strip()
+        if rounds_str.isdigit():
+            total_rounds = max(1, min(10, int(rounds_str)))
+            description  = fields[9] if len(fields) >= 10 else ""
+        else:
+            # User ne rounds skip kiya, treat as description (backward compat)
+            total_rounds = 1
+            description  = rounds_str
+    else:
+        total_rounds = 1
+        description  = ""
     # Limit description to 100 words
     if description:
         words = description.split()
@@ -6978,7 +7456,8 @@ def cmd_create_tournament(message):
         tid = f"t_{int(time.time())}"
         tournaments_col.update_one(
             {"tournament_id": tid},
-            {"$set": {
+            {"$setOnInsert": {"team_id_counter": 0},
+             "$set": {
                 "tournament_id": tid,
                 "title":         sanitize_text(title, max_length=100),
                 "mode":          sanitize_text(mode, max_length=30),
@@ -6990,6 +7469,8 @@ def cmd_create_tournament(message):
                 "prize_pool":    sanitize_text(prize_pool, max_length=200),
                 "description":   description,
                 "prizes":        [],
+                "total_rounds":  total_rounds,
+                "current_round": 0,
                 "status":        "coming_soon",
                 "active":        True,
                 "created_at":    datetime.utcnow(),
@@ -7006,13 +7487,16 @@ def cmd_create_tournament(message):
             f"📅 *Date:* {date}  |  ⏰ *Time:* {t_time}\n"
             f"💰 *Entry Fee:* {entry_fee} 🪙\n"
             f"👥 *Max Players:* {max_players}\n"
-            f"🏅 *Prize Pool:* {prize_pool}\n\n"
+            f"🏅 *Prize Pool:* {prize_pool}\n"
+            f"🔄 *Rounds:* {total_rounds}\n\n"
             f"📌 *Status:* Coming Soon\n"
             f"📝 *Description:* {description[:80] + '...' if description and len(description) > 80 else description or '—'}\n"
-            f"🆔 *ID:* `{tid}`\n\n"
+            f"🆔 *Tournament ID:* `{tid}`\n\n"
             f"*Next steps:*\n"
-            f"• Individual prizes: `/setprizes {tid} 1st:5000 Coins | 2nd:3000 Coins | 3rd:1000 Coins`\n"
-            f"• Registration open karo: `/tournamentstatus {tid} registration_open`",
+            f"• Prizes: `/setprizes {tid} 1st:5000 Coins | 2nd:3000 Coins | 3rd:1000 Coins`\n"
+            f"• Registration open: `/tournamentstatus {tid} registration_open`\n"
+            f"• Start Round 1: `/startround {tid}`\n"
+            f"• Add result: `/addresult {tid} 1 T001 1 8`",
             parse_mode="Markdown",
         )
         logger.info("Admin created tournament: %s", tid)
@@ -7114,7 +7598,42 @@ def cmd_tournament_info(message):
         except Exception:
             reg_count = 0
 
-        status_str = status_labels.get(t.get("status", ""), t.get("status", "Unknown"))
+        status_str    = status_labels.get(t.get("status", ""), t.get("status", "Unknown"))
+        total_rounds  = int(t.get("total_rounds", 1))
+        current_round = int(t.get("current_round", 0))
+        rounds_str    = f"{current_round}/{total_rounds}"
+
+        # Per-round room credentials breakdown
+        rounds_info = ""
+        try:
+            rounds_docs = list(
+                tournament_rounds_col.find(
+                    {"tournament_id": tid}, {"_id": 0}
+                ).sort("round_no", 1)
+            )
+            if rounds_docs:
+                round_status_labels = {"pending": "⏳ Pending", "live": "🔴 Live", "ended": "✅ Ended"}
+                rounds_info = "\n\n📋 *Rounds Breakdown:*\n"
+                for r in rounds_docs:
+                    rn  = r.get("round_no", "?")
+                    rs  = round_status_labels.get(r.get("status", "pending"), r.get("status", ""))
+                    rid = r.get("room_id", "—")
+                    rps = r.get("room_password", "—")
+                    rounds_info += (
+                        f"  🔸 *Round {rn}:* {rs}\n"
+                        f"     Room ID: `{rid}`  |  Pass: `{rps}`\n"
+                    )
+        except Exception:
+            pass
+
+        # Team ID counter
+        try:
+            tid_counter = config_col.find_one({"_id": "team_id_counter"}) or {}
+            last_team_id = tid_counter.get("seq", 0)
+            team_id_info = f"\n🎯 *Last Team ID:* T{last_team_id:03d}"
+        except Exception:
+            team_id_info = ""
+
         bot.reply_to(
             message,
             f"🏆 *Tournament Info*\n\n"
@@ -7126,12 +7645,17 @@ def cmd_tournament_info(message):
             f"💰 *Entry Fee:* {t.get('entry_fee', 0)} 🪙\n"
             f"👥 *Max Players:* {t.get('max_players', 'N/A')}\n"
             f"🏅 *Prize Pool:* {t.get('prize_pool', 'N/A')}\n"
-            f"📝 *Registered:* {reg_count} players\n\n"
+            f"📝 *Registered:* {reg_count} players\n"
+            f"🔁 *Rounds Progress:* {rounds_str} completed"
+            f"{team_id_info}"
+            f"{rounds_info}\n\n"
             f"*Commands for this tournament:*\n"
             f"• `/tournamentstatus {tid} <status>`\n"
             f"• `/tournamentregs {tid}`\n"
             f"• `/setwinners {tid} Nick:Reward | ...`\n"
-            f"• `/setroomid {tid} RoomID | Password`\n"
+            f"• `/setroomid {tid} RoomID | Password` — sab rounds ke liye\n"
+            f"• `/setroundroom {tid} <round_no> RoomID | Password` — specific round\n"
+            f"• `/roundinfo {tid} <round_no>` — round ki details\n"
             f"• `/canceltournament {tid}`",
             parse_mode="Markdown",
         )
@@ -7163,6 +7687,7 @@ def cmd_tournament_regs(message):
             {"_id": 0, "user_id": 1, "registration_type": 1,
              "ff_uid": 1, "ff_nickname": 1,
              "team_name": 1, "members": 1,
+             "team_id": 1,
              "registered_at": 1}
         ).sort("registered_at", 1).limit(50))
 
@@ -7192,7 +7717,7 @@ def cmd_tournament_regs(message):
                     [f"`{m.get('ff_uid','?')}` {m.get('ff_nickname','?')}" for m in members]
                 ) if members else f"`{r.get('ff_uid','?')}` {r.get('ff_nickname','?')}"
                 lines.append(
-                    f"{i}. {t_emoji} *{team_name}*\n"
+                    f"{i}. {t_emoji} `{r.get('team_id', '—')}` *{team_name}*\n"
                     f"   👑 TG: `{r.get('user_id', 'N/A')}`"
                     + (f"  |  {reg_time}" if reg_time else "") + "\n"
                     f"   {m_lines}"
@@ -7200,7 +7725,7 @@ def cmd_tournament_regs(message):
             else:
                 # Solo entry
                 lines.append(
-                    f"{i}. *{r.get('ff_nickname', 'N/A')}*\n"
+                    f"{i}. `{r.get('team_id', '—')}` *{r.get('ff_nickname', 'N/A')}*\n"
                     f"   FF UID: `{r.get('ff_uid', 'N/A')}`  |  TG: `{r.get('user_id', 'N/A')}`"
                     + (f"  |  {reg_time}" if reg_time else "")
                 )
@@ -7212,6 +7737,519 @@ def cmd_tournament_regs(message):
         bot.reply_to(message, msg, parse_mode="Markdown")
     except Exception as exc:
         logger.error("cmd_tournament_regs error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+
+# ============================================================
+# 🔄 ROUND MANAGEMENT — Admin Bot Commands
+# ============================================================
+
+@bot.message_handler(commands=["startround"])
+def cmd_start_round(message):
+    """/startround <tournament_id> — Current tournament ka next round start karo."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/startround <tournament_id>`\n\n"
+            "IDs dekhne ke liye: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
+
+        total_rounds   = int(t.get("total_rounds",  1))
+        current_round  = int(t.get("current_round", 0))
+        next_round     = current_round + 1
+
+        if next_round > total_rounds:
+            return bot.reply_to(
+                message,
+                f"❌ Sab rounds complete ho chuke hain! `{total_rounds}` rounds mein se `{total_rounds}` done.\n"
+                f"Tournament finish karo: `/finishtournament {tid}`",
+                parse_mode="Markdown",
+            )
+
+        # Check no round is already live
+        live_round = tournament_rounds_col.find_one({"tournament_id": tid, "status": "live"})
+        if live_round:
+            return bot.reply_to(
+                message,
+                f"❌ Round *{live_round['round_no']}* already live hai! Pehle `/endround {tid}` karo.",
+                parse_mode="Markdown",
+            )
+
+        now = datetime.utcnow()
+        round_doc = {
+            "tournament_id": tid,
+            "round_no":      next_round,
+            "room_id":       "",
+            "room_password": "",
+            "status":        "live",
+            "started_at":    now,
+            "ended_at":      None,
+        }
+        tournament_rounds_col.update_one(
+            {"tournament_id": tid, "round_no": next_round},
+            {"$set": round_doc},
+            upsert=True,
+        )
+        tournaments_col.update_one(
+            {"tournament_id": tid},
+            {"$set": {"current_round": next_round, "status": "match_live"}},
+        )
+
+        bot.reply_to(
+            message,
+            f"✅ *Round {next_round} Started!*\n\n"
+            f"🏆 *{t.get('title', 'Tournament')}* `[{tid}]`\n"
+            f"🔄 Round: *{next_round} / {total_rounds}*\n"
+            f"📌 Status: *Match Live*\n\n"
+            f"*Next steps:*\n"
+            f"• Set room: `/setroomid {tid} RoomID | Password`\n"
+            f"• Enter results: `/addresult {tid} {next_round} T001 1 8`\n"
+            f"• End round: `/endround {tid}`",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin started round %s for tournament %s", next_round, tid)
+    except Exception as exc:
+        logger.error("cmd_start_round error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["endround"])
+def cmd_end_round(message):
+    """/endround <tournament_id> — Current live round close karo."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/endround <tournament_id>`\n\nIDs: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
+
+        live_round = tournament_rounds_col.find_one({"tournament_id": tid, "status": "live"})
+        if not live_round:
+            return bot.reply_to(message, "❌ Koi round abhi live nahi hai.", parse_mode="Markdown")
+
+        rnd_no = int(live_round["round_no"])
+        tournament_rounds_col.update_one(
+            {"tournament_id": tid, "round_no": rnd_no},
+            {"$set": {"status": "completed", "ended_at": datetime.utcnow()}},
+        )
+
+        total_rounds  = int(t.get("total_rounds", 1))
+        cur_round     = int(t.get("current_round", 0))
+        remaining     = total_rounds - cur_round
+
+        bot.reply_to(
+            message,
+            f"✅ *Round {rnd_no} Ended!*\n\n"
+            f"🏆 *{t.get('title', 'Tournament')}* `[{tid}]`\n"
+            f"✔️ Completed: *{cur_round} / {total_rounds}* rounds\n"
+            f"⏳ Remaining: *{remaining}* round(s)\n\n"
+            + (f"*Next:* `/nextround {tid}` to start Round {cur_round + 1}\n"
+               f"or `/finishtournament {tid}` to declare final results." if remaining == 0 else
+               f"*Start next:* `/startround {tid}` — Round {cur_round + 1}\n"
+               f"or `/nextround {tid}` — End + Start next automatically"),
+            parse_mode="Markdown",
+        )
+        logger.info("Admin ended round %s for tournament %s", rnd_no, tid)
+    except Exception as exc:
+        logger.error("cmd_end_round error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["nextround"])
+def cmd_next_round(message):
+    """/nextround <tournament_id> — End current round + start next round automatically."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/nextround <tournament_id>`\n\n"
+            "Current round end hoga aur next round automatically start hoga.\n"
+            "IDs: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
+
+        total_rounds  = int(t.get("total_rounds",  1))
+        current_round = int(t.get("current_round", 0))
+        next_round    = current_round + 1
+
+        if next_round > total_rounds:
+            return bot.reply_to(
+                message,
+                f"❌ Sab `{total_rounds}` rounds complete! Tournament finish karo:\n"
+                f"`/finishtournament {tid}`",
+                parse_mode="Markdown",
+            )
+
+        # End current live round (if any)
+        live_round = tournament_rounds_col.find_one({"tournament_id": tid, "status": "live"})
+        if live_round:
+            tournament_rounds_col.update_one(
+                {"tournament_id": tid, "round_no": int(live_round["round_no"])},
+                {"$set": {"status": "completed", "ended_at": datetime.utcnow()}},
+            )
+
+        # Start next round
+        now = datetime.utcnow()
+        tournament_rounds_col.update_one(
+            {"tournament_id": tid, "round_no": next_round},
+            {"$set": {
+                "tournament_id": tid,
+                "round_no":      next_round,
+                "room_id":       "",
+                "room_password": "",
+                "status":        "live",
+                "started_at":    now,
+                "ended_at":      None,
+            }},
+            upsert=True,
+        )
+        tournaments_col.update_one(
+            {"tournament_id": tid},
+            {"$set": {"current_round": next_round, "status": "match_live"}},
+        )
+
+        bot.reply_to(
+            message,
+            f"⏩ *Round {current_round} Ended → Round {next_round} Started!*\n\n"
+            f"🏆 *{t.get('title', 'Tournament')}* `[{tid}]`\n"
+            f"🔄 Current: *Round {next_round} / {total_rounds}*\n\n"
+            f"• Set room: `/setroomid {tid} RoomID | Password`\n"
+            f"• Add results: `/addresult {tid} {next_round} T001 1 8`",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin moved to round %s for tournament %s", next_round, tid)
+    except Exception as exc:
+        logger.error("cmd_next_round error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["addresult"])
+def cmd_add_result(message):
+    """/addresult <tournament_id> <round_no> <team_id> <rank> <kills>
+    Example: /addresult t_123456 1 T001 3 7
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 6:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/addresult <tournament_id> <round_no> <team_id> <rank> <kills>`\n\n"
+            "*Example:* `/addresult t_123456 1 T001 3 7`\n"
+            "_T001 ne Round 1 mein 3rd place liya aur 7 kills mare_\n\n"
+            "Team IDs dekhne ke liye: `/tournamentregs <tid>`",
+            parse_mode="Markdown",
+        )
+    tid, round_str, team_id_raw, rank_str, kills_str = parts[1], parts[2], parts[3], parts[4], parts[5]
+    try:
+        round_no = int(round_str)
+        rank     = int(rank_str)
+        kills    = max(0, int(kills_str))
+        team_id  = team_id_raw.upper().strip()
+    except ValueError:
+        return bot.reply_to(message, "❌ round_no, rank aur kills sirf number mein dena hai.", parse_mode="Markdown")
+
+    if rank < 1:
+        return bot.reply_to(message, "❌ Rank 1 ya usse zyada hona chahiye.", parse_mode="Markdown")
+
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
+
+        # Get team info from registration
+        reg = tournament_registrations_col.find_one(
+            {"tournament_id": tid, "team_id": team_id},
+            {"team_name": 1, "ff_nickname": 1, "_id": 0},
+        )
+        if not reg:
+            return bot.reply_to(
+                message,
+                f"❌ Team `{team_id}` is tournament mein registered nahi hai.\n"
+                f"Team IDs dekhne ke liye: `/tournamentregs {tid}`",
+                parse_mode="Markdown",
+            )
+
+        team_name         = reg.get("team_name") or reg.get("ff_nickname") or team_id
+        placement_points  = get_placement_points(rank)
+        kill_points       = kills
+        total_points      = placement_points + kill_points
+
+        tournament_results_col.update_one(
+            {"tournament_id": tid, "round_no": round_no, "team_id": team_id},
+            {"$set": {
+                "tournament_id":    tid,
+                "round_no":         round_no,
+                "team_id":          team_id,
+                "team_name":        team_name,
+                "rank":             rank,
+                "kills":            kills,
+                "placement_points": placement_points,
+                "kill_points":      kill_points,
+                "total_points":     total_points,
+                "recorded_at":      datetime.utcnow(),
+            }},
+            upsert=True,
+        )
+
+        rank_emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
+        rank_emoji  = rank_emojis.get(rank, "🏅")
+        bot.reply_to(
+            message,
+            f"✅ *Result Saved!*\n\n"
+            f"🆔 *Team:* `{team_id}` — {team_name}\n"
+            f"{rank_emoji} *Placement:* #{rank} → {placement_points} pts\n"
+            f"🔫 *Kills:* {kills} → {kill_points} pts\n"
+            f"📊 *Total Round {round_no} Points:* *{total_points}*\n\n"
+            f"Next team: `/addresult {tid} {round_no} T00X <rank> <kills>`\n"
+            f"Leaderboard: `/tournamentleaderboard {tid}`",
+            parse_mode="Markdown",
+        )
+        logger.info("Result added: tournament=%s round=%s team=%s rank=%s kills=%s pts=%s", tid, round_no, team_id, rank, kills, total_points)
+    except Exception as exc:
+        logger.error("cmd_add_result error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["tournamentleaderboard"])
+def cmd_tournament_leaderboard(message):
+    """/tournamentleaderboard <tournament_id> — Full leaderboard dekho."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/tournamentleaderboard <tournament_id>`\n\nIDs: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
+
+        board        = calculate_tournament_leaderboard(tid)
+        total_rounds = int(t.get("total_rounds", 1))
+        cur_round    = int(t.get("current_round", 0))
+
+        if not board:
+            return bot.reply_to(
+                message,
+                f"📊 *{t.get('title')} — Leaderboard*\n\nAbhi koi result nahi hai.\n"
+                f"Results add karo: `/addresult {tid} <round> <team_id> <rank> <kills>`",
+                parse_mode="Markdown",
+            )
+
+        # Build header
+        rnd_headers = "  ".join([f"R{r}" for r in range(1, total_rounds + 1)])
+        lines = [
+            f"📊 *{t.get('title', 'Tournament')} — Leaderboard*",
+            f"🔄 Round: {cur_round}/{total_rounds}  |  🆔 `{tid}`\n",
+            f"`{'Pos':<4} {'ID':<5} {'Team':<14} {rnd_headers:<{total_rounds*4}} {'Kills':<6} {'Total'}`",
+            "─" * 52,
+        ]
+        rank_emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
+        for row in board[:20]:
+            pos       = row["position"]
+            emoji     = rank_emojis.get(pos, f"#{pos}")
+            tid_str   = row["team_id"]
+            name      = (row["team_name"] or "—")[:13]
+            rnd_pts   = "  ".join([str(row["rounds"].get(r, 0)) for r in range(1, total_rounds + 1)])
+            kills     = row["total_kills"]
+            total     = row["total_points"]
+            lines.append(f"{str(emoji):<4} {tid_str:<5} {name:<14} {rnd_pts:<{total_rounds*4}} {kills:<6} {total}")
+
+        msg = "\n".join(lines)
+        if len(msg) > 4000:
+            msg = msg[:3980] + "\n_...top 20 shown_"
+
+        bot.reply_to(message, f"```\n{msg}\n```", parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("cmd_tournament_leaderboard error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["roundresults"])
+def cmd_round_results(message):
+    """/roundresults <tournament_id> <round_no> — Specific round ke results dekho."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 3:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/roundresults <tournament_id> <round_no>`\n\n"
+            "*Example:* `/roundresults t_123456 2`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    try:
+        round_no = int(parts[2])
+    except ValueError:
+        return bot.reply_to(message, "❌ round_no sirf number mein dena hai.", parse_mode="Markdown")
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
+
+        results = list(
+            tournament_results_col.find(
+                {"tournament_id": tid, "round_no": round_no}, {"_id": 0}
+            ).sort("rank", 1)
+        )
+        if not results:
+            return bot.reply_to(
+                message,
+                f"📊 *Round {round_no} Results*\n\nKoi result nahi hai.\n"
+                f"Add karo: `/addresult {tid} {round_no} T001 1 8`",
+                parse_mode="Markdown",
+            )
+
+        rank_emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
+        lines       = [f"📊 *Round {round_no} Results — {t.get('title', 'Tournament')}*\n"]
+        for r in results:
+            pos   = int(r.get("rank", 0))
+            emoji = rank_emojis.get(pos, f"#{pos}")
+            lines.append(
+                f"{emoji} `{r.get('team_id','?')}` *{r.get('team_name','—')}*\n"
+                f"   📍 Rank #{pos} | 🔫 Kills: {r.get('kills',0)} | "
+                f"🏅 {r.get('placement_points',0)}+{r.get('kill_points',0)} = *{r.get('total_points',0)} pts*"
+            )
+        bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("cmd_round_results error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["finishtournament"])
+def cmd_finish_tournament(message):
+    """/finishtournament <tournament_id> — Tournament finish karo, final leaderboard se auto-winners declare."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/finishtournament <tournament_id>`\n\n"
+            "Final leaderboard calculate hoga aur top 3 winners auto-declare ho jaayenge.\n"
+            "IDs: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
+
+        # End any live round
+        live_round = tournament_rounds_col.find_one({"tournament_id": tid, "status": "live"})
+        if live_round:
+            tournament_rounds_col.update_one(
+                {"tournament_id": tid, "round_no": int(live_round["round_no"])},
+                {"$set": {"status": "completed", "ended_at": datetime.utcnow()}},
+            )
+
+        # Calculate final leaderboard
+        board = calculate_tournament_leaderboard(tid)
+        if not board:
+            return bot.reply_to(
+                message,
+                f"❌ Koi result nahi hai tournament mein! Pehle results add karo.\n"
+                f"Use: `/addresult {tid} <round> <team_id> <rank> <kills>`",
+                parse_mode="Markdown",
+            )
+
+        # Store top 3 winners
+        rank_emojis  = {1: "🥇", 2: "🥈", 3: "🥉"}
+        rank_labels  = {1: "Winner 🏆", 2: "Runner-up 🥈", 3: "Third Place 🥉"}
+        winner_docs  = []
+        winner_lines = []
+
+        for row in board[:3]:
+            pos  = row["position"]
+            doc  = {
+                "tournament_id": tid,
+                "rank":          pos,
+                "team_id":       row["team_id"],
+                "username":      row["team_name"],
+                "total_points":  row["total_points"],
+                "total_kills":   row["total_kills"],
+                "reward":        "—",
+                "published_at":  datetime.utcnow(),
+            }
+            winner_docs.append(doc)
+            winner_lines.append(
+                f"{rank_emojis.get(pos,'🏅')} *{rank_labels.get(pos, f'#{pos}')}*\n"
+                f"   `{row['team_id']}` {row['team_name']}\n"
+                f"   🎯 {row['total_points']} pts  |  🔫 {row['total_kills']} kills"
+            )
+
+        tournament_winners_col.delete_many({"tournament_id": tid})
+        if winner_docs:
+            tournament_winners_col.insert_many(winner_docs)
+
+        tournaments_col.update_one(
+            {"tournament_id": tid},
+            {"$set": {"status": "completed"}},
+        )
+
+        total_rounds = int(t.get("total_rounds", 1))
+        announce_text = (
+            f"🏆 *{t.get('title', 'Tournament')} — Final Results!*\n\n"
+            f"🔄 Rounds Played: {total_rounds}\n\n"
+            + "\n".join(winner_lines)
+            + "\n\n🎉 Congrats to all winners! Stay tuned for more!"
+        )
+
+        bot.reply_to(
+            message,
+            f"✅ *Tournament Finished!*\n\n{announce_text}\n\n"
+            f"💰 Winners ko coins dene ke liye: `/addcoins <user_id> <amount>`\n"
+            f"₹ Rupees dene ke liye: `/addrupees <user_id> <amount>`",
+            parse_mode="Markdown",
+        )
+
+        # Announce to all registered participants
+        try:
+            regs = tournament_registrations_col.find({"tournament_id": tid}, {"user_id": 1})
+            for reg in regs:
+                try:
+                    bot.send_message(reg["user_id"], announce_text, parse_mode="Markdown")
+                    time.sleep(0.05)
+                except Exception:
+                    pass
+        except Exception as ann_exc:
+            logger.warning("Tournament finish announcement failed: %s", ann_exc)
+
+        logger.info("Admin finished tournament %s with %d winners", tid, len(winner_docs))
+    except Exception as exc:
+        logger.error("cmd_finish_tournament error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
@@ -7367,6 +8405,154 @@ def cmd_set_room_id(message):
         logger.info("Admin set room credentials for tournament %s: room_id=%s", tid, room_id)
     except Exception as exc:
         logger.error("cmd_set_room_id error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["setroundroom"])
+def cmd_set_round_room(message):
+    """Admin: /setroundroom <tournament_id> <round_no> RoomID | Password
+    Specific round ke liye alag Room ID & Password set karo.
+    Example:
+      /setroundroom t_123456 2 ABC123 | pass456
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    text  = message.text or ""
+    parts = text.split(None, 3)
+    if len(parts) < 4 or "|" not in parts[3]:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:*\n"
+            "`/setroundroom <tournament_id> <round_no> RoomID | Password`\n\n"
+            "*Example:*\n"
+            "`/setroundroom t_123456 2 ABC123 | pass456`\n\n"
+            "IDs dekhne ke liye: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    try:
+        round_no = int(parts[2].strip())
+    except ValueError:
+        return bot.reply_to(
+            message, "❌ Round number valid integer hona chahiye. Example: `2`",
+            parse_mode="Markdown",
+        )
+    fields = [f.strip() for f in parts[3].split("|", 1)]
+    if len(fields) < 2 or not fields[0] or not fields[1]:
+        return bot.reply_to(message, "❌ RoomID aur Password dono chahiye.", parse_mode="Markdown")
+
+    room_id       = fields[0][:50]
+    room_password = fields[1][:50]
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(
+                message,
+                f"❌ Tournament `{tid}` nahi mila.\n`/listtournaments` se IDs dekho.",
+                parse_mode="Markdown",
+            )
+        total_rounds = int(t.get("total_rounds", 1))
+        if round_no < 1 or round_no > total_rounds:
+            return bot.reply_to(
+                message,
+                f"❌ Round number 1 se {total_rounds} ke beech hona chahiye.",
+                parse_mode="Markdown",
+            )
+        tournament_rounds_col.update_one(
+            {"tournament_id": tid, "round_no": round_no},
+            {"$set": {"room_id": room_id, "room_password": room_password}},
+            upsert=True,
+        )
+        bot.reply_to(
+            message,
+            f"✅ *Round {round_no} Room Set!*\n\n"
+            f"🏷 *Tournament:* {t.get('title', 'N/A')} `[{tid}]`\n"
+            f"🔢 *Round:* {round_no}/{total_rounds}\n"
+            f"🆔 *Room ID:* `{room_id}`\n"
+            f"🔑 *Password:* `{room_password}`\n\n"
+            f"ℹ️ Room details registered users ko tab dikhenge jab round live hoga.\n"
+            f"Round start karne ke liye: `/startround {tid}`",
+            parse_mode="Markdown",
+        )
+        logger.info(
+            "Admin set round room for tournament %s round %d: room_id=%s", tid, round_no, room_id
+        )
+    except Exception as exc:
+        logger.error("cmd_set_round_room error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["roundinfo"])
+def cmd_round_info(message):
+    """Admin: /roundinfo <tournament_id> <round_no> — Specific round ki details dekho.
+    Example:
+      /roundinfo t_123456 2
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) < 3:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/roundinfo <tournament_id> <round_no>`\n\nExample: `/roundinfo t_123456 2`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    try:
+        round_no = int(parts[2].strip())
+    except ValueError:
+        return bot.reply_to(message, "❌ Round number valid integer hona chahiye.", parse_mode="Markdown")
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(
+                message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown"
+            )
+        r = tournament_rounds_col.find_one({"tournament_id": tid, "round_no": round_no})
+        if not r:
+            return bot.reply_to(
+                message,
+                f"❌ Round {round_no} ka data nahi mila tournament `{tid}` mein.\n"
+                f"Tournament mein {t.get('total_rounds', 1)} total rounds hain.",
+                parse_mode="Markdown",
+            )
+        round_status_labels = {"pending": "⏳ Pending", "live": "🔴 Live", "ended": "✅ Ended"}
+        rs       = round_status_labels.get(r.get("status", "pending"), r.get("status", ""))
+        room_id  = r.get("room_id", "Not set")
+        room_pwd = r.get("room_password", "Not set")
+
+        # Results if available
+        results_text = ""
+        try:
+            results = list(
+                tournament_results_col.find(
+                    {"tournament_id": tid, "round_no": round_no}, {"_id": 0}
+                ).sort("rank", 1).limit(10)
+            )
+            if results:
+                results_text = "\n\n🏅 *Round Results (Top 10):*\n"
+                for res in results:
+                    results_text += (
+                        f"  #{res.get('rank','?')} "
+                        f"{res.get('team_name', res.get('username','?'))} "
+                        f"— {res.get('total_points', res.get('kills', 0))} pts\n"
+                    )
+        except Exception:
+            pass
+
+        bot.reply_to(
+            message,
+            f"📋 *Round {round_no} Info*\n\n"
+            f"🏷 *Tournament:* {t.get('title', 'N/A')} `[{tid}]`\n"
+            f"🔢 *Round:* {round_no} / {t.get('total_rounds', 1)}\n"
+            f"📌 *Status:* {rs}\n"
+            f"🆔 *Room ID:* `{room_id}`\n"
+            f"🔑 *Password:* `{room_pwd}`"
+            f"{results_text}",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logger.error("cmd_round_info error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
@@ -7526,17 +8712,23 @@ def cmd_list_tournaments(message):
                 reg_cnt = tournament_registrations_col.count_documents({"tournament_id": tid})
             except Exception:
                 reg_cnt = 0
+            total_rounds  = int(t.get("total_rounds", 1))
+            current_round = int(t.get("current_round", 0))
+            rounds_str    = f"{current_round}/{total_rounds} rounds"
             lines.append(
                 f"🏆 *{title}*\n"
                 f"   ID: `{tid}`\n"
-                f"   Status: {status}  |  👥 {reg_cnt} registered"
+                f"   Status: {status}  |  👥 {reg_cnt} registered\n"
+                f"   🔁 {rounds_str}"
             )
 
         lines.append(
             "\n*Commands:*\n"
-            "• `/tournamentinfo <id>` — Full details\n"
+            "• `/tournamentinfo <id>` — Full details + rounds\n"
             "• `/tournamentstatus <id> <status>` — Status change\n"
-            "• `/setroomid <id> RoomID | Pass` — Room set\n"
+            "• `/setroomid <id> RoomID | Pass` — Room set (all rounds)\n"
+            "• `/setroundroom <id> <round_no> RoomID | Pass` — Per-round room\n"
+            "• `/roundinfo <id> <round_no>` — Round details\n"
             "• `/setwinners <id> Nick:Reward | ...` — Winners\n"
             "• `/tournamentregs <id>` — Registered players\n"
             "• `/canceltournament <id>` — Cancel"
@@ -7754,6 +8946,278 @@ def cmd_premium_status(message):
         )
 
 
+
+
+
+# ============================================================
+# ₹ RUPEE WALLET — Admin Bot Commands
+# ============================================================
+
+@bot.message_handler(commands=["addrupees"])
+def cmd_add_rupees(message):
+    """/addrupees <user_id> <amount>"""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 3:
+        return bot.reply_to(message, "Usage: /addrupees <user_id> <amount>\nExample: /addrupees 123456 50.00")
+    try:
+        target_id = int(parts[1])
+        amount    = round(float(parts[2]), 2)
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        return bot.reply_to(message, "❌ Invalid user ID or amount.")
+    users_col.update_one(
+        {"user_id": target_id},
+        {"$inc": {"rupees": amount}},
+        upsert=False,
+    )
+    _invalidate_user_cache(target_id)
+    try:
+        bot.send_message(target_id, f"💰 *₹{amount:.2f} credited* to your rupee wallet by admin!", parse_mode="Markdown")
+    except Exception:
+        pass
+    bot.reply_to(message, f"✅ ₹{amount:.2f} rupees added to user {target_id}.")
+    logger.info("Admin added ₹%s rupees to user %s", amount, target_id)
+
+
+@bot.message_handler(commands=["deductrupees"])
+def cmd_deduct_rupees(message):
+    """/deductrupees <user_id> <amount>"""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 3:
+        return bot.reply_to(message, "Usage: /deductrupees <user_id> <amount>\nExample: /deductrupees 123456 10.00")
+    try:
+        target_id = int(parts[1])
+        amount    = round(float(parts[2]), 2)
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        return bot.reply_to(message, "❌ Invalid user ID or amount.")
+    result = users_col.find_one_and_update(
+        {"user_id": target_id},
+        {"$inc": {"rupees": -amount}},
+        return_document=True,
+    )
+    if not result:
+        return bot.reply_to(message, f"❌ User {target_id} not found.")
+    _invalidate_user_cache(target_id)
+    new_bal = round(result.get("rupees", 0) - amount, 2)
+    bot.reply_to(message, f"✅ ₹{amount:.2f} deducted from user {target_id}. New balance: ₹{max(0, new_bal):.2f}")
+    logger.info("Admin deducted ₹%s rupees from user %s", amount, target_id)
+
+
+@bot.message_handler(commands=["rupeebalance"])
+def cmd_rupee_balance(message):
+    """/rupeebalance <user_id>"""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /rupeebalance <user_id>")
+    try:
+        target_id = int(parts[1])
+    except ValueError:
+        return bot.reply_to(message, "❌ Invalid user ID.")
+    user = users_col.find_one({"user_id": target_id}, {"rupees": 1, "coins": 1, "username": 1})
+    if not user:
+        return bot.reply_to(message, f"❌ User {target_id} not found.")
+    bot.reply_to(
+        message,
+        f"💰 *User {target_id}* (@{user.get('username') or 'N/A'})\n"
+        f"🪙 Coins: `{user.get('coins', 0)}`\n"
+        f"₹ Rupees: `₹{round(user.get('rupees', 0.0), 2):.2f}`",
+        parse_mode="Markdown",
+    )
+
+
+@bot.message_handler(commands=["approverupee"])
+def cmd_approve_rupee(message):
+    """/approverupee <user_id> — Approve pending rupee withdrawal."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /approverupee <user_id>")
+    try:
+        target_id = int(parts[1])
+    except ValueError:
+        return bot.reply_to(message, "❌ Invalid user ID.")
+    wd = rupee_withdrawals_col.find_one({"user_id": target_id, "status": "Pending ⏳"})
+    if not wd:
+        return bot.reply_to(message, f"❌ No pending rupee withdrawal for user {target_id}.")
+    rupee_withdrawals_col.update_one(
+        {"_id": wd["_id"]},
+        {"$set": {"status": "Approved ✅", "approved_at": datetime.utcnow().isoformat()}},
+    )
+    try:
+        bot.send_message(
+            target_id,
+            f"✅ *Rupee Withdrawal Approved!*\n\n"
+            f"Amount: *₹{wd.get('amount', 0):.2f}*\n"
+            f"Method: {wd.get('method', 'UPI').upper()}\n\n"
+            f"Payment will be processed soon. 🎉",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        pass
+    bot.reply_to(message, f"✅ Rupee withdrawal of ₹{wd.get('amount', 0):.2f} approved for user {target_id}.")
+    logger.info("Admin approved rupee withdrawal for user %s: ₹%s", target_id, wd.get("amount"))
+
+
+@bot.message_handler(commands=["rejectrupee"])
+def cmd_reject_rupee(message):
+    """/rejectrupee <user_id> [reason]"""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split(None, 2)
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /rejectrupee <user_id> [reason]")
+    try:
+        target_id = int(parts[1])
+    except ValueError:
+        return bot.reply_to(message, "❌ Invalid user ID.")
+    reason = parts[2] if len(parts) > 2 else "Admin rejected the request."
+    wd = rupee_withdrawals_col.find_one({"user_id": target_id, "status": "Pending ⏳"})
+    if not wd:
+        return bot.reply_to(message, f"❌ No pending rupee withdrawal for user {target_id}.")
+    # Refund the rupees
+    users_col.update_one({"user_id": target_id}, {"$inc": {"rupees": wd.get("amount", 0)}})
+    _invalidate_user_cache(target_id)
+    rupee_withdrawals_col.update_one(
+        {"_id": wd["_id"]},
+        {"$set": {"status": "Rejected ❌", "rejected_at": datetime.utcnow().isoformat(), "reject_reason": reason}},
+    )
+    try:
+        bot.send_message(
+            target_id,
+            f"❌ *Rupee Withdrawal Rejected*\n\n"
+            f"Amount: ₹{wd.get('amount', 0):.2f} has been *refunded* to your wallet.\n"
+            f"Reason: {reason}",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        pass
+    bot.reply_to(message, f"✅ Rupee withdrawal rejected & ₹{wd.get('amount', 0):.2f} refunded to user {target_id}.")
+    logger.info("Admin rejected rupee withdrawal for user %s: ₹%s", target_id, wd.get("amount"))
+
+
+# ============================================================
+# 💎 VIP TASK MANAGEMENT — Admin Bot Commands
+# ============================================================
+
+@bot.message_handler(commands=["addviptask"])
+def cmd_add_vip_task(message):
+    """
+    /addviptask <task_id> <reward_coins> <task title>
+    Example: /addviptask join_channel 50 Join our official channel
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split(None, 3)
+    if len(parts) < 4:
+        bot.reply_to(
+            message,
+            "❌ *Usage:*\n`/addviptask <task_id> <coins> <title>`\n\n"
+            "*Example:*\n`/addviptask join_channel 50 Join our official channel`",
+            parse_mode="Markdown",
+        )
+        return
+
+    task_id = sanitize_text(parts[1]).strip().lower()
+    try:
+        reward = int(parts[2])
+        if reward <= 0:
+            raise ValueError
+    except ValueError:
+        bot.reply_to(message, "❌ Reward coins must be a positive number.")
+        return
+    title = sanitize_text(parts[3], max_length=200).strip()
+
+    if not task_id or not title:
+        bot.reply_to(message, "❌ task_id aur title dono required hain.")
+        return
+
+    try:
+        existing = vip_tasks_col.find_one({"task_id": task_id})
+        if existing:
+            bot.reply_to(message, f"❌ VIP task `{task_id}` already exists!", parse_mode="Markdown")
+            return
+        vip_tasks_col.insert_one({
+            "task_id":    task_id,
+            "title":      title,
+            "reward":     reward,
+            "active":     True,
+            "created_at": datetime.utcnow().isoformat(),
+        })
+        bot.reply_to(
+            message,
+            f"✅ *VIP Task Added!*
+
+"
+            f"🆔 ID: `{task_id}`
+"
+            f"📌 Title: {title}
+"
+            f"🪙 Reward: {reward} coins
+
+"
+            f"_Ab premium users ise claim kar sakte hain._",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin added VIP task: %s (%s coins)", task_id, reward)
+    except Exception as exc:
+        logger.error("cmd_add_vip_task error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["delviptask"])
+def cmd_del_vip_task(message):
+    """/delviptask <task_id>"""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        bot.reply_to(message, "❌ Usage: `/delviptask <task_id>`", parse_mode="Markdown")
+        return
+    task_id = sanitize_text(parts[1]).strip().lower()
+    try:
+        result = vip_tasks_col.update_one(
+            {"task_id": task_id},
+            {"$set": {"active": False, "deactivated_at": datetime.utcnow().isoformat()}},
+        )
+        if result.matched_count:
+            bot.reply_to(message, f"✅ VIP task `{task_id}` deactivated.", parse_mode="Markdown")
+        else:
+            bot.reply_to(message, f"❌ VIP task `{task_id}` not found.", parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("cmd_del_vip_task error: %s", exc)
+        bot.reply_to(message, "❌ Server error.")
+
+
+@bot.message_handler(commands=["listviptasks"])
+def cmd_list_vip_tasks(message):
+    """/listviptasks — All active VIP tasks."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        tasks = list(vip_tasks_col.find({"active": True}, {"_id": 0}))
+        if not tasks:
+            bot.reply_to(message, "📋 No active VIP tasks. Use /addviptask to create one.")
+            return
+        lines = ["💎 *Active VIP Tasks:*
+"]
+        for t in tasks:
+            lines.append(f"• `{t['task_id']}` — {t['title']} (+{t.get('reward', 0)} 🪙)")
+        bot.reply_to(message, "
+".join(lines), parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("cmd_list_vip_tasks error: %s", exc)
+        bot.reply_to(message, "❌ Server error.")
+
 # ============================================================
 # SCREENSHOT / PHOTO HANDLER — Payment proof forwarding
 # ============================================================
@@ -7841,10 +9305,16 @@ def run_bot() -> None:
                     types.BotCommand("monetag",          "💵 Monetag earnings"),
                     types.BotCommand("setpremium",       "👑 Activate premium for user"),
                     types.BotCommand("removepremium",    "❌ Remove premium from user"),
-                    types.BotCommand("listtournaments",  "📋 List all tournaments"),
-                    types.BotCommand("addtournament",    "➕ Add a tournament"),
-                    types.BotCommand("deltournament",    "🗑 Delete a tournament"),
-                    types.BotCommand("setprizes",        "🏆 Set tournament prizes"),
+                    types.BotCommand("listtournaments",        "📋 List all tournaments"),
+                    types.BotCommand("createtournament",       "➕ Create tournament"),
+                    types.BotCommand("startround",             "▶️ Start next round"),
+                    types.BotCommand("endround",               "⏹ End current round"),
+                    types.BotCommand("nextround",              "⏩ End + Start next round"),
+                    types.BotCommand("addresult",              "📝 Add team round result"),
+                    types.BotCommand("tournamentleaderboard",  "📊 View leaderboard"),
+                    types.BotCommand("roundresults",           "📋 View round results"),
+                    types.BotCommand("finishtournament",       "🏁 Finish & declare winners"),
+                    types.BotCommand("setprizes",              "🏆 Set tournament prizes"),
                     types.BotCommand("broadcast",        "📢 Broadcast message to all users"),
                     types.BotCommand("addtask",          "✅ Add a task"),
                     types.BotCommand("deltask",          "🗑 Delete a task"),
