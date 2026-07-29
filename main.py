@@ -9226,16 +9226,10 @@ def cmd_add_vip_task(message):
         })
         bot.reply_to(
             message,
-            f"✅ *VIP Task Added!*
-
-"
-            f"🆔 ID: `{task_id}`
-"
-            f"📌 Title: {title}
-"
-            f"🪙 Reward: {reward} coins
-
-"
+            f"✅ *VIP Task Added!*\n\n"
+            f"🆔 ID: `{task_id}`\n"
+            f"📌 Title: {title}\n"
+            f"🪙 Reward: {reward} coins\n\n"
             f"_Ab premium users ise claim kar sakte hain._",
             parse_mode="Markdown",
         )
