@@ -351,6 +351,28 @@
         /* Content padding area */
         .t-body { padding: 0 16px 20px; }
 
+        /* Rounds progress row */
+        .t-rounds-row {
+            display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;
+        }
+        .t-round-tile {
+            flex: 1; min-width: 54px; text-align: center;
+            padding: 6px 4px; border-radius: 10px;
+            transition: transform 0.2s;
+        }
+        .t-round-tile.live   { background: rgba(239,68,68,0.12);  border: 1px solid rgba(239,68,68,0.40); }
+        .t-round-tile.ended  { background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.25); }
+        .t-round-tile.pending{ background: rgba(255,255,255,0.04);border: 1px solid rgba(255,255,255,0.08); }
+        .t-round-tile p { margin: 0; }
+
+        /* Team ID badge */
+        .t-team-id-badge {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-top: 8px; padding: 10px 14px;
+            background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.25);
+            border-radius: 12px;
+        }
+
         /* ── Task section labels ── */
         .task-section-label {
             padding: 8px 4px 4px 4px;
@@ -410,7 +432,12 @@
             <div id="premium-status-badge" style="display:none; margin-bottom:8px; text-align:center;"></div>
             <p style="font-size:12px; color:var(--text-muted); margin-bottom:6px; letter-spacing:0.3px;">Your Balance</p>
             <h1 id="balance" style="font-size:42px; color:var(--gold); font-weight:800; letter-spacing:-1px;">0 🪙</h1>
-            <p style="font-size:11px; color:var(--text-dim); margin-top:4px;">Keep earning to unlock withdrawal! 🚀</p>
+            <div style="display:inline-flex;align-items:center;gap:6px;margin-top:6px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.25);border-radius:20px;padding:4px 14px;">
+                <span style="font-size:13px;color:#4ade80;">₹</span>
+                <span id="rupee-balance" style="font-size:15px;font-weight:800;color:#4ade80;">0.00</span>
+                <span style="font-size:11px;color:#64748b;">rupees</span>
+            </div>
+            <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Keep earning to unlock withdrawal! 🚀</p>
         </div>
 
         <!-- Premium Buy Card -->
@@ -599,9 +626,63 @@
             </div>
         </div>
 
+
+        <!-- ₹ Rupees Withdrawal Card -->
+        <div class="card" id="rupee-withdraw-card" style="position:relative;overflow:hidden;background:linear-gradient(135deg,#0a1f0a,#0d2b0d);border:1px solid rgba(34,197,94,0.3);">
+            <h4 style="margin-bottom:6px;color:#4ade80;">₹ Rupee Wallet 💰</h4>
+            <p style="font-size:12px;color:#64748b;margin-bottom:14px;">Your earned rupees — withdraw directly to UPI or Google Pay</p>
+
+            <div class="withdraw-inner" style="margin-bottom:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                    <span style="font-size:13px;color:var(--text-muted);">💰 Rupee Balance</span>
+                    <span id="rupee-wd-balance-text" style="font-size:15px;font-weight:800;color:#4ade80;">₹0.00</span>
+                </div>
+                <p style="font-size:11px;color:#475569;margin:0;">Min withdrawal: ₹10 &nbsp;|&nbsp; Max: ₹10,000</p>
+            </div>
+
+            <input type="text" id="rupee-withdraw-amount" placeholder="Enter amount (e.g. 50.00)"
+                style="margin-bottom:10px;" oninput="this.value=this.value.replace(/[^0-9.]/g,'')">
+
+            <div style="display:flex;gap:8px;margin-bottom:14px;">
+                <button id="rupee-method-btn-upi" onclick="selectRupeeMethod('upi')"
+                    style="flex:1;padding:9px 4px;border-radius:12px;border:1px solid rgba(34,197,94,0.45);
+                           background:rgba(34,197,94,0.12);color:#4ade80;font-size:12px;font-weight:700;cursor:pointer;">
+                    🏦 UPI
+                </button>
+                <button id="rupee-method-btn-google" onclick="selectRupeeMethod('google')"
+                    style="flex:1;padding:9px 4px;border-radius:12px;border:1px solid rgba(255,255,255,0.10);
+                           background:rgba(255,255,255,0.05);color:var(--text-muted);font-size:12px;font-weight:700;cursor:pointer;">
+                    🎁 Google Play
+                </button>
+            </div>
+
+            <div id="rupee-input-upi">
+                <input type="text" id="rupee-upi-id" placeholder="Enter UPI ID (name@upi)" style="margin-bottom:4px;">
+                <p style="font-size:11px;color:var(--text-dim);margin-bottom:12px;">Example: yourname@paytm</p>
+            </div>
+            <div id="rupee-input-google" style="display:none;">
+                <div class="withdraw-inner" style="text-align:center;margin-bottom:12px;">
+                    <div style="font-size:22px;margin-bottom:6px;">🎁</div>
+                    <p style="font-size:13px;color:var(--text-primary);margin:0 0 4px 0;font-weight:600;">Google Play Gift Card</p>
+                    <p style="font-size:11px;color:var(--text-muted);margin:0;">Code sent via Telegram after approval.</p>
+                </div>
+            </div>
+
+            <button class="btn" style="background:linear-gradient(135deg,#16a34a,#15803d);font-weight:700;" onclick="requestRupeeWithdraw()">Withdraw Rupees</button>
+        </div>
+
+        <!-- ₹ Rupee Withdrawal History -->
+        <div class="card" style="margin-top:10px;background:rgba(34,197,94,0.04);border:1px solid rgba(34,197,94,0.12);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <h4 style="color:#4ade80;margin:0;">₹ Rupee History</h4>
+                <button onclick="loadRupeeHistory()" style="background:none;border:1px solid rgba(34,197,94,0.3);color:#4ade80;padding:4px 10px;border-radius:8px;font-size:11px;cursor:pointer;">↻ Refresh</button>
+            </div>
+            <div id="rupee-history-list"><p style="color:#64748b;font-size:13px;text-align:center;">Tap Refresh to load history</p></div>
+        </div>
+
         <div class="section-gap"></div>
 
-        <!-- Withdraw -->
+        <!-- Withdraw (Coins) -->
         <div class="card c-gold" id="withdraw-card" style="position:relative; overflow:hidden;">
             <h4 style="margin-bottom:14px; color:var(--text-primary);">Withdraw 💸</h4>
 
@@ -636,12 +717,7 @@
                            cursor:pointer; transition:all 0.2s;">
                     🏦 UPI
                 </button>
-                <button id="method-btn-usdt" onclick="selectWithdrawMethod('usdt')"
-                    style="flex:1; padding:9px 4px; border-radius:12px; border:1px solid rgba(255,255,255,0.10);
-                           background:rgba(255,255,255,0.05); color:var(--text-muted); font-size:12px; font-weight:700;
-                           cursor:pointer; transition:all 0.2s;">
-                    💎 USDT
-                </button>
+
                 <button id="method-btn-google" onclick="selectWithdrawMethod('google')"
                     style="flex:1; padding:9px 4px; border-radius:12px; border:1px solid rgba(255,255,255,0.10);
                            background:rgba(255,255,255,0.05); color:var(--text-muted); font-size:12px; font-weight:700;
@@ -655,13 +731,6 @@
                 <p style="font-size:11px; color:var(--text-dim); margin-bottom:12px;">Example: yourname@paytm, name@okicici</p>
             </div>
 
-            <div id="method-input-usdt" style="display:none;">
-                <input type="text" id="usdt-address" placeholder="Enter USDT TRC20 wallet address"
-                    style="margin-bottom:4px;" maxlength="34">
-                <p style="font-size:11px; color:var(--text-dim); margin-bottom:12px;">
-                    ⚠️ TRC20 network only. Address starts with T, 34 characters.
-                </p>
-            </div>
 
             <div id="method-input-google" style="display:none;">
                 <div class="withdraw-inner" style="text-align:center; margin-bottom:12px;">
