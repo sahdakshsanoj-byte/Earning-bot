@@ -296,6 +296,11 @@ def calculate_tournament_leaderboard(tid: str) -> list:
     Ek tournament ka complete leaderboard calculate karo.
     Returns: list of dicts sorted by (total_points DESC, total_kills DESC)
     Each dict: {team_id, team_name, total_kills, total_points, rounds: {1: pts, 2: pts, ...}}
+
+    BUG FIX T7: Double-entry protection — agar same team ka same round result
+    dobara add ho jaye (admin galti se), totals galat nahi hone chahiye.
+    Ab round-level deduplication hoti hai: agar kisi round ki entry pehle se
+    hai toh totals ko adjust karke overwrite karo, blindly add nahi.
     """
     try:
         # All results for this tournament
@@ -309,7 +314,7 @@ def calculate_tournament_leaderboard(tid: str) -> list:
         t = tournaments_col.find_one({"tournament_id": tid}, {"total_rounds": 1})
         total_rounds = int(t.get("total_rounds", 1)) if t else 1
 
-        # Aggregate by team_id
+        # Aggregate by team_id — with per-round deduplication
         teams: dict = {}
         for r in results:
             team_id   = r.get("team_id", "")
@@ -321,18 +326,32 @@ def calculate_tournament_leaderboard(tid: str) -> list:
 
             if team_id not in teams:
                 teams[team_id] = {
-                    "team_id":     team_id,
-                    "team_name":   team_name,
-                    "total_kills": 0,
+                    "team_id":      team_id,
+                    "team_name":    team_name,
+                    "total_kills":  0,
                     "total_points": 0,
-                    "best_rank":   rank,
-                    "rounds":      {},
+                    "best_rank":    rank,
+                    "rounds":       {},       # round_no → {"pts": x, "kills": y}
                 }
+
+            existing_round = teams[team_id]["rounds"].get(rnd_no)
+            if existing_round:
+                # BUG FIX T7: Round already exists — subtract old values before adding new
+                # (handles admin accidentally re-submitting the same round's result)
+                teams[team_id]["total_kills"]  -= existing_round["kills"]
+                teams[team_id]["total_points"] -= existing_round["pts"]
+
+            # Now add the (new or updated) round entry
             teams[team_id]["total_kills"]  += kills
             teams[team_id]["total_points"] += total_pts
-            teams[team_id]["rounds"][rnd_no] = total_pts
+            teams[team_id]["rounds"][rnd_no] = {"pts": total_pts, "kills": kills}
+
             if rank < teams[team_id]["best_rank"]:
                 teams[team_id]["best_rank"] = rank
+
+        # Convert rounds dict to {round_no: pts} for API response compatibility
+        for td in teams.values():
+            td["rounds"] = {rn: v["pts"] for rn, v in td["rounds"].items()}
 
         board = sorted(
             teams.values(),
@@ -2397,8 +2416,11 @@ def claim_channel_api():
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Invalid user ID."}), 400
 
-    channel_id  = sanitize_text(data.get("channel_id", "")).lower()
-    channel_url = sanitize_text(data.get("channel_url", ""), max_length=500)
+    channel_id   = sanitize_text(data.get("channel_id", "")).lower()
+    channel_url  = sanitize_text(data.get("channel_url", ""), max_length=500)
+    # BUG FIX #4: claimed_link read karo — sponsor slots ke liye link-change
+    # detection enable karta hai (slot1/slot2 ke liye object store hoga, baki ke liye True)
+    claimed_link = sanitize_text(data.get("claimed_link", ""), max_length=500)
 
     if channel_id not in CHANNEL_IDS:
         return jsonify({"status": "error", "message": "Invalid channel."}), 400
@@ -2418,8 +2440,25 @@ def claim_channel_api():
             return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
 
         channel_claims = user.get("channel_claims", {})
-        if channel_claims.get(channel_id):
-            return jsonify({"status": "error", "message": "Reward already claimed for this channel! \u2705"}), 400
+        existing_claim = channel_claims.get(channel_id)
+
+        # BUG FIX #4: Sponsor slots (slot1/slot2) ke liye link-change detection:
+        # Agar admin ne sponsor link change ki ho toh user dobara claim kar sake.
+        # Official channels (official/channel2/channel3) ke liye simple True check.
+        if existing_claim:
+            if channel_id in ("slot1", "slot2"):
+                # Pehle claim ki link nikalo
+                if isinstance(existing_claim, dict):
+                    claimed_link_in_db = existing_claim.get("claimed_link", "")
+                else:
+                    # Purana boolean True format — treat as claimed with any link
+                    claimed_link_in_db = ""
+                # Agar link same hai (ya naya link nahi aaya) toh already claimed
+                if not claimed_link or not claimed_link_in_db or claimed_link_in_db == claimed_link:
+                    return jsonify({"status": "error", "message": "Reward already claimed for this channel! \u2705"}), 400
+                # Link change hui hai — allow re-claim (fall through)
+            else:
+                return jsonify({"status": "error", "message": "Reward already claimed for this channel! \u2705"}), 400
 
         if channel_url:
             ch_username = extract_channel_username(channel_url)
@@ -2432,11 +2471,19 @@ def claim_channel_api():
                     }), 400
 
         reward = CHANNEL_REWARDS.get(channel_id, CHANNEL_REWARD_PER_CHANNEL)
+
+        # BUG FIX #4: Sponsor slots ke liye claimed_link object save karo,
+        # baki channels ke liye simple True store karo.
+        if channel_id in ("slot1", "slot2") and claimed_link:
+            claim_value = {"claimed_link": claimed_link}
+        else:
+            claim_value = True
+
         users_col.update_one(
             {"user_id": user_id},
             {
                 "$inc": {"coins": reward},
-                "$set": {f"channel_claims.{channel_id}": True},
+                "$set": {f"channel_claims.{channel_id}": claim_value},
             },
         )
         _invalidate_user_cache(user_id)
@@ -2679,7 +2726,10 @@ def withdraw_rupees_api():
             f"Method: {method_label}\n"
             f"Address: `{addr_display}`\n"
             f"Amount: *₹{amount:.2f}*\n"
-            f"Remaining Rupees: ₹{round(result.get('rupees', 0) - amount, 2)}\n"
+            f"Remaining Rupees: ₹{round(result.get('rupees', 0), 2)}\n"
+            # BUG FIX #3: result return_document=True se post-update doc aata hai
+            # matlab rupees already deduct ho chuki hain — dobara amount ghataane
+            # ki zaroorat nahi thi, admin ko galat (bahut kam) balance dikh raha tha.
             f"Date: {withdrawal['date']}\n\n"
             f"Approve: `/approverupee {user_id}`\n"
             f"Reject:  `/rejectrupee {user_id}`",
@@ -5305,26 +5355,36 @@ def admin_create_tournament_api():
                     "message": f"Maximum {MAX_TOURNAMENTS} active tournaments allowed. Pehle kisi existing tournament ko delete/deactivate karo.",
                 }), 400
 
+        # BUG FIX T5: total_rounds aur current_round REST API mein missing the.
+        # Ab ye fields bhi $set mein hain — multi-round tournaments REST API se bhi ban sakenge.
+        new_total_rounds = max(1, min(10, int(data.get("total_rounds", existing.get("total_rounds", 1) if existing else 1))))
+
+        set_doc = {
+            "tournament_id":  tid,
+            "title":          sanitize_text(data.get("title", "Free Fire Tournament"), max_length=100),
+            "mode":           sanitize_text(data.get("mode", "Squad"), max_length=30),
+            "map":            sanitize_text(data.get("map", "Bermuda"), max_length=30),
+            "date":           sanitize_text(data.get("date", ""), max_length=30),
+            "time":           sanitize_text(data.get("time", ""), max_length=30),
+            "entry_fee":      int(data.get("entry_fee", 0)),
+            "max_players":    int(data.get("max_players", 50)),
+            "prize_pool":     sanitize_text(data.get("prize_pool", ""), max_length=200),
+            "description":    sanitize_text(data.get("description", ""), max_length=600),
+            "prizes":         data.get("prizes", []),
+            "total_rounds":   new_total_rounds,
+            "status":         data.get("status", "coming_soon") if existing else "coming_soon",
+            "active":         True,
+            "created_at":     existing.get("created_at", datetime.utcnow()) if existing else datetime.utcnow(),
+            "updated_at":     datetime.utcnow(),
+            "created_by":     ADMIN_ID,
+        }
         tournaments_col.update_one(
             {"tournament_id": tid},
-            {"$set": {
-                "tournament_id":  tid,
-                "title":          sanitize_text(data.get("title", "Free Fire Tournament"), max_length=100),
-                "mode":           sanitize_text(data.get("mode", "Squad"), max_length=30),
-                "map":            sanitize_text(data.get("map", "Bermuda"), max_length=30),
-                "date":           sanitize_text(data.get("date", ""), max_length=30),
-                "time":           sanitize_text(data.get("time", ""), max_length=30),
-                "entry_fee":      int(data.get("entry_fee", 0)),
-                "max_players":    int(data.get("max_players", 50)),
-                "prize_pool":     sanitize_text(data.get("prize_pool", ""), max_length=200),
-                "description":    sanitize_text(data.get("description", ""), max_length=600),
-                "prizes":         data.get("prizes", []),
-                "status":         data.get("status", "coming_soon") if existing else "coming_soon",
-                "active":         True,
-                "created_at":     existing.get("created_at", datetime.utcnow()) if existing else datetime.utcnow(),
-                "updated_at":     datetime.utcnow(),
-                "created_by":     ADMIN_ID,
-            }},
+            {
+                "$set":      set_doc,
+                # current_round aur team_id_counter sirf naye tournament mein initialize karo
+                "$setOnInsert": {"current_round": 0, "team_id_counter": 0},
+            },
             upsert=True,
         )
         action = "updated" if existing else "created"
@@ -7612,13 +7672,20 @@ def cmd_tournament_info(message):
                 ).sort("round_no", 1)
             )
             if rounds_docs:
-                round_status_labels = {"pending": "⏳ Pending", "live": "🔴 Live", "ended": "✅ Ended"}
+                # BUG FIX T2: Backend "completed" save karta hai, "ended" nahi.
+                # Isliye "completed" bhi map mein add kiya.
+                round_status_labels = {
+                    "pending":   "⏳ Pending",
+                    "live":      "🔴 Live",
+                    "completed": "✅ Completed",
+                    "ended":     "✅ Ended",     # legacy support
+                }
                 rounds_info = "\n\n📋 *Rounds Breakdown:*\n"
                 for r in rounds_docs:
                     rn  = r.get("round_no", "?")
                     rs  = round_status_labels.get(r.get("status", "pending"), r.get("status", ""))
-                    rid = r.get("room_id", "—")
-                    rps = r.get("room_password", "—")
+                    rid = r.get("room_id") or "—"
+                    rps = r.get("room_password") or "—"
                     rounds_info += (
                         f"  🔸 *Round {rn}:* {rs}\n"
                         f"     Room ID: `{rid}`  |  Pass: `{rps}`\n"
@@ -7626,11 +7693,11 @@ def cmd_tournament_info(message):
         except Exception:
             pass
 
-        # Team ID counter
+        # BUG FIX T1: team_id_counter config_col mein nahi, tournaments_col ke
+        # tournament document mein hota hai. Wahan se padhna chahiye.
         try:
-            tid_counter = config_col.find_one({"_id": "team_id_counter"}) or {}
-            last_team_id = tid_counter.get("seq", 0)
-            team_id_info = f"\n🎯 *Last Team ID:* T{last_team_id:03d}"
+            last_ctr = int(t.get("team_id_counter", 0))
+            team_id_info = f"\n🎯 *Last Team ID:* `T{last_ctr:03d}` ({last_ctr} teams registered)" if last_ctr > 0 else ""
         except Exception:
             team_id_info = ""
 
@@ -7653,8 +7720,8 @@ def cmd_tournament_info(message):
             f"• `/tournamentstatus {tid} <status>`\n"
             f"• `/tournamentregs {tid}`\n"
             f"• `/setwinners {tid} Nick:Reward | ...`\n"
-            f"• `/setroomid {tid} RoomID | Password` — sab rounds ke liye\n"
-            f"• `/setroundroom {tid} <round_no> RoomID | Password` — specific round\n"
+            f"• `/setroomid {tid} RoomID | Password` — global room (sab rounds ke liye fallback)\n"
+            f"• `/setroundroom {tid} <round_no> RoomID | Password` — specific round ka room 🔑\n"
             f"• `/roundinfo {tid} <round_no>` — round ki details\n"
             f"• `/canceltournament {tid}`",
             parse_mode="Markdown",
@@ -7812,7 +7879,8 @@ def cmd_start_round(message):
             f"🔄 Round: *{next_round} / {total_rounds}*\n"
             f"📌 Status: *Match Live*\n\n"
             f"*Next steps:*\n"
-            f"• Set room: `/setroomid {tid} RoomID | Password`\n"
+            # BUG FIX T3: Typo fix — `/setroomid` exist nahi karta, sahi command `/setroundroom` hai.
+            f"• Set round room: `/setroundroom {tid} {next_round} RoomID | Password`\n"
             f"• Enter results: `/addresult {tid} {next_round} T001 1 8`\n"
             f"• End round: `/endround {tid}`",
             parse_mode="Markdown",
@@ -7861,8 +7929,11 @@ def cmd_end_round(message):
             f"🏆 *{t.get('title', 'Tournament')}* `[{tid}]`\n"
             f"✔️ Completed: *{cur_round} / {total_rounds}* rounds\n"
             f"⏳ Remaining: *{remaining}* round(s)\n\n"
-            + (f"*Next:* `/nextround {tid}` to start Round {cur_round + 1}\n"
-               f"or `/finishtournament {tid}` to declare final results." if remaining == 0 else
+            # BUG FIX (endround): Ternary inverted thi — remaining==0 matlab sab done,
+            # toh sirf finishtournament dikhana chahiye. Pehle galti se "start next round"
+            # suggest kar raha tha jab koi round bacha hi nahi tha.
+            + (f"🏁 *All {total_rounds} rounds complete!*\n"
+               f"Ab tournament finish karo: `/finishtournament {tid}`" if remaining == 0 else
                f"*Start next:* `/startround {tid}` — Round {cur_round + 1}\n"
                f"or `/nextround {tid}` — End + Start next automatically"),
             parse_mode="Markdown",
@@ -7938,7 +8009,7 @@ def cmd_next_round(message):
             f"⏩ *Round {current_round} Ended → Round {next_round} Started!*\n\n"
             f"🏆 *{t.get('title', 'Tournament')}* `[{tid}]`\n"
             f"🔄 Current: *Round {next_round} / {total_rounds}*\n\n"
-            f"• Set room: `/setroomid {tid} RoomID | Password`\n"
+            f"• Set round room: `/setroundroom {tid} {next_round} RoomID | Password`\n"
             f"• Add results: `/addresult {tid} {next_round} T001 1 8`",
             parse_mode="Markdown",
         )
@@ -9412,14 +9483,22 @@ def uptime_ping() -> None:
 # ENTRY POINT
 # ============================================================
 
-if __name__ == "__main__":
+# BUG FIX #1: Background threads ko Flask app load hote hi start karo.
+# Pehle sirf `if __name__ == "__main__"` mein tha — Gunicorn se run karne
+# par __name__ = "main" hota hai, isliye threads kabhi start nahi hote the.
+# Ab ye function Gunicorn aur direct python dono mein kaam karega.
+def _start_background_threads() -> None:
     Thread(target=run_bot,                    daemon=True).start()
     Thread(target=uptime_ping,                daemon=True).start()
     Thread(target=refresh_leaderboard_loop,   daemon=True).start()
     Thread(target=_cleanup_rate_cache,        daemon=True).start()
     Thread(target=auto_lottery_draw_loop,     daemon=True).start()
     Thread(target=_cleanup_security_caches,   daemon=True).start()
+    logger.info("Background threads started.")
 
+_start_background_threads()
+
+if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     logger.info("Starting Flask on port %s...", port)
     app.run(host="0.0.0.0", port=port)
