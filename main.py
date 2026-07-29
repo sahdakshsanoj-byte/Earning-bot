@@ -9273,12 +9273,10 @@ def cmd_list_vip_tasks(message):
         if not tasks:
             bot.reply_to(message, "📋 No active VIP tasks. Use /addviptask to create one.")
             return
-        lines = ["💎 *Active VIP Tasks:*
-"]
+        lines = ["💎 *Active VIP Tasks:*\n"]
         for t in tasks:
             lines.append(f"• `{t['task_id']}` — {t['title']} (+{t.get('reward', 0)} 🪙)")
-        bot.reply_to(message, "
-".join(lines), parse_mode="Markdown")
+        bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
     except Exception as exc:
         logger.error("cmd_list_vip_tasks error: %s", exc)
         bot.reply_to(message, "❌ Server error.")
