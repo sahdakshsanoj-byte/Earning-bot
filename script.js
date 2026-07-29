@@ -1863,11 +1863,13 @@ async function requestWithdraw() {
     if (reqAmount < _minWdCheck) return showToast(`Minimum ${_minWdCheck} coins required.${_minWdCheck < MIN_WITHDRAW_COINS ? ' (Premium)' : ''}`, "error");
     if (reqAmount > totalCoins)         return showToast(`Insufficient balance. You have ${totalCoins} coins.`, "error");
 
-    // Referral check — 5 referrals required when CONFIG.REFERRAL_ACTIVE is true
-    // BUG FIX: removed duplicate const refCount, using outer refCount
+    // BUG FIX #2: Premium user ke liye sirf 2 referrals chahiye, free user ke liye 5.
+    // Pehle hardcoded 5 tha — premium users ke 3-4 referrals hone par bhi block ho jaate the.
     if (CONFIG.REFERRAL_ACTIVE === true) {
-        if (refCount < 5) {
-            return showToast(`You need ${5 - refCount} more referral(s) to unlock withdrawal.`, "error");
+        const isPremForRef = !!(userData && userData.premium_info && userData.premium_info.premium);
+        const _refNeeded   = isPremForRef ? 2 : 5;
+        if (refCount < _refNeeded) {
+            return showToast(`You need ${_refNeeded - refCount} more referral(s) to unlock withdrawal.`, "error");
         }
     }
 
@@ -3488,11 +3490,33 @@ function _renderTournament(t, winners, roundsData) {
             <p style="font-size:16px;font-weight:800;color:#fb923c;margin:0 0 6px;">Registration Closed</p>
             <p style="font-size:12px;color:#64748b;margin:0;">Registration period is over. Match starting soon!</p>
         </div>`;
+        // BUG FIX T4: registration_closed mein Team ID nahi dikh rahi thi.
+        // Yahi woh window hai jab user ko apna Team ID confirm karna hota hai
+        // match shuru hone se pehle. Ab Team ID + registration type bhi dikhate hain.
         if (reg && reg.registered) {
+            const rd4 = reg.data || {};
+            const teamIdBlock4 = rd4.team_id
+                ? `<div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;
+                               padding:8px 12px;background:rgba(139,92,246,0.10);
+                               border:1px solid rgba(139,92,246,0.28);border-radius:10px;">
+                       <div>
+                           <p style="font-size:10px;color:#a78bfa;margin:0 0 2px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">🛡️ Your Team ID</p>
+                           <p style="font-size:22px;font-weight:900;color:#e2e8f0;margin:0;letter-spacing:1px;">${_esc(rd4.team_id)}</p>
+                       </div>
+                       <button onclick="navigator.clipboard.writeText('${_esc(rd4.team_id)}').then(()=>showToast('Team ID copied! ✅','success'))"
+                           style="background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.35);
+                                  border-radius:8px;padding:6px 12px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;">📋 Copy</button>
+                   </div>`
+                : '';
+            const regTypeLabel4 = rd4.team_name
+                ? `<span style="font-size:11px;color:#64748b;">Team: <b style="color:#94a3b8;">${_esc(rd4.team_name)}</b></span>`
+                : (rd4.ff_nickname ? `<span style="font-size:11px;color:#64748b;">FF Name: <b style="color:#94a3b8;">${_esc(rd4.ff_nickname)}</b></span>` : '');
             html += `
             <div class="t-registered-badge" style="margin-top:10px;">
-                <p style="font-size:13px;font-weight:800;color:#4ade80;margin:0 0 3px;">✅ You are registered!</p>
-                <p style="font-size:11px;color:#64748b;margin:0;">Room ID & Password will be shared before match time.</p>
+                <p style="font-size:13px;font-weight:800;color:#4ade80;margin:0 0 4px;">✅ You are registered!</p>
+                ${regTypeLabel4}
+                ${teamIdBlock4}
+                <p style="font-size:11px;color:#64748b;margin-top:8px;">Room ID & Password will be shared before match time. Keep your Team ID ready!</p>
             </div>`;
         }
 
@@ -3528,19 +3552,30 @@ function _renderTournament(t, winners, roundsData) {
         </div>`;
 
         // ── Rounds progress bar (if multi-round)
+        // BUG FIX T2: Backend "completed" save karta hai, "ended" nahi.
+        // Isliye ab dono keys ko same color/emoji map kiya — legacy "ended" bhi support hoga.
         if (roundsData && roundsData.rounds && totalRoundsCount > 1) {
-            const statusColor = { pending: '#475569', live: '#f87171', ended: '#4ade80' };
-            const statusLabel = { pending: '⏳', live: '🔴', ended: '✅' };
+            const _isDone  = rs => rs === 'completed' || rs === 'ended';
+            const statusColor = rs =>
+                rs === 'live'       ? 'rgba(239,68,68,0.12)'     :
+                _isDone(rs)         ? 'rgba(74,222,128,0.08)'    :
+                                      'rgba(255,255,255,0.04)';
+            const statusBorder = rs =>
+                rs === 'live'       ? 'rgba(239,68,68,0.4)'      :
+                _isDone(rs)         ? 'rgba(74,222,128,0.25)'    :
+                                      'rgba(255,255,255,0.08)';
+            const statusEmoji = rs =>
+                rs === 'live'       ? '🔴' :
+                _isDone(rs)         ? '✅' :
+                                      '⏳';
             let roundsHtml = '<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">';
             for (let rn = 1; rn <= totalRoundsCount; rn++) {
-                const rDoc   = roundsData.rounds.find(r => r.round_no === rn) || { status: 'pending', round_no: rn };
-                const rs     = rDoc.status || 'pending';
-                const isLive = rs === 'live';
+                const rDoc = roundsData.rounds.find(r => r.round_no === rn) || { status: 'pending', round_no: rn };
+                const rs   = rDoc.status || 'pending';
                 roundsHtml += `<div style="flex:1;min-width:60px;text-align:center;padding:6px 4px;border-radius:10px;
-                    background:${isLive ? 'rgba(239,68,68,0.12)' : rs==='ended' ? 'rgba(74,222,128,0.08)' : 'rgba(255,255,255,0.04)'};
-                    border:1px solid ${isLive ? 'rgba(239,68,68,0.4)' : rs==='ended' ? 'rgba(74,222,128,0.25)' : 'rgba(255,255,255,0.08)'};">
+                    background:${statusColor(rs)};border:1px solid ${statusBorder(rs)};">
                     <p style="font-size:10px;color:#64748b;margin:0;">Round ${rn}</p>
-                    <p style="font-size:14px;margin:2px 0 0;">${statusLabel[rs] || '⏳'}</p>
+                    <p style="font-size:14px;margin:2px 0 0;">${statusEmoji(rs)}</p>
                 </div>`;
             }
             roundsHtml += '</div>';
@@ -3610,12 +3645,112 @@ function _renderTournament(t, winners, roundsData) {
         </div>`;
     }
 
+    // BUG FIX T6: Leaderboard API exist karti thi lekin koi frontend button nahi tha.
+    // Ab match_live aur completed status mein "View Leaderboard" button dikhega.
+    const _showLbBtn = t.status === 'match_live' || t.status === 'completed';
     html += `
     <div style="height:14px;"></div>
+    ${_showLbBtn ? `
+    <button onclick="openTournamentLeaderboard('${_esc(_selectedTid)}')"
+        style="width:100%;margin-bottom:8px;padding:10px;
+               background:rgba(99,102,241,0.10);border:1px solid rgba(99,102,241,0.28);
+               border-radius:10px;color:#818cf8;font-size:12px;font-weight:700;cursor:pointer;">
+        📊 View Live Leaderboard
+    </button>` : ''}
     <button onclick="loadTournamentById('${_esc(_selectedTid)}', true)" style="width:100%;padding:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;color:#64748b;font-size:12px;cursor:pointer;">↻ Refresh</button>
     </div>`;  // close t-body
 
     content.innerHTML = html;
+}
+
+// BUG FIX T6: Tournament leaderboard modal — per-team kills, points, rounds breakdown
+async function openTournamentLeaderboard(tid) {
+    const content = document.getElementById('tournament-content');
+    if (content) content.innerHTML = '<div style="padding:20px;text-align:center;color:#64748b;font-size:12px;">⏳ Loading leaderboard...</div>';
+
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/tournament/${encodeURIComponent(tid)}/leaderboard`);
+        const data = await res.json();
+        if (data.status !== 'success') throw new Error(data.message || 'API error');
+
+        const board       = data.leaderboard || [];
+        const totalRounds = data.total_rounds || 1;
+        const rankEmoji   = { 1: '🥇', 2: '🥈', 3: '🥉' };
+
+        let html = '<div class="t-body">';
+        html += `<p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 12px;">
+                    📊 Tournament Leaderboard
+                    <span style="font-size:10px;font-weight:500;color:#475569;text-transform:none;margin-left:6px;">
+                        ${data.current_round || 0}/${totalRounds} rounds played
+                    </span>
+                 </p>`;
+
+        if (board.length === 0) {
+            html += `<div style="text-align:center;padding:30px;color:#475569;font-size:13px;">
+                        No results yet. Results will appear after each round.
+                     </div>`;
+        } else {
+            // Round headers
+            let roundCols = '';
+            for (let rn = 1; rn <= totalRounds; rn++) {
+                roundCols += `<span style="flex:0.8;text-align:center;font-size:10px;color:#64748b;font-weight:700;">R${rn}</span>`;
+            }
+            html += `
+            <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;margin-bottom:4px;">
+                <span style="width:28px;"></span>
+                <span style="flex:2;font-size:10px;color:#64748b;font-weight:700;">TEAM</span>
+                ${roundCols}
+                <span style="flex:1;text-align:center;font-size:10px;color:#64748b;font-weight:700;">KILLS</span>
+                <span style="flex:1;text-align:center;font-size:10px;color:#f1c40f;font-weight:700;">PTS</span>
+            </div>`;
+
+            board.forEach(row => {
+                const pos       = row.position || '?';
+                const isTop3    = pos <= 3;
+                const teamBg    = pos === 1 ? 'rgba(241,196,15,0.07)' : pos === 2 ? 'rgba(148,163,184,0.06)' : pos === 3 ? 'rgba(180,83,9,0.07)' : 'rgba(255,255,255,0.025)';
+                const teamBdr   = pos === 1 ? 'rgba(241,196,15,0.25)' : pos === 2 ? 'rgba(148,163,184,0.18)' : pos === 3 ? 'rgba(180,83,9,0.20)' : 'rgba(255,255,255,0.06)';
+
+                let roundPts = '';
+                for (let rn = 1; rn <= totalRounds; rn++) {
+                    const pts = row.rounds?.[rn] ?? '—';
+                    roundPts += `<span style="flex:0.8;text-align:center;font-size:11px;color:${typeof pts==='number' ? '#e2e8f0' : '#475569'};">${pts}</span>`;
+                }
+                html += `
+                <div style="display:flex;align-items:center;gap:6px;padding:8px;
+                             background:${teamBg};border:1px solid ${teamBdr};
+                             border-radius:10px;margin-bottom:5px;">
+                    <span style="width:28px;font-size:${isTop3 ? '18px' : '12px'};text-align:center;">${rankEmoji[pos] || ('#' + pos)}</span>
+                    <div style="flex:2;min-width:0;">
+                        <p style="font-size:12px;font-weight:800;color:#e2e8f0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(row.team_name || row.team_id)}</p>
+                        <p style="font-size:10px;color:#64748b;margin:1px 0 0;">${_esc(row.team_id)}</p>
+                    </div>
+                    ${roundPts}
+                    <span style="flex:1;text-align:center;font-size:12px;color:#94a3b8;font-weight:700;">${row.total_kills ?? 0}</span>
+                    <span style="flex:1;text-align:center;font-size:13px;color:#f1c40f;font-weight:900;">${row.total_points ?? 0}</span>
+                </div>`;
+            });
+        }
+
+        html += `
+        <div style="height:14px;"></div>
+        <button onclick="loadTournamentById('${_esc(tid)}', false)"
+            style="width:100%;padding:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
+                   border-radius:10px;color:#64748b;font-size:12px;cursor:pointer;">← Back to Tournament</button>
+        </div>`;
+
+        if (content) content.innerHTML = html;
+    } catch (err) {
+        if (content) content.innerHTML =
+            `<div style="padding:20px;text-align:center;">
+                <p style="color:#ef4444;font-size:13px;">⚠️ Could not load leaderboard.</p>
+                <button onclick="openTournamentLeaderboard('${_esc(tid)}')"
+                    style="margin-top:10px;background:rgba(241,196,15,0.1);border:1px solid rgba(241,196,15,0.3);
+                           color:#f1c40f;border-radius:8px;padding:8px 20px;cursor:pointer;font-weight:700;">Retry</button>
+                <button onclick="loadTournamentById('${_esc(tid)}', false)"
+                    style="margin-top:8px;display:block;width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
+                           border-radius:10px;color:#64748b;font-size:12px;padding:10px;cursor:pointer;">← Back</button>
+             </div>`;
+    }
 }
 
 async function registerForTournament() {
