@@ -364,6 +364,13 @@ async function fetchLiveData() {
             const balEl = document.getElementById('balance');
             if (balEl) balEl.innerText = `${coins} 🪙`;
 
+            // Rupee balance display
+            const rupees = parseFloat(data.rupees || 0).toFixed(2);
+            const rupeeBalEl = document.getElementById('rupee-balance');
+            const rupeeWdEl  = document.getElementById('rupee-wd-balance-text');
+            if (rupeeBalEl) rupeeBalEl.textContent = rupees;
+            if (rupeeWdEl)  rupeeWdEl.textContent  = '₹' + rupees;
+
             // ── Premium badge in balance area ─────────────────────────────
             const premBadgeEl = document.getElementById('premium-status-badge');
             if (premBadgeEl) {
@@ -603,8 +610,7 @@ async function buyLotteryTicket() {
         const data = await res.json();
         if (data.status === 'success') {
             showToast(data.message || '🎫 Ticket purchased!', 'success');
-            // BUG FIX #5: fetchLiveData() se poora balance aur UI update hota hai
-            fetchLiveData();
+            if (typeof refreshBalance === 'function') refreshBalance();
         } else {
             showToast(data.message || 'Could not buy ticket.', 'error');
         }
@@ -1824,9 +1830,9 @@ let _selectedWithdrawMethod = 'upi';
 
 function selectWithdrawMethod(method) {
     _selectedWithdrawMethod = method;
-    const colors = { upi: '#2ecc71', usdt: '#3b82f6', google: '#f59e0b' };
-    const bg     = { upi: '#0d2318',  usdt: '#0d1b2e', google: '#1c1600' };
-    ['upi', 'usdt', 'google'].forEach(m => {
+    const colors = { upi: '#2ecc71', google: '#f59e0b' };
+    const bg     = { upi: '#0d2318', google: '#1c1600' };
+    ['upi', 'google'].forEach(m => {
         const btn   = document.getElementById(`method-btn-${m}`);
         const panel = document.getElementById(`method-input-${m}`);
         if (btn) {
@@ -1870,12 +1876,6 @@ async function requestWithdraw() {
         const upi = document.getElementById('upi-id')?.value.trim();
         if (!upi || !upi.includes('@')) return showToast("Please enter a valid UPI ID! (Example: name@upi)", "error");
         paymentAddress = upi;
-    } else if (method === 'usdt') {
-        const addr = document.getElementById('usdt-address')?.value.trim();
-        if (!addr) return showToast("Please enter your USDT TRC20 wallet address!", "error");
-        if (!addr.startsWith('T') || addr.length !== 34 || !/^[A-Za-z0-9]{34}$/.test(addr))
-            return showToast("Invalid TRC20 address! Must start with T and be 34 characters.", "error");
-        paymentAddress = addr;
     } else if (method === 'google') {
         paymentAddress = 'via_telegram';
     }
@@ -1898,13 +1898,11 @@ async function requestWithdraw() {
         });
         const data = await res.json();
         if (data.status === "success") {
-            const methodLabel = method === 'upi' ? 'UPI' : method === 'usdt' ? 'USDT TRC20' : 'Google Play';
+            const methodLabel = method === 'upi' ? 'UPI' : 'Google Play';
             showToast(`💸 ${methodLabel} withdrawal request submitted!`, "success");
             if (amountEl) amountEl.value = '';
-            const upiEl  = document.getElementById('upi-id');
-            const usdtEl = document.getElementById('usdt-address');
-            if (upiEl)  upiEl.value  = '';
-            if (usdtEl) usdtEl.value = '';
+            const upiEl = document.getElementById('upi-id');
+            if (upiEl) upiEl.value = '';
             fetchLiveData();
         } else {
             showToast(data.message || "An error occurred. Please retry.", "error");
@@ -2612,6 +2610,107 @@ function updateReferralList(referrals) {
         </div>`).join('');
 }
 
+
+// ============================================================
+// ₹ RUPEE WALLET — Withdraw & History
+// ============================================================
+let _selectedRupeeMethod = 'upi';
+
+function selectRupeeMethod(method) {
+    _selectedRupeeMethod = method;
+    ['upi', 'google'].forEach(m => {
+        const btn   = document.getElementById(`rupee-method-btn-${m}`);
+        const panel = document.getElementById(`rupee-input-${m}`);
+        const active = m === method;
+        if (btn) {
+            btn.style.borderColor = active ? '#4ade80' : 'rgba(255,255,255,0.10)';
+            btn.style.color       = active ? '#4ade80' : '#94a3b8';
+            btn.style.background  = active ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)';
+        }
+        if (panel) panel.style.display = active ? '' : 'none';
+    });
+}
+
+async function requestRupeeWithdraw() {
+    if (!userId) return showToast("User ID not found!", "error");
+    if (_pendingRequests.has('rupeeWithdraw')) return showToast("Request in progress...", "error");
+
+    const amountEl = document.getElementById('rupee-withdraw-amount');
+    const rawAmt   = amountEl ? amountEl.value.trim() : '';
+    const amount   = parseFloat(rawAmt);
+    const method   = _selectedRupeeMethod;
+
+    if (!rawAmt || isNaN(amount)) return showToast("Please enter a valid amount!", "error");
+    if (amount < 10)              return showToast("Minimum withdrawal is ₹10.", "error");
+
+    let paymentAddress = '';
+    if (method === 'upi') {
+        const upi = document.getElementById('rupee-upi-id')?.value.trim();
+        if (!upi || !upi.includes('@')) return showToast("Please enter a valid UPI ID! (name@upi)", "error");
+        paymentAddress = upi;
+    } else {
+        paymentAddress = 'via_telegram';
+    }
+
+    _pendingRequests.add('rupeeWithdraw');
+    const btn = document.querySelector('[onclick="requestRupeeWithdraw()"]');
+    if (btn) { btn.disabled = true; btn.innerText = "Processing..."; }
+
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/withdraw_rupees`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ user_id: userId, method, payment_address: paymentAddress, amount }),
+        });
+        const data = await res.json();
+        if (data.status === "success") {
+            showToast(`💰 ${data.message}`, "success");
+            if (amountEl) amountEl.value = '';
+            const upiEl = document.getElementById('rupee-upi-id');
+            if (upiEl) upiEl.value = '';
+            fetchLiveData();
+            loadRupeeHistory();
+        } else {
+            showToast(data.message || "An error occurred.", "error");
+        }
+    } catch (e) {
+        showToast("⚠️ Connection error! Please retry.", "error");
+    } finally {
+        _pendingRequests.delete('rupeeWithdraw');
+        if (btn) { btn.disabled = false; btn.innerText = "Withdraw Rupees"; }
+    }
+}
+
+async function loadRupeeHistory() {
+    const list = document.getElementById('rupee-history-list');
+    if (!list || !userId) return;
+    list.innerHTML = "<p class='spinner'>Loading...</p>";
+    try {
+        const res     = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_rupee_history/${userId}`);
+        const data    = await res.json();
+        const history = data.data?.history || [];
+        if (history.length > 0) {
+            const icons = { upi: '🏦', google_redeem: '🎁' };
+            const names = { upi: 'UPI', google_redeem: 'Google Play' };
+            list.innerHTML = history.map(h => {
+                const color = h.status.includes('Approved') ? '#22c55e'
+                            : h.status.includes('Rejected') ? '#e74c3c' : '#f1c40f';
+                const m    = h.method || 'upi';
+                const addr = h.payment_address === 'via_telegram' ? 'via Telegram DM' : (h.payment_address || '—');
+                return `
+                <div class="history-item">
+                    <div>${icons[m]||'💰'} <b>₹${parseFloat(h.amount||0).toFixed(2)}</b> — ${names[m]||'UPI'}: <span style="color:#94a3b8;font-size:12px;">${addr}</span></div>
+                    <div class="history-status" style="color:${color}">${h.status} • ${h.date}</div>
+                </div>`;
+            }).join('');
+        } else {
+            list.innerHTML = "<p style='color:#94a3b8;text-align:center;font-size:13px;'>No rupee withdrawals yet.</p>";
+        }
+    } catch (e) {
+        list.innerHTML = "<p style='color:#94a3b8;text-align:center;'>Failed to load history.</p>";
+    }
+}
+
 // ============================================================
 // WITHDRAWAL HISTORY
 // ============================================================
@@ -2624,8 +2723,8 @@ async function loadHistory() {
         const data    = await res.json();
         const history = data.history || data.data?.history;
         if (history && history.length > 0) {
-            const methodIcons = { upi: '🏦', usdt_trc20: '💎', google_redeem: '🎁' };
-            const methodNames = { upi: 'UPI', usdt_trc20: 'USDT TRC20', google_redeem: 'Google Play' };
+            const methodIcons = { upi: '🏦', google_redeem: '🎁' };
+            const methodNames = { upi: 'UPI', google_redeem: 'Google Play' };
             list.innerHTML = history.map(h => {
                 const color  = h.status.includes('Approved') ? '#22c55e' : h.status.includes('Rejected') ? '#e74c3c' : '#f1c40f';
                 const m      = h.method || 'upi';
@@ -2766,7 +2865,7 @@ function switchTab(tabId, el) {
 
     if (tabId === 'leaderboard') refreshLeaderboard();
     if (tabId === 'history')     loadHistory();
-    if (tabId === 'refer')       loadReferralDashboard(true);  // BUG FIX #6: force refresh — active status hamesha fresh dikhega
+    if (tabId === 'refer')       loadReferralDashboard();
 
     // Re-apply referral lock on tab switch (for both rewards and refer tabs)
     if (tabId === 'rewards' || tabId === 'refer') setTimeout(applyReferralLock, 50);
@@ -3095,7 +3194,7 @@ async function loadTournamentById(tid, forceRefresh) {
     // Check cache
     const cached = _tournamentCache[tid];
     if (!forceRefresh && cached && (Date.now() - cached.ts) < TOURNAMENT_CACHE_TTL) {
-        _renderTournament(cached.tournament, cached.winners);
+        _renderTournament(cached.tournament, cached.winners, cached.roundsData || null);
         return;
     }
 
@@ -3108,22 +3207,34 @@ async function loadTournamentById(tid, forceRefresh) {
             uid ? fetchWithRetry(`${CONFIG.API_BASE_URL}/tournament/my_registration/${uid}?tournament_id=${encodeURIComponent(tid)}`) : Promise.resolve(null),
         ]);
 
-        const tData  = await tRes.json();
+        const tData   = await tRes.json();
         const regData = regRes ? await regRes.json() : { registered: false };
 
-        if (tData.status === 'success') {
-            _tournamentCache[tid] = { tournament: tData.tournament, winners: tData.winners || [], ts: Date.now() };
-        }
         _tournamentRegCache[tid] = (regData?.status === 'success') ? regData : { registered: false };
 
-        _renderTournament(tData.tournament, tData.winners || []);
+        // Fetch rounds data if tournament has multiple rounds or is live
+        let roundsData = null;
+        try {
+            const t = tData.tournament;
+            if (t && (parseInt(t.total_rounds||1) > 1 || t.status === 'match_live' || t.status === 'registration_closed')) {
+                const rRes  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/tournament/${encodeURIComponent(tid)}/rounds`);
+                const rData = await rRes.json();
+                if (rData.status === 'success') roundsData = rData;
+            }
+        } catch (_) { /* rounds fetch failure non-critical */ }
+
+        if (tData.status === 'success') {
+            _tournamentCache[tid] = { tournament: tData.tournament, winners: tData.winners || [], ts: Date.now(), roundsData };
+        }
+
+        _renderTournament(tData.tournament, tData.winners || [], roundsData);
     } catch (err) {
         if (content) content.innerHTML =
             '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px;">⚠️ Failed to load. <button onclick="loadTournamentById(\'' + _esc(tid) + '\',true)" style="color:#f1c40f;background:none;border:none;cursor:pointer;font-weight:700;">Retry</button></div>';
     }
 }
 
-function _renderTournament(t, winners) {
+function _renderTournament(t, winners, roundsData) {
     const content = document.getElementById('tournament-content');
     if (!content) return;
 
@@ -3272,8 +3383,12 @@ function _renderTournament(t, winners) {
                         <span style="color:#475569;"> · ${_esc(m.ff_uid||'')}</span>
                     </p>`
                 ).join('');
+                const teamIdRow = rd.team_id
+                    ? `<p style="font-size:12px;margin:6px 0 4px;"><span style="color:#a78bfa;font-weight:700;">🛡️ Team ID:</span> <b style="color:#e2e8f0;letter-spacing:1px;">${_esc(rd.team_id)}</b></p>`
+                    : '';
                 regDetails = `
-                    <p style="font-size:13px;font-weight:800;color:#f1c40f;margin:4px 0 6px;">🛡️ Team: ${_esc(rd.team_name||'')}</p>
+                    ${teamIdRow}
+                    <p style="font-size:13px;font-weight:800;color:#f1c40f;margin:4px 0 6px;">🏟️ Team: ${_esc(rd.team_name||'')}</p>
                     <div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:8px 10px;margin-bottom:4px;">${memberRows}</div>`;
             } else {
                 regDetails = `<p style="font-size:12px;color:#64748b;margin:4px 0 0;">FF UID: <b style="color:#e2e8f0;">${_esc(rd.ff_uid||'')}</b> &nbsp;·&nbsp; Nick: <b style="color:#e2e8f0;">${_esc(rd.ff_nickname||'')}</b></p>`;
@@ -3384,22 +3499,63 @@ function _renderTournament(t, winners) {
     } else if (t.status === 'match_live') {
         const reg = _tournamentRegCache[_selectedTid] || { registered: false };
 
+        // Determine current round room credentials
+        // Priority: current live round > global tournament room
+        let roomId   = t.room_id       || null;
+        let roomPass = t.room_password || null;
+        let currentRoundNo   = t.current_round || 1;
+        let totalRoundsCount = t.total_rounds  || 1;
+
+        if (roundsData && roundsData.rounds) {
+            const liveRound = roundsData.rounds.find(r => r.status === 'live');
+            if (liveRound) {
+                if (liveRound.room_id)       roomId   = liveRound.room_id;
+                if (liveRound.room_password) roomPass = liveRound.room_password;
+                currentRoundNo = liveRound.round_no;
+            }
+            totalRoundsCount = roundsData.total_rounds || totalRoundsCount;
+        }
+
         // ── Live banner
+        const roundLabel = totalRoundsCount > 1
+            ? ` · Round ${currentRoundNo}/${totalRoundsCount}`
+            : '';
         html += `
         <div style="text-align:center;padding:16px;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.28);border-radius:14px;margin-bottom:12px;">
             <span style="font-size:40px;display:block;margin-bottom:6px;" class="t-lock-icon">🔥</span>
-            <p style="font-size:18px;font-weight:900;color:#f87171;margin:0 0 4px;letter-spacing:0.5px;">MATCH IS LIVE!</p>
+            <p style="font-size:18px;font-weight:900;color:#f87171;margin:0 0 4px;letter-spacing:0.5px;">MATCH IS LIVE${_esc(roundLabel)}!</p>
             <p style="font-size:12px;color:#94a3b8;margin:0;">The battle has begun. Good luck to all players!</p>
         </div>`;
 
+        // ── Rounds progress bar (if multi-round)
+        if (roundsData && roundsData.rounds && totalRoundsCount > 1) {
+            const statusColor = { pending: '#475569', live: '#f87171', ended: '#4ade80' };
+            const statusLabel = { pending: '⏳', live: '🔴', ended: '✅' };
+            let roundsHtml = '<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">';
+            for (let rn = 1; rn <= totalRoundsCount; rn++) {
+                const rDoc   = roundsData.rounds.find(r => r.round_no === rn) || { status: 'pending', round_no: rn };
+                const rs     = rDoc.status || 'pending';
+                const isLive = rs === 'live';
+                roundsHtml += `<div style="flex:1;min-width:60px;text-align:center;padding:6px 4px;border-radius:10px;
+                    background:${isLive ? 'rgba(239,68,68,0.12)' : rs==='ended' ? 'rgba(74,222,128,0.08)' : 'rgba(255,255,255,0.04)'};
+                    border:1px solid ${isLive ? 'rgba(239,68,68,0.4)' : rs==='ended' ? 'rgba(74,222,128,0.25)' : 'rgba(255,255,255,0.08)'};">
+                    <p style="font-size:10px;color:#64748b;margin:0;">Round ${rn}</p>
+                    <p style="font-size:14px;margin:2px 0 0;">${statusLabel[rs] || '⏳'}</p>
+                </div>`;
+            }
+            roundsHtml += '</div>';
+            html += roundsHtml;
+        }
+
         if (reg && reg.registered) {
             // ── Room credentials dashboard (only for registered users)
-            const roomId   = t.room_id       || null;
-            const roomPass = t.room_password || null;
+            const roundTitle = totalRoundsCount > 1
+                ? `🔑 Round ${currentRoundNo} Room Details`
+                : '🔑 Your Room Details';
 
             html += `
             <div style="background:linear-gradient(135deg,rgba(241,196,15,0.08),rgba(251,146,60,0.06));border:1.5px solid rgba(241,196,15,0.35);border-radius:16px;padding:16px;margin-bottom:4px;">
-                <p style="font-size:11px;font-weight:800;color:#f1c40f;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 12px;text-align:center;">🔑 Your Room Details</p>
+                <p style="font-size:11px;font-weight:800;color:#f1c40f;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 12px;text-align:center;">${_esc(roundTitle)}</p>
 
                 <div style="background:rgba(0,0,0,0.30);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
                     <div>
@@ -3423,6 +3579,20 @@ function _renderTournament(t, winners) {
                 <p style="font-size:11px;color:#4ade80;text-align:center;margin:10px 0 0;font-weight:700;">✅ All set! Join the room and good luck 🎯</p>
                 `}
             </div>`;
+
+            // ── Team ID display (for squad/duo registrations)
+            const rd = reg.data || {};
+            if (rd.team_id) {
+                html += `
+                <div style="margin-top:8px;padding:10px 14px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.25);border-radius:12px;display:flex;align-items:center;justify-content:space-between;">
+                    <div>
+                        <p style="font-size:10px;color:#a78bfa;margin:0 0 2px;text-transform:uppercase;letter-spacing:0.5px;font-weight:700;">🛡️ Your Team ID</p>
+                        <p style="font-size:22px;font-weight:900;color:#e2e8f0;margin:0;letter-spacing:1px;">${_esc(rd.team_id)}</p>
+                    </div>
+                    <button onclick="navigator.clipboard.writeText('${_esc(rd.team_id)}').then(()=>showToast('Team ID copied! ✅','success'))"
+                        style="background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.35);border-radius:8px;padding:6px 12px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;">📋 Copy</button>
+                </div>`;
+            }
         } else {
             // Not registered — show a message
             html += `
