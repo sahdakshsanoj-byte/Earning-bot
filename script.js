@@ -1770,15 +1770,12 @@ async function refreshLeaderboard() {
 
     // Background mein fresh data fetch karo
     try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-        const res  = await fetch(`${CONFIG.API_BASE_URL}/get_leaderboard`, { signal: controller.signal });
-        clearTimeout(timeout);
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_leaderboard`);
         const data = await res.json();
         if (data.status === "success" && data.leaderboard) {
             updateLeaderboardUI(data.leaderboard);
         } else if (!userData?.leaderboard || userData.leaderboard === "none") {
-            list.innerHTML = '<div style="text-align:center;padding:24px;"><p style="color:#6e7e96;font-size:13px;margin-bottom:12px;">🏆 Abhi koi ranking nahi hai. Coins kamao aur top pe aao!</p></div>';
+            list.innerHTML = '<div style="text-align:center;padding:24px;"><p style="color:#6e7e96;font-size:13px;margin-bottom:12px;">🏆 No rankings yet. Earn coins and climb to the top!</p></div>';
         }
     } catch (e) {
         // Agar cached data dikh raha hai toh error mat dikhao
