@@ -2674,6 +2674,17 @@ def withdraw_rupees_api():
     if is_rate_limited(f"rupeewd_{user_id}", 10):
         return jsonify({"status": "error", "message": "Please wait before retrying."}), 429
 
+    # ── Referral Check — same logic as coin withdrawal ──────────────────────────
+    if REFERRAL_ACTIVE:
+        _ref_user   = users_col.find_one({"user_id": user_id}, {"referral_count": 1, "_id": 0})
+        ref_count   = _ref_user.get("referral_count", 0) if _ref_user else 0
+        _ref_needed = PREMIUM_REFERRAL_NEEDED if is_premium(user_id) else 5
+        if ref_count < _ref_needed:
+            return jsonify({
+                "status":  "error",
+                "message": f"{_ref_needed - ref_count} aur referral chahiye rupee withdrawal ke liye.",
+            }), 400
+
     # One pending rupee withdrawal at a time
     _pending = rupee_withdrawals_col.find_one({"user_id": user_id, "status": "Pending ⏳"})
     if _pending:
@@ -8550,6 +8561,66 @@ def cmd_set_round_room(message):
         )
     except Exception as exc:
         logger.error("cmd_set_round_room error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["settotalrounds"])
+def cmd_set_total_rounds(message):
+    """Admin: /settotalrounds <tournament_id> <number> — Existing tournament ke total rounds update karo.
+    Example:
+      /settotalrounds t_123456 3
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) < 3:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/settotalrounds <tournament_id> <rounds>`
+
+"
+            "*Example:*
+"
+            "`/settotalrounds t_123456 3`
+
+"
+            "IDs dekhne ke liye: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    try:
+        new_rounds = int(parts[2].strip())
+    except ValueError:
+        return bot.reply_to(message, "❌ Rounds number valid integer hona chahiye. Example: `3`", parse_mode="Markdown")
+
+    if new_rounds < 1 or new_rounds > 20:
+        return bot.reply_to(message, "❌ Rounds 1 se 20 ke beech hona chahiye.", parse_mode="Markdown")
+
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(
+                message,
+                f"❌ Tournament `{tid}` nahi mila.\n`/listtournaments` se IDs dekho.",
+                parse_mode="Markdown",
+            )
+        old_rounds = int(t.get("total_rounds", 1))
+        tournaments_col.update_one(
+            {"tournament_id": tid},
+            {"$set": {"total_rounds": new_rounds}},
+        )
+        _invalidate_user_cache_all = lambda: None  # cache clear not needed for tournament update
+        bot.reply_to(
+            message,
+            f"✅ *Total Rounds Updated!*\n\n"
+            f"🏷 *Tournament:* {t.get('title', 'N/A')} `[{tid}]`\n"
+            f"🔄 *Rounds:* {old_rounds} → *{new_rounds}*\n\n"
+            f"Ab `/setroundroom {tid} 1 RoomID | Password` se har round ka room set karo.",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin updated total_rounds for tournament %s: %d → %d", tid, old_rounds, new_rounds)
+    except Exception as exc:
+        logger.error("cmd_set_total_rounds error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
