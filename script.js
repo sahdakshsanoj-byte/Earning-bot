@@ -415,6 +415,8 @@ async function fetchLiveData() {
             if (refText)   refText.innerText     = `${refCount} / ${_refNeeded}${refCount >= _refNeeded ? ' ✅' : ''}${isPremium ? ' ✓' : ''}`;
 
             applyReferralLock();
+            // Update rupee withdrawal referral progress UI
+            updateRupeeRefUI(refCount, isPremium ? 2 : 5);
 
             if (data.leaderboard && data.leaderboard !== "none") updateLeaderboardUI(data.leaderboard);
 
@@ -1759,16 +1761,33 @@ async function refreshBalance() {
 // ============================================================
 async function refreshLeaderboard() {
     const list = document.getElementById('leaderboard-list');
+    if (!list) return;
+
+    // ✅ FIX: Pehle already-loaded cached data instantly dikhao
+    if (userData && userData.leaderboard && userData.leaderboard !== "none") {
+        updateLeaderboardUI(userData.leaderboard);
+    }
+
+    // Background mein fresh data fetch karo
     try {
-        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_leaderboard`);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const res  = await fetch(`${CONFIG.API_BASE_URL}/get_leaderboard`, { signal: controller.signal });
+        clearTimeout(timeout);
         const data = await res.json();
         if (data.status === "success" && data.leaderboard) {
             updateLeaderboardUI(data.leaderboard);
-        } else {
-            if (list) list.innerHTML = '<p style="color:#ef4444;text-align:center;font-size:13px;padding:20px;">⚠️ Leaderboard load nahi hua. Thodi der baad try karo.</p>';
+        } else if (!userData?.leaderboard || userData.leaderboard === "none") {
+            list.innerHTML = '<div style="text-align:center;padding:24px;"><p style="color:#6e7e96;font-size:13px;margin-bottom:12px;">🏆 Abhi koi ranking nahi hai. Coins kamao aur top pe aao!</p></div>';
         }
     } catch (e) {
-        if (list) list.innerHTML = '<p style="color:#ef4444;text-align:center;font-size:13px;padding:20px;">⚠️ Connection error. Please refresh.</p>';
+        // Agar cached data dikh raha hai toh error mat dikhao
+        if (!userData?.leaderboard || userData.leaderboard === "none") {
+            list.innerHTML = `<div style="text-align:center;padding:24px;">
+                <p style="color:#ef4444;font-size:13px;margin-bottom:12px;">⚠️ Load nahi hua. Retry karo.</p>
+                <button onclick="refreshLeaderboard()" style="background:rgba(212,160,23,0.15);border:1px solid rgba(212,160,23,0.3);color:var(--gold);border-radius:10px;padding:8px 20px;font-size:13px;font-weight:700;cursor:pointer;">🔄 Retry</button>
+            </div>`;
+        }
     }
 }
 
@@ -2652,6 +2671,17 @@ async function requestRupeeWithdraw() {
     if (!rawAmt || isNaN(amount)) return showToast("Please enter a valid amount!", "error");
     if (amount < 10)              return showToast("Minimum withdrawal is ₹10.", "error");
 
+    // ── 5 Referral Check for Rupee Withdrawal ─────────────────────────────
+    if (CONFIG.REFERRAL_ACTIVE === true) {
+        const refCount  = getRefCount(userData.referrals);
+        const isPrem    = !!(userData && userData.premium_info && userData.premium_info.premium);
+        const refNeeded = isPrem ? 2 : 5;
+        updateRupeeRefUI(refCount, refNeeded);
+        if (refCount < refNeeded) {
+            return showToast(`${refNeeded - refCount} aur referral chahiye rupee withdrawal ke liye! 👥`, "error");
+        }
+    }
+
     let paymentAddress = '';
     if (method === 'upi') {
         const upi = document.getElementById('rupee-upi-id')?.value.trim();
@@ -2688,6 +2718,19 @@ async function requestRupeeWithdraw() {
         _pendingRequests.delete('rupeeWithdraw');
         if (btn) { btn.disabled = false; btn.innerText = "Withdraw Rupees"; }
     }
+}
+
+// ── RUPEE REFERRAL PROGRESS UI ──────────────────────────────────────────────
+function updateRupeeRefUI(refCount, refNeeded) {
+    const text = document.getElementById('rupee-ref-progress-text');
+    const bar  = document.getElementById('rupee-ref-progress-bar');
+    const box  = document.getElementById('rupee-ref-requirement-box');
+    if (!text || !bar) return;
+    const met = refCount >= refNeeded;
+    text.innerText   = `${refCount} / ${refNeeded}${met ? ' ✅' : ''}`;
+    text.style.color = met ? '#22c55e' : '#ef4444';
+    bar.style.width  = Math.min((refCount / refNeeded) * 100, 100) + '%';
+    if (box) box.style.borderColor = met ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)';
 }
 
 async function loadRupeeHistory() {
@@ -2873,7 +2916,13 @@ function switchTab(tabId, el) {
     const titleEl = document.getElementById('tab-title');
     if (titleEl) titleEl.textContent = titleMap[tabId] || '';
 
-    if (tabId === 'leaderboard') refreshLeaderboard();
+    if (tabId === 'leaderboard') {
+        // ✅ FIX: Cached data instantly dikhao phir background refresh
+        if (userData && userData.leaderboard && userData.leaderboard !== "none") {
+            updateLeaderboardUI(userData.leaderboard);
+        }
+        refreshLeaderboard();
+    }
     if (tabId === 'history')     loadHistory();
     if (tabId === 'refer')       loadReferralDashboard();
 
@@ -3226,7 +3275,7 @@ async function loadTournamentById(tid, forceRefresh) {
         let roundsData = null;
         try {
             const t = tData.tournament;
-            if (t && (parseInt(t.total_rounds||1) > 1 || t.status === 'match_live' || t.status === 'registration_closed')) {
+            if (t && (parseInt(t.total_rounds||1) > 1 || t.status === 'match_live' || t.status === 'registration_closed' || t.status === 'registration_open')) {
                 const rRes  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/tournament/${encodeURIComponent(tid)}/rounds`);
                 const rData = await rRes.json();
                 if (rData.status === 'success') roundsData = rData;
@@ -3291,6 +3340,14 @@ function _renderTournament(t, winners, roundsData) {
     }
 
     // ── Stats grid
+    const _totalRnds   = parseInt(t.total_rounds  || 1);
+    const _curRnd      = parseInt(t.current_round || 1);
+    const _roundLabel  = t.status === 'match_live'
+        ? `${_curRnd} / ${_totalRnds}`
+        : `${_totalRnds}`;
+    const _roundColor  = t.status === 'match_live' ? '#f87171' : '#38bdf8';
+    const _roundTileLabel = t.status === 'match_live' ? '🔴 Current Round' : '🔄 Total Rounds';
+
     html += `
     <div class="t-stats-grid">
         <div class="t-stat-tile">
@@ -3304,6 +3361,10 @@ function _renderTournament(t, winners, roundsData) {
         <div class="t-stat-tile">
             <p class="t-lbl">🏟️ Max Players</p>
             <p class="t-val">${t.max_players || '—'}</p>
+        </div>
+        <div class="t-stat-tile">
+            <p class="t-lbl">${_roundTileLabel}</p>
+            <p class="t-val" style="color:${_roundColor};font-weight:900;">${_roundLabel}</p>
         </div>
         ${t.date ? `<div class="t-stat-tile"><p class="t-lbl">📅 Date</p><p class="t-val" style="font-size:12px;">${_esc(t.date)}</p></div>` : ''}
         ${t.time ? `<div class="t-stat-tile"><p class="t-lbl">⏰ Time</p><p class="t-val" style="font-size:12px;">${_esc(t.time)}</p></div>` : ''}
@@ -3376,6 +3437,19 @@ function _renderTournament(t, winners, roundsData) {
     } else if (t.status === 'registration_open') {
         const reg      = _tournamentRegCache[_selectedTid] || { registered: false };
         const _tmode   = (t.mode || 'Solo').toLowerCase();
+
+        // ── Round info banner at top of registration section
+        const _roTotalRnds = parseInt(t.total_rounds || 1);
+        if (_roTotalRnds > 1) {
+            html += `
+            <div style="padding:10px 14px;background:rgba(56,189,248,0.07);border:1px solid rgba(56,189,248,0.25);border-radius:12px;margin-bottom:12px;display:flex;align-items:center;gap:10px;">
+                <span style="font-size:22px;">🔄</span>
+                <div>
+                    <p style="font-size:13px;font-weight:800;color:#38bdf8;margin:0;">${_roTotalRnds} Rounds Tournament</p>
+                    <p style="font-size:11px;color:#64748b;margin:2px 0 0;">Har round ke liye alag Room ID milega. Sab rounds mein khelo!</p>
+                </div>
+            </div>`;
+        }
         const isSquad  = _tmode === 'squad';
         const isDuo    = _tmode === 'duo';
         const isTeam   = isSquad || isDuo;
@@ -3498,6 +3572,19 @@ function _renderTournament(t, winners, roundsData) {
             <p style="font-size:16px;font-weight:800;color:#fb923c;margin:0 0 6px;">Registration Closed</p>
             <p style="font-size:12px;color:#64748b;margin:0;">Registration period is over. Match starting soon!</p>
         </div>`;
+
+        // ── Round info banner (registration closed — match aane wala hai)
+        const _rcTotalRnds = parseInt(t.total_rounds || 1);
+        if (_rcTotalRnds > 1) {
+            html += `
+            <div style="margin-top:10px;padding:12px 14px;background:rgba(56,189,248,0.07);border:1px solid rgba(56,189,248,0.25);border-radius:12px;display:flex;align-items:center;gap:12px;">
+                <span style="font-size:26px;">🔄</span>
+                <div>
+                    <p style="font-size:13px;font-weight:800;color:#38bdf8;margin:0;">Is tournament mein <b>${_rcTotalRnds} rounds</b> honge</p>
+                    <p style="font-size:11px;color:#64748b;margin:3px 0 0;">Har round ke liye alag Room ID & Password milega.</p>
+                </div>
+            </div>`;
+        }
         // BUG FIX T4: registration_closed mein Team ID nahi dikh rahi thi.
         // Yahi woh window hai jab user ko apna Team ID confirm karna hota hai
         // match shuru hone se pehle. Ab Team ID + registration type bhi dikhate hain.
@@ -3555,8 +3642,11 @@ function _renderTournament(t, winners, roundsData) {
         html += `
         <div style="text-align:center;padding:16px;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.28);border-radius:14px;margin-bottom:12px;">
             <span style="font-size:40px;display:block;margin-bottom:6px;" class="t-lock-icon">🔥</span>
-            <p style="font-size:18px;font-weight:900;color:#f87171;margin:0 0 4px;letter-spacing:0.5px;">MATCH IS LIVE${_esc(roundLabel)}!</p>
-            <p style="font-size:12px;color:#94a3b8;margin:0;">The battle has begun. Good luck to all players!</p>
+            <p style="font-size:18px;font-weight:900;color:#f87171;margin:0 0 4px;letter-spacing:0.5px;">MATCH IS LIVE!</p>
+            ${totalRoundsCount > 1
+                ? `<p style="font-size:15px;font-weight:800;color:#fbbf24;margin:4px 0;">Round ${currentRoundNo} / ${totalRoundsCount} chal raha hai 🎯</p>`
+                : `<p style="font-size:13px;font-weight:700;color:#fbbf24;margin:4px 0;">Single Round Match 🎯</p>`}
+            <p style="font-size:12px;color:#94a3b8;margin:4px 0 0;">The battle has begun. Good luck to all players!</p>
         </div>`;
 
         // ── Rounds progress bar (if multi-round)
