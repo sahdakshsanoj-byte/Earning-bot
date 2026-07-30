@@ -1758,11 +1758,18 @@ async function refreshBalance() {
 // LEADERBOARD
 // ============================================================
 async function refreshLeaderboard() {
+    const list = document.getElementById('leaderboard-list');
     try {
         const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_leaderboard`);
         const data = await res.json();
-        if (data.status === "success" && data.leaderboard) updateLeaderboardUI(data.leaderboard);
-    } catch (e) { /* silent */ }
+        if (data.status === "success" && data.leaderboard) {
+            updateLeaderboardUI(data.leaderboard);
+        } else {
+            if (list) list.innerHTML = '<p style="color:#ef4444;text-align:center;font-size:13px;padding:20px;">⚠️ Leaderboard load nahi hua. Thodi der baad try karo.</p>';
+        }
+    } catch (e) {
+        if (list) list.innerHTML = '<p style="color:#ef4444;text-align:center;font-size:13px;padding:20px;">⚠️ Connection error. Please refresh.</p>';
+    }
 }
 
 function updateLeaderboardUI(leaderboardData) {
@@ -2849,6 +2856,7 @@ function switchTab(tabId, el) {
 
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     if (el) el.classList.add('active');
+    try { sessionStorage.setItem('activeTab', tabId); } catch(_) {}
 
     const titleMap = {
         rewards:     'Rewards',
@@ -3907,6 +3915,17 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // Tournament: silently load status + show dot indicator
     setTimeout(_initTournamentIndicator, 2000);
+
+    // BUG FIX: Refresh ke baad last active tab restore karo
+    try {
+        const savedTab = sessionStorage.getItem('activeTab');
+        if (savedTab && savedTab !== 'rewards' && document.getElementById(savedTab)) {
+            const navItems = document.querySelectorAll('.nav-item');
+            const tabOrder = ['rewards', 'tasks', 'leaderboard', 'refer', 'profile'];
+            const tabIdx = tabOrder.indexOf(savedTab);
+            switchTab(savedTab, tabIdx >= 0 ? navItems[tabIdx] : null);
+        }
+    } catch(_) {}
 });
 
 // ============================================================
