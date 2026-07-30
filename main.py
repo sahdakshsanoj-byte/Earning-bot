@@ -8576,16 +8576,16 @@ def cmd_set_total_rounds(message):
     if len(parts) < 3:
         return bot.reply_to(
             message,
-            "📋 *Usage:* `/settotalrounds <tournament_id> <rounds>`
+ "📋 *Usage:* `/settotalrounds <tournament_id> <rounds>`
 
 "
-            "*Example:*
+  "*Example:*
 "
-            "`/settotalrounds t_123456 3`
+ "`/settotalrounds t_123456 3`
 
 "
-            "IDs dekhne ke liye: `/listtournaments`",
-            parse_mode="Markdown",
+ "IDs dekhne ke liye: `/listtournaments`",
+  parse_mode="Markdown",
         )
     tid = parts[1].strip()
     try:
