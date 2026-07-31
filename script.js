@@ -2718,7 +2718,7 @@ async function requestRupeeWithdraw() {
     const method   = _selectedRupeeMethod;
 
     if (!rawAmt || isNaN(amount)) return showToast("Please enter a valid amount!", "error");
-    if (amount < 10)              return showToast("Minimum withdrawal is ₹10.", "error");
+    if (amount < 50)              return showToast("Minimum withdrawal is ₹50.", "error");
 
     // ── 5 Referral Check for Rupee Withdrawal ─────────────────────────────
     if (CONFIG.REFERRAL_ACTIVE === true) {
@@ -2770,16 +2770,39 @@ async function requestRupeeWithdraw() {
 }
 
 // ── RUPEE REFERRAL PROGRESS UI ──────────────────────────────────────────────
+// Reuses the same referral-check logic as the coins withdrawal.
+// When REFERRAL_ACTIVE is false the requirement is bypassed automatically.
 function updateRupeeRefUI(refCount, refNeeded) {
-    const text = document.getElementById('rupee-ref-progress-text');
-    const bar  = document.getElementById('rupee-ref-progress-bar');
-    const box  = document.getElementById('rupee-ref-requirement-box');
+    const text  = document.getElementById('rupee-ref-progress-text');
+    const bar   = document.getElementById('rupee-ref-progress-bar');
+    const box   = document.getElementById('rupee-ref-requirement-box');
+    const hint  = document.getElementById('rupee-ref-hint');
+    const wdBtn = document.getElementById('rupee-withdraw-btn');
     if (!text || !bar) return;
-    const met = refCount >= refNeeded;
-    text.innerText   = `${refCount} / ${refNeeded}${met ? ' ✅' : ''}`;
+
+    const bypass = CONFIG.REFERRAL_ACTIVE === false;
+    const met    = bypass || refCount >= refNeeded;
+
+    // Progress text & bar
+    text.innerText   = bypass ? '✅ Not Required' : `${refCount} / ${refNeeded}${met ? ' ✅' : ''}`;
     text.style.color = met ? '#22c55e' : '#ef4444';
-    bar.style.width  = Math.min((refCount / refNeeded) * 100, 100) + '%';
+    bar.style.width  = bypass ? '100%' : Math.min((refCount / refNeeded) * 100, 100) + '%';
+    bar.style.background = met
+        ? 'linear-gradient(90deg,#22c55e,#16a34a)'
+        : 'linear-gradient(90deg,#ef4444,#b91c1c)';
+
+    // Card border colour
     if (box) box.style.borderColor = met ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)';
+
+    // Hint message — shown only when requirement is not met
+    if (hint) hint.style.display = met ? 'none' : '';
+
+    // Enable / disable the Withdraw button
+    if (wdBtn) {
+        wdBtn.disabled        = !met;
+        wdBtn.style.opacity   = met ? '1'           : '0.45';
+        wdBtn.style.cursor    = met ? 'pointer'     : 'not-allowed';
+    }
 }
 
 async function loadRupeeHistory() {
@@ -3792,52 +3815,147 @@ function _renderTournament(t, winners, roundsData) {
         </div>`;
     }
 
-    // BUG FIX T6: Leaderboard API exist karti thi lekin koi frontend button nahi tha.
-    // Ab match_live aur completed status mein "View Leaderboard" button dikhega.
-    const _showLbBtn = t.status === 'match_live' || t.status === 'completed';
+    // Per-tournament 🏆 Leaderboard button — always visible for every tournament.
+    // Access control is handled inside openTournamentLeaderboard():
+    //   • completed  → public final leaderboard (no registration needed)
+    //   • otherwise  → shows "⚠️ Join this tournament to view the leaderboard." if not registered
+    const _lbLabel = t.status === 'completed'
+        ? '🏆 Final Leaderboard'
+        : (t.status === 'match_live' ? '📊 Live Leaderboard' : '🏆 Leaderboard');
+    const _lbStyle = t.status === 'completed'
+        ? 'background:rgba(241,196,15,0.12);border:1px solid rgba(241,196,15,0.30);color:#f1c40f;'
+        : t.status === 'match_live'
+            ? 'background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.30);color:#f87171;'
+            : 'background:rgba(99,102,241,0.10);border:1px solid rgba(99,102,241,0.28);color:#818cf8;';
     html += `
     <div style="height:14px;"></div>
-    ${_showLbBtn ? `
     <button onclick="openTournamentLeaderboard('${_esc(_selectedTid)}')"
         style="width:100%;margin-bottom:8px;padding:10px;
-               background:rgba(99,102,241,0.10);border:1px solid rgba(99,102,241,0.28);
-               border-radius:10px;color:#818cf8;font-size:12px;font-weight:700;cursor:pointer;">
-        📊 View Live Leaderboard
-    </button>` : ''}
+               ${_lbStyle}
+               border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;">
+        ${_lbLabel}
+    </button>
     <button onclick="loadTournamentById('${_esc(_selectedTid)}', true)" style="width:100%;padding:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;color:#64748b;font-size:12px;cursor:pointer;">↻ Refresh</button>
     </div>`;  // close t-body
 
     content.innerHTML = html;
 }
 
-// BUG FIX T6: Tournament leaderboard modal — per-team kills, points, rounds breakdown
+// Per-tournament leaderboard — every tournament has its own separate leaderboard.
+// Access rules:
+//   • completed tournaments  → public final leaderboard, anyone can view
+//   • all other statuses     → user must be registered to view; shows join-prompt otherwise
 async function openTournamentLeaderboard(tid) {
     const content = document.getElementById('tournament-content');
     if (content) content.innerHTML = '<div style="padding:20px;text-align:center;color:#64748b;font-size:12px;">⏳ Loading leaderboard...</div>';
 
+    // ── Frontend registration gate (fast path — no extra API call needed) ──
+    // For completed tournaments skip the gate so final results are always public.
+    const cachedTournament = (_tournamentCache[tid] || {}).tournament;
+    const isCompleted      = cachedTournament?.status === 'completed';
+
+    if (!isCompleted) {
+        const reg = _tournamentRegCache[tid] || { registered: false };
+        if (!reg.registered) {
+            // User hasn't joined this tournament — show join-prompt instead of leaderboard
+            if (content) content.innerHTML = `
+                <div class="t-body">
+                    <div style="text-align:center;padding:36px 20px;">
+                        <span style="font-size:46px;display:block;margin-bottom:14px;">🔒</span>
+                        <p style="font-size:16px;font-weight:800;color:#e2e8f0;margin:0 0 8px;">Leaderboard Locked</p>
+                        <p style="font-size:13px;color:#94a3b8;margin:0 0 20px;line-height:1.6;">
+                            ⚠️ Join this tournament to view the leaderboard.
+                        </p>
+                        <button onclick="loadTournamentById('${_esc(tid)}', false)"
+                            style="width:100%;padding:11px;background:linear-gradient(135deg,#f1c40f,#e67e22);
+                                   color:#000;font-size:13px;font-weight:800;border:none;
+                                   border-radius:12px;cursor:pointer;margin-bottom:8px;">
+                            🏆 Register Now
+                        </button>
+                        <button onclick="loadTournamentById('${_esc(tid)}', false)"
+                            style="width:100%;padding:10px;background:rgba(255,255,255,0.04);
+                                   border:1px solid rgba(255,255,255,0.08);border-radius:10px;
+                                   color:#64748b;font-size:12px;cursor:pointer;">
+                            ← Back to Tournament
+                        </button>
+                    </div>
+                </div>`;
+            return;
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     try {
-        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/tournament/${encodeURIComponent(tid)}/leaderboard`);
-        const data = await res.json();
+        // Pass user_id so the backend can also enforce the registration gate
+        const uid    = window._tgUser?.id || '';
+        const uidQs  = uid ? `?user_id=${encodeURIComponent(uid)}` : '';
+        const res    = await fetchWithRetry(
+            `${CONFIG.API_BASE_URL}/tournament/${encodeURIComponent(tid)}/leaderboard${uidQs}`
+        );
+        const data   = await res.json();
+
+        // Backend returned not_joined (edge-case: cache was stale)
+        if (data.status === 'not_joined') {
+            if (content) content.innerHTML = `
+                <div class="t-body">
+                    <div style="text-align:center;padding:36px 20px;">
+                        <span style="font-size:46px;display:block;margin-bottom:14px;">🔒</span>
+                        <p style="font-size:16px;font-weight:800;color:#e2e8f0;margin:0 0 8px;">Leaderboard Locked</p>
+                        <p style="font-size:13px;color:#94a3b8;margin:0 0 20px;line-height:1.6;">
+                            ⚠️ Join this tournament to view the leaderboard.
+                        </p>
+                        <button onclick="loadTournamentById('${_esc(tid)}', false)"
+                            style="width:100%;padding:11px;background:linear-gradient(135deg,#f1c40f,#e67e22);
+                                   color:#000;font-size:13px;font-weight:800;border:none;
+                                   border-radius:12px;cursor:pointer;margin-bottom:8px;">
+                            🏆 Register Now
+                        </button>
+                        <button onclick="loadTournamentById('${_esc(tid)}', false)"
+                            style="width:100%;padding:10px;background:rgba(255,255,255,0.04);
+                                   border:1px solid rgba(255,255,255,0.08);border-radius:10px;
+                                   color:#64748b;font-size:12px;cursor:pointer;">
+                            ← Back to Tournament
+                        </button>
+                    </div>
+                </div>`;
+            return;
+        }
+
         if (data.status !== 'success') throw new Error(data.message || 'API error');
 
         const board       = data.leaderboard || [];
         const totalRounds = data.total_rounds || 1;
         const rankEmoji   = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
+        // Header label differs for completed vs live tournaments
+        const lbTitle = data.is_completed
+            ? '🏆 Final Leaderboard'
+            : `📊 Live Leaderboard · ${data.current_round || 0}/${totalRounds} rounds played`;
+
         let html = '<div class="t-body">';
-        html += `<p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 12px;">
-                    📊 Tournament Leaderboard
-                    <span style="font-size:10px;font-weight:500;color:#475569;text-transform:none;margin-left:6px;">
-                        ${data.current_round || 0}/${totalRounds} rounds played
-                    </span>
-                 </p>`;
+        html += `<p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;
+                           letter-spacing:0.8px;margin:0 0 12px;">${lbTitle}</p>`;
+
+        // If completed, show a "Tournament Ended" ribbon
+        if (data.is_completed) {
+            html += `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
+                        background:rgba(241,196,15,0.08);border:1px solid rgba(241,196,15,0.25);
+                        border-radius:12px;margin-bottom:12px;">
+                <span style="font-size:22px;">🏆</span>
+                <div>
+                    <p style="font-size:13px;font-weight:800;color:#f1c40f;margin:0;">Tournament Completed</p>
+                    <p style="font-size:11px;color:#64748b;margin:2px 0 0;">Final standings — these results are official.</p>
+                </div>
+            </div>`;
+        }
 
         if (board.length === 0) {
             html += `<div style="text-align:center;padding:30px;color:#475569;font-size:13px;">
                         No results yet. Results will appear after each round.
                      </div>`;
         } else {
-            // Round headers
+            // Round column headers
             let roundCols = '';
             for (let rn = 1; rn <= totalRounds; rn++) {
                 roundCols += `<span style="flex:0.8;text-align:center;font-size:10px;color:#64748b;font-weight:700;">R${rn}</span>`;
@@ -3852,15 +3970,15 @@ async function openTournamentLeaderboard(tid) {
             </div>`;
 
             board.forEach(row => {
-                const pos       = row.position || '?';
-                const isTop3    = pos <= 3;
-                const teamBg    = pos === 1 ? 'rgba(241,196,15,0.07)' : pos === 2 ? 'rgba(148,163,184,0.06)' : pos === 3 ? 'rgba(180,83,9,0.07)' : 'rgba(255,255,255,0.025)';
-                const teamBdr   = pos === 1 ? 'rgba(241,196,15,0.25)' : pos === 2 ? 'rgba(148,163,184,0.18)' : pos === 3 ? 'rgba(180,83,9,0.20)' : 'rgba(255,255,255,0.06)';
+                const pos     = row.position || '?';
+                const isTop3  = pos <= 3;
+                const teamBg  = pos === 1 ? 'rgba(241,196,15,0.07)' : pos === 2 ? 'rgba(148,163,184,0.06)' : pos === 3 ? 'rgba(180,83,9,0.07)' : 'rgba(255,255,255,0.025)';
+                const teamBdr = pos === 1 ? 'rgba(241,196,15,0.25)' : pos === 2 ? 'rgba(148,163,184,0.18)' : pos === 3 ? 'rgba(180,83,9,0.20)' : 'rgba(255,255,255,0.06)';
 
                 let roundPts = '';
                 for (let rn = 1; rn <= totalRounds; rn++) {
                     const pts = row.rounds?.[rn] ?? '—';
-                    roundPts += `<span style="flex:0.8;text-align:center;font-size:11px;color:${typeof pts==='number' ? '#e2e8f0' : '#475569'};">${pts}</span>`;
+                    roundPts += `<span style="flex:0.8;text-align:center;font-size:11px;color:${typeof pts === 'number' ? '#e2e8f0' : '#475569'};">${pts}</span>`;
                 }
                 html += `
                 <div style="display:flex;align-items:center;gap:6px;padding:8px;
