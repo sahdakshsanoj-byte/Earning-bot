@@ -16,7 +16,6 @@ window._tgUser = tg.initDataUnsafe?.user || null;
 let userData = {};
 let _winnerPopupShown = false;   // guard: show winner popup only once per session
 const _pendingRequests = new Set();
-let _fetchLiveDataRunning = false;
 let monetagSdkPromise  = null;
 let monetagPreloaded   = false;
 
@@ -339,12 +338,9 @@ async function claimDaily() {
 // MAIN DATA FETCH
 // ============================================================
 async function fetchLiveData() {
-    if (_fetchLiveDataRunning) return;
-_fetchLiveDataRunning = true;
     if (!userId) {
         const bal = document.getElementById('balance');
         if (bal) bal.innerText = "ID Error";
-        _fetchLiveDataRunning = false;
         return;
     }
     try {
@@ -458,8 +454,6 @@ _fetchLiveDataRunning = true;
     } catch (err) {
         showToast("⚠️ Connection error. Retrying...", "error");
         setTimeout(fetchLiveData, 15000);
-        } finally {
-          _fetchLiveDataRunning = false;
     }
 }
 
@@ -2367,7 +2361,7 @@ async function checkDevice() {
             body:    JSON.stringify({ user_id: userId, fingerprint })
         });
         const data = await res.json();
-        if (data.status === "blocked") { setTimeout(showBlockedView,0);
+        if (data.status === "blocked") showBlockedView();
     } catch (e) { /* silent */ }
 }
 
