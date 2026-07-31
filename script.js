@@ -14,10 +14,15 @@ window.USER_ID = userId;
 window._tgUser = tg.initDataUnsafe?.user || null;
 
 let userData = {};
-let _winnerPopupShown = false;   // guard: show winner popup only once per session
-const _pendingRequests = new Set();
-let monetagSdkPromise  = null;
-let monetagPreloaded   = false;
+let _winnerPopupShown    = false;   // guard: show winner popup only once per session
+const _pendingRequests   = new Set();
+let monetagSdkPromise    = null;
+let monetagPreloaded     = false;
+// BUG FIX #1: Block confirmation guard — need 2 consecutive 'blocked' responses
+// to avoid cold-start / temporary API error triggering showBlockedView()
+let _blockVotes          = 0;
+// BUG FIX #2: fetchLiveData overlap guard — prevent concurrent API calls
+let _fetchLiveDataRunning = false;
 
 // ============================================================
 // CONSTANTS
@@ -338,16 +343,32 @@ async function claimDaily() {
 // MAIN DATA FETCH
 // ============================================================
 async function fetchLiveData() {
+    // BUG FIX #2: Prevent overlapping concurrent calls
+    if (_fetchLiveDataRunning) return;
+    _fetchLiveDataRunning = true;
+
     if (!userId) {
         const bal = document.getElementById('balance');
         if (bal) bal.innerText = "ID Error";
+        _fetchLiveDataRunning = false;
         return;
     }
     try {
         const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_user/${userId}`);
         const data = await res.json();
 
-        if (data.status === "blocked") { showBlockedView(); return; }
+        // BUG FIX #1: Require 2 consecutive 'blocked' responses before blocking UI.
+        // This prevents a Render cold-start or temp error from hiding all tabs.
+        if (data.status === "blocked") {
+            _blockVotes++;
+            if (_blockVotes >= 2) { showBlockedView(); return; }
+            // First vote — retry once after a short delay to confirm
+            setTimeout(fetchLiveData, 5000);
+            _fetchLiveDataRunning = false;
+            return;
+        }
+        // Reset block votes on any successful non-blocked response
+        _blockVotes = 0;
 
         if (data.status === "success") {
             userData = data;
@@ -418,7 +439,9 @@ async function fetchLiveData() {
             // Update rupee withdrawal referral progress UI
             updateRupeeRefUI(refCount, isPremium ? 2 : 5);
 
-            if (data.leaderboard && data.leaderboard !== "none") updateLeaderboardUI(data.leaderboard);
+            // BUG FIX #4: Only update leaderboard UI when leaderboard tab is actually visible
+            const _lbTabActive = document.getElementById('leaderboard')?.classList.contains('active-tab');
+            if (_lbTabActive && data.leaderboard && data.leaderboard !== "none") updateLeaderboardUI(data.leaderboard);
 
             const linkEl = document.getElementById('display-link');
             if (linkEl) linkEl.innerText = `https://t.me/${CONFIG.BOT_USERNAME}?start=${userId}`;
@@ -454,6 +477,9 @@ async function fetchLiveData() {
     } catch (err) {
         showToast("⚠️ Connection error. Retrying...", "error");
         setTimeout(fetchLiveData, 15000);
+    } finally {
+        // BUG FIX #2: Always release the running lock
+        _fetchLiveDataRunning = false;
     }
 }
 
@@ -1759,27 +1785,47 @@ async function refreshBalance() {
 // ============================================================
 // LEADERBOARD
 // ============================================================
+// BUG FIX #3: refreshLeaderboard — show loading immediately, handle Render cold starts
 async function refreshLeaderboard() {
     const list = document.getElementById('leaderboard-list');
     if (!list) return;
 
-    // ✅ FIX: Pehle already-loaded cached data instantly dikhao
-    if (userData && userData.leaderboard && userData.leaderboard !== "none") {
+    const hasCachedData = userData && userData.leaderboard && userData.leaderboard !== "none";
+
+    // Immediately show cached data if available, otherwise show a loading spinner
+    if (hasCachedData) {
         updateLeaderboardUI(userData.leaderboard);
+    } else {
+        list.innerHTML = '<div style="text-align:center;padding:24px;"><p style="color:#6e7e96;font-size:13px;">⏳ Loading leaderboard...</p></div>';
     }
 
-    // Background mein fresh data fetch karo
-    try {
-        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_leaderboard`);
+    // Fetch fresh data — with one automatic retry for Render cold starts
+    const _tryFetch = async () => {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_leaderboard`, {}, 3, 3000);
         const data = await res.json();
+        return data;
+    };
+
+    try {
+        let data;
+        try {
+            data = await _tryFetch();
+        } catch (_firstErr) {
+            // Render cold start — wait 4s and try once more
+            await new Promise(r => setTimeout(r, 4000));
+            data = await _tryFetch();
+        }
+
         if (data.status === "success" && data.leaderboard) {
+            // Persist fresh data to cache so tab switching stays fast
+            if (userData) userData.leaderboard = data.leaderboard;
             updateLeaderboardUI(data.leaderboard);
-        } else if (!userData?.leaderboard || userData.leaderboard === "none") {
+        } else if (!hasCachedData) {
             list.innerHTML = '<div style="text-align:center;padding:24px;"><p style="color:#6e7e96;font-size:13px;margin-bottom:12px;">🏆 No rankings yet. Earn coins and climb to the top!</p></div>';
         }
     } catch (e) {
-        // Agar cached data dikh raha hai toh error mat dikhao
-        if (!userData?.leaderboard || userData.leaderboard === "none") {
+        // Only show error when there's nothing cached to display
+        if (!hasCachedData) {
             list.innerHTML = `<div style="text-align:center;padding:24px;">
                 <p style="color:#ef4444;font-size:13px;margin-bottom:12px;">⚠️ Load nahi hua. Retry karo.</p>
                 <button onclick="refreshLeaderboard()" style="background:rgba(212,160,23,0.15);border:1px solid rgba(212,160,23,0.3);color:var(--gold);border-radius:10px;padding:8px 20px;font-size:13px;font-weight:700;cursor:pointer;">🔄 Retry</button>
@@ -2361,8 +2407,12 @@ async function checkDevice() {
             body:    JSON.stringify({ user_id: userId, fingerprint })
         });
         const data = await res.json();
-        if (data.status === "blocked") showBlockedView();
-    } catch (e) { /* silent */ }
+        // BUG FIX #1: Use _blockVotes — same double-confirmation guard as fetchLiveData()
+        if (data.status === "blocked") {
+            _blockVotes++;
+            if (_blockVotes >= 2) showBlockedView();
+        }
+    } catch (e) { /* silent — checkDevice failure should never block the UI */ }
 }
 
 // ============================================================
