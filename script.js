@@ -23,6 +23,8 @@ let monetagPreloaded     = false;
 let _blockVotes          = 0;
 // BUG FIX #2: fetchLiveData overlap guard — prevent concurrent API calls
 let _fetchLiveDataRunning = false;
+// Tournament T&C — accepted once per session
+let _tournamentTncAccepted = false;
 
 // ============================================================
 // CONSTANTS
@@ -3898,7 +3900,118 @@ async function openTournamentLeaderboard(tid) {
     }
 }
 
+// ============================================================
+// TOURNAMENT TERMS & CONDITIONS POPUP
+// ============================================================
+function _showTournamentTnC(onAccept) {
+    // Remove any existing instance
+    const existing = document.getElementById('_tnc-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = '_tnc-overlay';
+    overlay.style.cssText = [
+        'position:fixed', 'inset:0', 'z-index:99999',
+        'background:rgba(0,0,0,0.82)', 'backdrop-filter:blur(6px)',
+        'display:flex', 'align-items:center', 'justify-content:center',
+        'padding:16px', 'box-sizing:border-box'
+    ].join(';');
+
+    overlay.innerHTML = `
+        <div style="
+            background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);
+            border:1px solid rgba(241,196,15,0.30);
+            border-radius:20px; padding:22px 20px 20px;
+            max-width:360px; width:100%; max-height:88vh;
+            overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.7);
+            font-family:inherit;
+        ">
+            <h3 style="margin:0 0 4px;font-size:17px;color:#f1c40f;text-align:center;">
+                🏆 Tournament Terms & Conditions
+            </h3>
+            <p style="margin:0 0 14px;font-size:11px;color:#64748b;text-align:center;">
+                Please read carefully before joining
+            </p>
+
+            <div style="
+                background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07);
+                border-radius:12px; padding:14px; margin-bottom:16px;
+                font-size:12.5px; color:#94a3b8; line-height:1.7;
+            ">
+                <p style="margin:0 0 8px;color:#cbd5e1;font-weight:700;">📋 General Rules</p>
+                <p style="margin:0 0 6px;">• Entry fee is <b style="color:#f87171;">non-refundable</b> once registration is confirmed.</p>
+                <p style="margin:0 0 6px;">• Players must use their own Free Fire UID & Nickname. Fake details will lead to <b>disqualification</b>.</p>
+                <p style="margin:0 0 6px;">• Cheating, hacking, or using any unfair means is strictly prohibited. Violators will be permanently banned.</p>
+                <p style="margin:0 0 6px;">• You must join the in-game room on time. Late entries will not be accommodated.</p>
+                <p style="margin:0 0 6px;">• Results declared by the organizer are <b>final</b> and cannot be disputed.</p>
+
+                <p style="margin:10px 0 8px;color:#cbd5e1;font-weight:700;">💰 Prize & Payout</p>
+                <p style="margin:0 0 6px;">• Prize is credited to your in-app Rupee Wallet within 24 hours of result declaration.</p>
+                <p style="margin:0 0 6px;">• Daksh Grand Earn reserves the right to disqualify any suspicious account without prior notice.</p>
+
+                <p style="margin:10px 0 8px;color:#cbd5e1;font-weight:700;">⚠️ Disclaimer</p>
+                <p style="margin:0;">• By registering, you confirm that you are eligible to participate and you accept all rules without exception.</p>
+            </div>
+
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:16px;user-select:none;">
+                <input type="checkbox" id="_tnc-checkbox" style="
+                    width:18px;height:18px;accent-color:#f1c40f;cursor:pointer;flex-shrink:0;
+                ">
+                <span style="font-size:13px;color:#e2e8f0;line-height:1.4;">
+                    I have read and agree to the <b style="color:#f1c40f;">Terms & Conditions</b>
+                </span>
+            </label>
+
+            <div style="display:flex;gap:10px;">
+                <button id="_tnc-cancel" style="
+                    flex:1; background:rgba(255,255,255,0.06);
+                    border:1px solid rgba(255,255,255,0.10);
+                    color:#94a3b8; border-radius:12px;
+                    padding:12px; font-size:13px; font-weight:700;
+                    cursor:pointer;
+                ">✖ Cancel</button>
+                <button id="_tnc-proceed" style="
+                    flex:2; background:linear-gradient(135deg,#d4a017,#f1c40f);
+                    border:none; color:#0f172a; border-radius:12px;
+                    padding:12px; font-size:13px; font-weight:800;
+                    cursor:pointer; opacity:0.45; transition:opacity 0.2s;
+                " disabled>✅ Proceed</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const checkbox = overlay.querySelector('#_tnc-checkbox');
+    const proceedBtn = overlay.querySelector('#_tnc-proceed');
+    const cancelBtn  = overlay.querySelector('#_tnc-cancel');
+
+    // Enable Proceed only when checkbox is ticked
+    checkbox.addEventListener('change', () => {
+        proceedBtn.disabled = !checkbox.checked;
+        proceedBtn.style.opacity = checkbox.checked ? '1' : '0.45';
+    });
+
+    cancelBtn.addEventListener('click', () => overlay.remove());
+
+    proceedBtn.addEventListener('click', () => {
+        if (!checkbox.checked) return;
+        _tournamentTncAccepted = true;   // remember for this session
+        overlay.remove();
+        onAccept();                      // run the original join logic
+    });
+
+    // Tap outside to dismiss
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
 async function registerForTournament() {
+    // Show T&C popup first — on accept it re-calls this function (with flag set)
+    if (!_tournamentTncAccepted) {
+        _showTournamentTnC(() => registerForTournament());
+        return;
+    }
+
     const btn     = document.getElementById('t-reg-btn');
     const msg     = document.getElementById('t-reg-msg');
     // Detect mode from which form is rendered
