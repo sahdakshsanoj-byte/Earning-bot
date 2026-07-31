@@ -5159,20 +5159,51 @@ def tournament_register_api():
 
 @app.route("/tournament/<string:tid>/leaderboard", methods=["GET"])
 def tournament_leaderboard_api(tid: str):
-    """Tournament ka full leaderboard return karo (per-round breakdown included)."""
+    """Tournament ka full leaderboard return karo (per-round breakdown included).
+
+    Query params:
+        user_id (optional) — agar diya gaya toh non-completed tournaments ke liye
+                             registration verify ki jaati hai. Bina registration ke
+                             'not_joined' status return hota hai.
+    """
     try:
         t = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"_id": 0})
         if not t:
             return jsonify({"status": "error", "message": "Tournament not found."}), 404
-        board = calculate_tournament_leaderboard(tid)
+
+        t_status = t.get("status", "coming_soon")
+        is_completed = (t_status == "completed")
+
+        # ── Registration gate: completed tournaments are public;
+        #    all others require the user to have joined. ──────────────────────
+        if not is_completed:
+            user_id_str = request.args.get("user_id", "").strip()
+            if user_id_str:
+                try:
+                    uid = int(user_id_str)
+                    reg = tournament_registrations_col.find_one(
+                        {"tournament_id": tid, "user_id": uid},
+                        {"_id": 1},
+                    )
+                    if not reg:
+                        return jsonify({
+                            "status":  "not_joined",
+                            "message": "⚠️ Join this tournament to view the leaderboard.",
+                        }), 200
+                except (ValueError, TypeError):
+                    pass  # user_id parse nahi hua — gate skip karo
+        # ────────────────────────────────────────────────────────────────────
+
+        board        = calculate_tournament_leaderboard(tid)
         total_rounds = int(t.get("total_rounds", 1))
         return jsonify({
-            "status":       "success",
+            "status":        "success",
             "tournament_id": tid,
-            "title":        t.get("title", ""),
-            "total_rounds": total_rounds,
+            "title":         t.get("title", ""),
+            "total_rounds":  total_rounds,
             "current_round": int(t.get("current_round", 0)),
-            "leaderboard":  board,
+            "leaderboard":   board,
+            "is_completed":  is_completed,
         })
     except Exception as exc:
         logger.error("tournament_leaderboard_api error for %s: %s", tid, exc)
