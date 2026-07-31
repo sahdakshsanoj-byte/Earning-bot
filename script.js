@@ -2361,7 +2361,7 @@ async function checkDevice() {
             body:    JSON.stringify({ user_id: userId, fingerprint })
         });
         const data = await res.json();
-        if (data.status === "blocked") showBlockedView();
+        if (data.status === "blocked") { setTimeout(showBlockedView,0);
     } catch (e) { /* silent */ }
 }
 
