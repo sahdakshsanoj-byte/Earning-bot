@@ -434,6 +434,8 @@ def get_feature_config() -> dict:
     DB se spin_active + mining_active + bomb_box_active fetch karo.
     Default: sab active.
     Admin /togglespin, /togglemining, /togglebomb se control kar sakta hai.
+    Also returns tournament_lock_active + tournament_lock_features for the
+    optional Tournament Lock Mode (admin/tournament_lock endpoint se set hota hai).
     """
     global _feature_cfg_cache, _feature_cfg_cache_time
     now = time.time()
@@ -449,11 +451,15 @@ def get_feature_config() -> dict:
             # is wajah se frontend mein dono hamesha LOCKED dikhte the
             "web_tasks_active": bool(doc.get("web_tasks_active", True)),
             "premium_active":   bool(doc.get("premium_active",   True)),
+            # ── Tournament Lock Mode ──────────────────────────────────────────
+            "tournament_lock_active":   bool(doc.get("tournament_lock_active",   False)),
+            "tournament_lock_features": list(doc.get("tournament_lock_features", [])),
         }
     except Exception:
         merged = {
             "spin_active": True, "mining_active": True, "bomb_box_active": True,
             "web_tasks_active": True, "premium_active": True,  # BUG FIX #1
+            "tournament_lock_active": False, "tournament_lock_features": [],
         }
     _feature_cfg_cache      = merged
     _feature_cfg_cache_time = now
@@ -5171,12 +5177,17 @@ def tournament_leaderboard_api(tid: str):
         if not t:
             return jsonify({"status": "error", "message": "Tournament not found."}), 404
 
-        t_status = t.get("status", "coming_soon")
+        t_status     = t.get("status", "coming_soon")
         is_completed = (t_status == "completed")
+        is_live      = (t_status == "match_live")
 
-        # ── Registration gate: completed tournaments are public;
-        #    all others require the user to have joined. ──────────────────────
-        if not is_completed:
+        # ── Registration gate ─────────────────────────────────────────────
+        # PUBLIC  (no gate):  match_live — live scoreboard har koi dekh sakta hai
+        #                     completed  — final results bhi public hain
+        # GATED   (need reg): registration_open / registration_closed / coming_soon
+        # ─────────────────────────────────────────────────────────────────
+        is_public = is_completed or is_live
+        if not is_public:
             user_id_str = request.args.get("user_id", "").strip()
             if user_id_str:
                 try:
@@ -5192,7 +5203,7 @@ def tournament_leaderboard_api(tid: str):
                         }), 200
                 except (ValueError, TypeError):
                     pass  # user_id parse nahi hua — gate skip karo
-        # ────────────────────────────────────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────
 
         board        = calculate_tournament_leaderboard(tid)
         total_rounds = int(t.get("total_rounds", 1))
@@ -5204,6 +5215,7 @@ def tournament_leaderboard_api(tid: str):
             "current_round": int(t.get("current_round", 0)),
             "leaderboard":   board,
             "is_completed":  is_completed,
+            "is_live":       is_live,
         })
     except Exception as exc:
         logger.error("tournament_leaderboard_api error for %s: %s", tid, exc)
@@ -5589,6 +5601,65 @@ def admin_set_feature():
     status = "UNLOCKED \u2705" if active else "LOCKED \U0001f512"
     logger.info("Admin set %s → %s", feature, status)
     return jsonify({"status": "success", "message": f"{label} is now {status}"})
+
+
+# ── Lockable feature names accepted by tournament_lock endpoint ──────────────
+_TL_LOCKABLE = frozenset({
+    "rewards", "tasks", "spin", "mining", "lottery", "bomb_box", "refer",
+})
+
+
+@app.route("/admin/tournament_lock", methods=["POST"])
+def admin_tournament_lock():
+    """
+    Tournament Lock Mode — admin ek click mein selected features ko lock/unlock kare.
+
+    Request body (JSON):
+        active   : bool  — true = lock mode enable, false = disable
+        features : list  — (optional) feature names to lock.
+                           Valid: rewards, tasks, spin, mining, lottery, bomb_box, refer.
+                           Tournament, Leaderboard, Profile are NEVER lockable.
+                           Omit to keep the existing feature list unchanged.
+
+    Examples:
+        {"active": true,  "features": ["tasks", "spin", "mining", "lottery"]}
+        {"active": false}                      # disable, keep feature list as-is
+        {"active": true,  "features": []}      # lock mode on but nothing selected
+    """
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+
+    data     = request.get_json(silent=True) or {}
+    active   = bool(data.get("active", False))
+    features = data.get("features")          # None means "don't change the list"
+
+    update_fields: dict = {"tournament_lock_active": active}
+
+    if features is not None:
+        if not isinstance(features, list):
+            return jsonify({"status": "error", "message": "'features' must be a list"}), 400
+        locked_clean = [str(f).strip().lower() for f in features
+                        if str(f).strip().lower() in _TL_LOCKABLE]
+        update_fields["tournament_lock_features"] = locked_clean
+
+    config_col.update_one(
+        {"_id": "feature_config"},
+        {"$set": update_fields},
+        upsert=True,
+    )
+    _bust_feature_cache()
+
+    cfg     = get_feature_config()
+    status  = "ENABLED 🔒" if active else "DISABLED ✅"
+    locked  = cfg.get("tournament_lock_features", [])
+    logger.info("Admin tournament lock → %s | features: %s", status, locked)
+
+    return jsonify({
+        "status":           "success",
+        "message":          f"Tournament Lock Mode {status}",
+        "lock_active":      active,
+        "locked_features":  locked,
+    })
 
 
 @app.route("/admin/broadcast_photo", methods=["POST"])
