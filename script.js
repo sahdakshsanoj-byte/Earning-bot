@@ -888,6 +888,12 @@ async function loadSpinStatus() {
         const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
         const cfg    = await cfgRes.json();
 
+        // ── Tournament Lock Mode — applied once per feature-config fetch ──
+        // This reuses the existing /get_feature_config call so no extra API
+        // request is needed; it covers all tabs and cards in one shot.
+        applyTournamentLock(cfg);
+        // ─────────────────────────────────────────────────────────────────
+
         if (!cfg.spin_active) {
             _applyFeatureLock(card, 'spin-lock-overlay', '🎡 Spin Wheel Coming Soon!');
             return;
@@ -2965,6 +2971,24 @@ function openAdminTelegram() {
 // TAB SWITCHER
 // ============================================================
 function switchTab(tabId, el) {
+    // ── Tournament Lock Mode intercept ────────────────────────────────────
+    // Leaderboard, Profile, and Tournament Hub are NEVER blocked.
+    const _TL_SAFE_TABS = new Set(['leaderboard', 'profile', 'tournament', 'history']);
+    if (!_TL_SAFE_TABS.has(tabId)) {
+        const tlCfg = window._featureCfgCache;
+        if (tlCfg && tlCfg.tournament_lock_active) {
+            const locked = new Set(tlCfg.tournament_lock_features || []);
+            // Map tab IDs to feature keys (bomb-box uses bomb_box key)
+            const featureKey = tabId === 'bomb-box' ? 'bomb_box' : tabId;
+            if (locked.has(featureKey)) {
+                // Still switch to the tab — the overlay already sits on top
+                // (applied by applyTournamentLock). This lets users see the
+                // lock message with the "View Tournament" button.
+            }
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
     document.querySelectorAll('.tab-content').forEach(t => { t.style.display = 'none'; t.classList.remove('active-tab'); });
     const tab = document.getElementById(tabId);
     if (tab) { tab.style.display = 'block'; tab.classList.add('active-tab'); }
@@ -3198,6 +3222,149 @@ function _removeWithdrawLock(withdrawTab) {
         const stale = withdrawTab.querySelector('.refer-lock-overlay');
         if (stale) stale.remove();
     }
+}
+
+// ============================================================
+// TOURNAMENT LOCK MODE
+// ============================================================
+// Admin can enable this anytime via POST /admin/tournament_lock.
+// When active, selected features show a lock overlay. Tournament,
+// Leaderboard, and Profile are ALWAYS accessible.
+
+const _TL_MSG = '🔒 Tournament is Live. This feature is temporarily unavailable.';
+
+// Last known feature config — set by loadSpinStatus() on every refresh.
+// Used by switchTab() without requiring an extra API call.
+window._featureCfgCache = null;
+
+/**
+ * Apply or remove tournament lock overlays across all configured features.
+ * Called automatically each time the feature config is fetched (loadSpinStatus).
+ * @param {object} cfg — result from /get_feature_config
+ */
+function applyTournamentLock(cfg) {
+    // Cache for switchTab() to reuse without an extra fetch
+    window._featureCfgCache = cfg;
+
+    const lockActive = !!(cfg && cfg.tournament_lock_active);
+    const locked     = new Set(lockActive ? (cfg.tournament_lock_features || []) : []);
+
+    // ── TAB containers (rewards / tasks / refer) ─────────────────────────
+    const TAB_MAP = {
+        rewards: 'rewards',
+        tasks:   'tasks',
+        refer:   'refer',
+    };
+    Object.entries(TAB_MAP).forEach(([key, tabId]) => {
+        const tabEl = document.getElementById(tabId);
+        if (!tabEl) return;
+        if (lockActive && locked.has(key)) {
+            _tl_applyOverlay(tabEl, 'tl-tab-lock-' + key);
+        } else {
+            _tl_removeOverlay(tabEl, 'tl-tab-lock-' + key);
+        }
+    });
+
+    // ── Feature cards (spin / mining / bomb_box) ─────────────────────────
+    const CARD_MAP = {
+        spin:     'spin-card',
+        mining:   'mining-card',
+        bomb_box: 'bomb-box-card',
+    };
+    Object.entries(CARD_MAP).forEach(([key, cardId]) => {
+        const cardEl = document.getElementById(cardId);
+        if (!cardEl) return;
+        if (lockActive && locked.has(key)) {
+            _tl_applyOverlay(cardEl, 'tl-card-lock-' + key);
+        } else {
+            _tl_removeOverlay(cardEl, 'tl-card-lock-' + key);
+        }
+    });
+
+    // ── Lottery card ──────────────────────────────────────────────────────
+    const lotteryCard = document.getElementById('lottery-card');
+    if (lotteryCard) {
+        if (lockActive && locked.has('lottery')) {
+            _tl_applyOverlay(lotteryCard, 'tl-card-lock-lottery');
+        } else {
+            _tl_removeOverlay(lotteryCard, 'tl-card-lock-lottery');
+        }
+    }
+
+    // ── Nav item visual dimming (🔒 on locked nav items) ─────────────────
+    // Map: tabId used in onclick → feature key
+    const NAV_FEATURE_MAP = {
+        rewards: 'rewards',
+        tasks:   'tasks',
+        refer:   'refer',
+        spin:    'spin',
+        mining:  'mining',
+        'bomb-box': 'bomb_box',
+    };
+    document.querySelectorAll('.nav-item').forEach(nav => {
+        const onclickAttr = nav.getAttribute('onclick') || '';
+        const match = onclickAttr.match(/switchTab\('([^']+)'/);
+        if (!match) return;
+        const tabId      = match[1];
+        const featureKey = NAV_FEATURE_MAP[tabId];
+        if (!featureKey) return;
+        if (lockActive && locked.has(featureKey)) {
+            nav.style.opacity = '0.45';
+            // Add tiny lock badge if not already there
+            if (!nav.querySelector('.tl-nav-lock')) {
+                const badge = document.createElement('span');
+                badge.className  = 'tl-nav-lock';
+                badge.textContent = '🔒';
+                badge.style.cssText =
+                    'position:absolute;top:2px;right:2px;font-size:9px;line-height:1;';
+                nav.style.position = 'relative';
+                nav.appendChild(badge);
+            }
+        } else {
+            nav.style.opacity = '';
+            const badge = nav.querySelector('.tl-nav-lock');
+            if (badge) badge.remove();
+        }
+    });
+}
+
+/** Inject a tournament-lock overlay onto a container element. */
+function _tl_applyOverlay(el, cls) {
+    if (!el) return;
+    if (el.querySelector('.' + cls)) return;   // already present
+    if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+    el.style.overflow = 'hidden';
+
+    const ov = document.createElement('div');
+    ov.className  = cls + ' tl-overlay';
+    ov.style.cssText =
+        'position:absolute;inset:0;z-index:9990;' +
+        'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+        'background:rgba(7,13,26,0.93);backdrop-filter:blur(8px);' +
+        '-webkit-backdrop-filter:blur(8px);' +
+        'padding:28px 20px;text-align:center;pointer-events:all;cursor:default;' +
+        'border-radius:inherit;';
+    ov.innerHTML =
+        '<span style="font-size:48px;display:block;margin-bottom:14px;' +
+        'animation:lock-pulse 1.8s ease-in-out infinite;">🔒</span>' +
+        '<p style="font-size:15px;font-weight:800;color:#f1c40f;margin:0 0 8px;letter-spacing:0.3px;">' +
+        'Tournament Mode Active</p>' +
+        '<p style="font-size:12px;color:#94a3b8;line-height:1.65;margin:0 0 20px;">' +
+        _TL_MSG + '</p>' +
+        '<button onclick="openTournamentHub(event)" ' +
+        'style="padding:10px 22px;background:linear-gradient(135deg,#f1c40f,#e67e22);' +
+        'color:#000;font-size:12px;font-weight:800;border:none;border-radius:12px;cursor:pointer;">' +
+        '🏆 View Tournament</button>';
+    ov.addEventListener('click',      e => e.stopPropagation());
+    ov.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+    el.appendChild(ov);
+}
+
+/** Remove a tournament-lock overlay from an element. */
+function _tl_removeOverlay(el, cls) {
+    if (!el) return;
+    const ov = el.querySelector('.' + cls);
+    if (ov) ov.remove();
 }
 
 // ============================================================
@@ -3849,15 +4016,20 @@ async function openTournamentLeaderboard(tid) {
     const content = document.getElementById('tournament-content');
     if (content) content.innerHTML = '<div style="padding:20px;text-align:center;color:#64748b;font-size:12px;">⏳ Loading leaderboard...</div>';
 
-    // ── Frontend registration gate (fast path — no extra API call needed) ──
-    // For completed tournaments skip the gate so final results are always public.
+    // ── Frontend registration gate ────────────────────────────────────────
+    // PUBLIC  (no gate): match_live  — live scoreboard, sabhi dekh sakte hain
+    //                    completed   — final results bhi public
+    // GATED   (join needed): registration_open / registration_closed / coming_soon
     const cachedTournament = (_tournamentCache[tid] || {}).tournament;
-    const isCompleted      = cachedTournament?.status === 'completed';
+    const _tStatus    = cachedTournament?.status || '';
+    const isCompleted = _tStatus === 'completed';
+    const isLive      = _tStatus === 'match_live';
+    const isPublic    = isCompleted || isLive;   // no gate for live + completed
 
-    if (!isCompleted) {
+    if (!isPublic) {
         const reg = _tournamentRegCache[tid] || { registered: false };
         if (!reg.registered) {
-            // User hasn't joined this tournament — show join-prompt instead of leaderboard
+            // User hasn't joined — show join-prompt instead of leaderboard
             if (content) content.innerHTML = `
                 <div class="t-body">
                     <div style="text-align:center;padding:36px 20px;">
@@ -3927,16 +4099,18 @@ async function openTournamentLeaderboard(tid) {
         const totalRounds = data.total_rounds || 1;
         const rankEmoji   = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
-        // Header label differs for completed vs live tournaments
+        // Header label
         const lbTitle = data.is_completed
             ? '🏆 Final Leaderboard'
-            : `📊 Live Leaderboard · ${data.current_round || 0}/${totalRounds} rounds played`;
+            : data.is_live
+                ? `🔴 Live Leaderboard · Round ${data.current_round || 0}/${totalRounds}`
+                : `📊 Tournament Leaderboard · ${data.current_round || 0}/${totalRounds} rounds played`;
 
         let html = '<div class="t-body">';
         html += `<p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;
                            letter-spacing:0.8px;margin:0 0 12px;">${lbTitle}</p>`;
 
-        // If completed, show a "Tournament Ended" ribbon
+        // Status banner — completed or live
         if (data.is_completed) {
             html += `
             <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
@@ -3948,12 +4122,34 @@ async function openTournamentLeaderboard(tid) {
                     <p style="font-size:11px;color:#64748b;margin:2px 0 0;">Final standings — these results are official.</p>
                 </div>
             </div>`;
+        } else if (data.is_live) {
+            html += `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
+                        background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.28);
+                        border-radius:12px;margin-bottom:12px;">
+                <span style="font-size:22px;animation:lock-pulse 1.8s ease-in-out infinite;">🔴</span>
+                <div>
+                    <p style="font-size:13px;font-weight:800;color:#f87171;margin:0;">Match is Live!</p>
+                    <p style="font-size:11px;color:#64748b;margin:2px 0 0;">Scores update after each round is submitted by admin.</p>
+                </div>
+            </div>`;
         }
 
         if (board.length === 0) {
-            html += `<div style="text-align:center;padding:30px;color:#475569;font-size:13px;">
+            // Different empty message for live vs pre-match
+            const emptyMsg = data.is_live
+                ? `<div style="text-align:center;padding:30px 16px;">
+                        <span style="font-size:40px;display:block;margin-bottom:12px;">⏳</span>
+                        <p style="color:#e2e8f0;font-size:14px;font-weight:700;margin:0 0 6px;">Match in Progress...</p>
+                        <p style="color:#64748b;font-size:12px;margin:0;line-height:1.6;">
+                            Round results will appear here once admin submits scores.<br>
+                            Tap <b style="color:#94a3b8;">↻ Refresh</b> after each round!
+                        </p>
+                   </div>`
+                : `<div style="text-align:center;padding:30px;color:#475569;font-size:13px;">
                         No results yet. Results will appear after each round.
-                     </div>`;
+                   </div>`;
+            html += emptyMsg;
         } else {
             // Round column headers
             let roundCols = '';
