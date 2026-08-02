@@ -129,6 +129,7 @@ try:
     tournament_registrations_col  = db["tournament_registrations"]
     tournament_winners_col        = db["tournament_winners"]
     tournament_rounds_col         = db["tournament_rounds"]   # Rounds per tournament
+    tournament_results_col        = db["tournament_results"]  # Per-round team results
 
     try:
         rate_col.create_index("expires_at", expireAfterSeconds=0)
@@ -173,6 +174,11 @@ try:
             [("tournament_id", 1), ("round_no", 1)], unique=True, **_idx_opts
         )
         tournament_rounds_col.create_index("tournament_id", **_idx_opts)
+        # Tournament results indexes
+        tournament_results_col.create_index(
+            [("tournament_id", 1), ("round_no", 1), ("team_id", 1)], unique=True, **_idx_opts
+        )
+        tournament_results_col.create_index("tournament_id", **_idx_opts)
         # Referral commissions indexes
         referral_commissions_col.create_index("event_id", unique=True, **_idx_opts)
         referral_commissions_col.create_index("sponsor_id", **_idx_opts)
@@ -5415,6 +5421,93 @@ def admin_tournament_registrations_api():
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
+@app.route("/tournament/<string:tid>/leaderboard", methods=["GET"])
+def tournament_leaderboard_api(tid: str):
+    """
+    Public leaderboard for a tournament.
+    Aggregates results from tournament_results_col and returns ranked teams.
+    Query params: user_id (optional, for future gating)
+    """
+    tid = tid.strip()
+    if not tid:
+        return jsonify({"status": "error", "message": "tournament_id required."}), 400
+
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"_id": 0})
+        if not t:
+            return jsonify({"status": "error", "message": "Tournament not found."}), 404
+
+        t_status      = t.get("status", "coming_soon")
+        total_rounds  = int(t.get("total_rounds", 1))
+        current_round = int(t.get("current_round", 1))
+        is_live       = t_status == "match_live"
+        is_completed  = t_status == "completed"
+
+        # Fetch all round results for this tournament
+        raw_results = list(
+            tournament_results_col.find(
+                {"tournament_id": tid},
+                {"_id": 0, "tournament_id": 0}
+            )
+        )
+
+        if not raw_results:
+            return jsonify({
+                "status":        "success",
+                "leaderboard":   [],
+                "total_rounds":  total_rounds,
+                "current_round": current_round,
+                "is_live":       is_live,
+                "is_completed":  is_completed,
+            })
+
+        # Aggregate by team_id
+        teams: dict = {}
+        for r in raw_results:
+            team_id   = r.get("team_id", "")
+            team_name = r.get("team_name", team_id)
+            round_no  = int(r.get("round_no", 1))
+            pts       = int(r.get("total_points", 0))
+            kills     = int(r.get("kills", 0))
+
+            if team_id not in teams:
+                teams[team_id] = {
+                    "team_id":     team_id,
+                    "team_name":   team_name,
+                    "total_points": 0,
+                    "total_kills":  0,
+                    "rounds":      {},
+                }
+            teams[team_id]["total_points"] += pts
+            teams[team_id]["total_kills"]  += kills
+            teams[team_id]["rounds"][round_no] = pts
+
+        # Sort: highest points first, then kills as tiebreaker
+        sorted_teams = sorted(
+            teams.values(),
+            key=lambda x: (-x["total_points"], -x["total_kills"])
+        )
+
+        # Assign positions
+        leaderboard = []
+        for pos, team in enumerate(sorted_teams, start=1):
+            team["position"] = pos
+            leaderboard.append(team)
+
+        return jsonify({
+            "status":        "success",
+            "leaderboard":   leaderboard,
+            "total_rounds":  total_rounds,
+            "current_round": current_round,
+            "is_live":       is_live,
+            "is_completed":  is_completed,
+        })
+
+    except Exception as exc:
+        logger.error("tournament_leaderboard_api error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
 # ── Admin API: feature lock/unlock ────────────────────────────
 
 @app.route("/admin/set_feature", methods=["POST"])
@@ -8103,9 +8196,9 @@ def cmd_next_round(message):
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
-@bot.message_handler(commands=["addresult_disabled"])
+@bot.message_handler(commands=["addresult"])
 def cmd_add_result(message):
-    """Removed — leaderboard feature disabled."""
+    """Admin: /addresult <tournament_id> <round_no> <team_id> <rank> <kills>"""
     if int(message.from_user.id) != ADMIN_ID:
         return
     parts = message.text.strip().split()
