@@ -478,6 +478,7 @@
                 🏆
                 <span id="t-trophy-dot" style="display:none; position:absolute; top:-2px; right:-2px; width:7px; height:7px; background:#ef4444; border-radius:50%; border:1.5px solid #0a0e1a;"></span>
             </div>
+            <div onclick="openPublicLeaderboard()" id="lb-crown-btn" style="cursor:pointer; font-size:20px;" title="Tournament Leaderboard">👑</div>
             <div onclick="switchTab('history', this)" style="cursor:pointer; font-size:24px; color:var(--gold);">⋮</div>
         </div>
     </div>
@@ -509,6 +510,52 @@
                 </div>
             </div>
 
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         PUBLIC TOURNAMENT LEADERBOARD MODAL
+         ═══════════════════════════════════════════ -->
+    <div id="pub-lb-modal" style="display:none; position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,0.78); backdrop-filter:blur(4px); overflow-y:auto; -webkit-overflow-scrolling:touch;">
+        <div id="pub-lb-box" style="background:linear-gradient(180deg,#0f1523 0%,#0a0e1a 100%); border:1px solid rgba(139,92,246,0.18); border-radius:20px 20px 0 0; min-height:88vh; margin-top:6vh; padding-bottom:40px; position:relative; max-width:480px; margin-left:auto; margin-right:auto; box-shadow:0 0 60px rgba(139,92,246,0.10);">
+
+            <!-- Header Band -->
+            <div style="background:linear-gradient(135deg,rgba(139,92,246,0.15),rgba(241,196,15,0.08)); border-bottom:1px solid rgba(139,92,246,0.18); padding:18px 20px 14px; position:relative; border-radius:20px 20px 0 0;">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:2px;">
+                    <span style="font-size:26px;">👑</span>
+                    <div>
+                        <h3 style="color:#a78bfa; margin:0; font-size:17px; font-weight:800; letter-spacing:0.3px;">Tournament Leaderboard</h3>
+                        <p style="font-size:11px; color:#64748b; margin:0;">Enter Tournament ID &amp; Team ID to view</p>
+                    </div>
+                </div>
+                <div onclick="closePublicLeaderboard()" class="t-close-btn">✕</div>
+            </div>
+
+            <!-- Content -->
+            <div style="padding:16px;">
+                <!-- Search form -->
+                <div style="margin-bottom:14px;">
+                    <input type="text" id="pub-lb-tid"
+                        class="t-input"
+                        placeholder="Enter Tournament ID (e.g. FF25-A8KQ)"
+                        autocomplete="off"
+                        autocapitalize="characters"
+                        style="margin-bottom:10px;" />
+                    <input type="text" id="pub-lb-teamid"
+                        class="t-input"
+                        placeholder="Enter Team ID (e.g. T001)"
+                        autocomplete="off"
+                        autocapitalize="characters"
+                        style="margin-bottom:12px;" />
+                    <button onclick="viewPublicLeaderboard()" id="pub-lb-view-btn"
+                        class="t-reg-btn"
+                        style="background:linear-gradient(135deg,#a78bfa,#7c3aed);">
+                        👑 View Leaderboard
+                    </button>
+                </div>
+                <!-- Results -->
+                <div id="pub-lb-result"></div>
+            </div>
         </div>
     </div>
 
