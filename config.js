@@ -15,6 +15,20 @@ const CONFIG = {
     ADMIN_TELEGRAM: "@cdotern_help",
 
     // ──────────────────────────────────────────────────────────
+    // ADMIN UPI PAYMENT DETAILS  ← NEW (Required for Premium)
+    //
+    //   ADMIN_UPI     → UPI ID shown in the premium payment modal
+    //                   Example: "yourname@paytm", "name@okicici"
+    //
+    //   ADMIN_QR_URL  → URL of your UPI QR code image
+    //                   Can be an absolute URL: "https://yoursite.com/qr.jpg"
+    //                   Or a relative path:     "payment_qr.jpg"  (file in same folder)
+    //                   Leave empty "" to auto-detect payment_qr.jpg from folder
+    // ──────────────────────────────────────────────────────────
+    ADMIN_UPI:     "sahdaksh@fam",
+    ADMIN_QR_URL:  "",              // e.g. "https://yourcdn.com/upi_qr.jpg" or "payment_qr.jpg"
+
+    // ──────────────────────────────────────────────────────────
     // LOTTERY LOCK
     //
     //   true  → Lottery card visible & active (users can buy tickets)
