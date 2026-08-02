@@ -3982,26 +3982,8 @@ function _renderTournament(t, winners, roundsData) {
         </div>`;
     }
 
-    // Per-tournament 🏆 Leaderboard button — always visible for every tournament.
-    // Access control is handled inside openTournamentLeaderboard():
-    //   • completed  → public final leaderboard (no registration needed)
-    //   • otherwise  → shows "⚠️ Join this tournament to view the leaderboard." if not registered
-    const _lbLabel = t.status === 'completed'
-        ? '🏆 Final Leaderboard'
-        : (t.status === 'match_live' ? '📊 Live Leaderboard' : '🏆 Leaderboard');
-    const _lbStyle = t.status === 'completed'
-        ? 'background:rgba(241,196,15,0.12);border:1px solid rgba(241,196,15,0.30);color:#f1c40f;'
-        : t.status === 'match_live'
-            ? 'background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.30);color:#f87171;'
-            : 'background:rgba(99,102,241,0.10);border:1px solid rgba(99,102,241,0.28);color:#818cf8;';
     html += `
     <div style="height:14px;"></div>
-    <button onclick="openTournamentLeaderboard('${_esc(_selectedTid)}')"
-        style="width:100%;margin-bottom:8px;padding:10px;
-               ${_lbStyle}
-               border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;">
-        ${_lbLabel}
-    </button>
     <button onclick="loadTournamentById('${_esc(_selectedTid)}', true)" style="width:100%;padding:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;color:#64748b;font-size:12px;cursor:pointer;">↻ Refresh</button>
     </div>`;  // close t-body
 
