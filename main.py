@@ -6094,8 +6094,9 @@ def admin_panel_command(message):
         "\u2022 /balance `<user_id>` \u2014 User balance\n"
         "\u2022 /health \u2014 Server CPU/RAM/uptime status\n\n"
         "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
-        "\U0001f4b0 *Coins*\n"
+        "\U0001f4b0 *Coins & Rupees*\n"
         "\u2022 /addcoins `<user_id> <amount>` \u2014 Add coins\n"
+        "\u2022 /addrupees `<user_id> <amount>` \u2014 Add rupees (₹)\n"
         "\u2022 /penalty `<user_id> <amount>` \u2014 Deduct coins\n\n"
         "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
         "\U0001f4b8 *Withdrawals*\n"
@@ -6124,7 +6125,14 @@ def admin_panel_command(message):
         "\U0001f3a1 *Spin Wheel & Mining*\n"
         "\u2022 /togglespin \u2014 Lock \U0001f512 / Unlock \u2705 Spin Wheel\n"
         "\u2022 /togglemining \u2014 Lock \U0001f512 / Unlock \u2705 Coin Mining\n"
-        "\u2022 /featurestatus \u2014 Check spin & mining lock status\n\n"
+        "\u2022 /featurestatus \u2014 Check all feature lock status\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+        "\U0001f512 *Tournament Lock Mode*\n"
+        "\u2022 /togglelock \u2014 Lock mode ON \U0001f512 / OFF \u2705\n"
+        "\u2022 /lockfeatures `<features...>` \u2014 Kaunse features lock hon\n"
+        "  Valid: `rewards` `tasks` `spin` `mining` `lottery` `bomb_box` `refer`\n"
+        "  Example: `/lockfeatures tasks spin mining`\n"
+        "  Disable all: `/lockfeatures off`\n\n"
         "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
         "\U0001f6ab *User Management*\n"
         "\u2022 /block `<user_id>` \u2014 Block user\n"
@@ -6228,6 +6236,10 @@ def feature_status_command(message):
         bomb_s      = "✅ Unlocked" if cfg.get("bomb_box_active")  else "🔒 Locked"
         webtasks_s  = "✅ Unlocked" if cfg.get("web_tasks_active") else "🔒 Locked"
         premium_s   = "✅ Unlocked" if cfg.get("premium_active")   else "🔒 Locked"
+        tl_active   = cfg.get("tournament_lock_active", False)
+        tl_s        = "🔒 ACTIVE" if tl_active else "✅ Off"
+        tl_features = cfg.get("tournament_lock_features", [])
+        tl_feat_str = ", ".join(tl_features) if tl_features else "none"
         bot.reply_to(
             message,
             f"🎡 *Feature Status*\n\n"
@@ -6236,11 +6248,133 @@ def feature_status_command(message):
             f"💣 Bomb Box:      {bomb_s}\n"
             f"🌐 Web Tasks:     {webtasks_s}\n"
             f"💎 Premium Card:  {premium_s}\n\n"
-            f"Commands: /togglespin /togglemining /togglebomb /togglewebtasks /togglepremium",
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🏆 *Tournament Lock Mode:* {tl_s}\n"
+            f"🔐 Locked features: `{tl_feat_str}`\n\n"
+            f"Commands: /togglespin /togglemining /togglebomb /togglewebtasks /togglepremium\n"
+            f"Lock cmds: /togglelock · /lockfeatures",
             parse_mode="Markdown",
         )
     except Exception as exc:
         logger.error("featurestatus error: %s", exc)
+        bot.reply_to(message, "Server error. Please try again.")
+
+
+@bot.message_handler(commands=["togglelock"])
+def toggle_lock_command(message):
+    """Admin: /togglelock — Tournament Lock Mode on/off karo."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        cfg     = get_feature_config()
+        current = bool(cfg.get("tournament_lock_active", False))
+        new_val = not current
+
+        config_col.update_one(
+            {"_id": "feature_config"},
+            {"$set": {"tournament_lock_active": new_val}},
+            upsert=True,
+        )
+        _bust_feature_cache()
+
+        locked   = cfg.get("tournament_lock_features", [])
+        feat_str = ", ".join(locked) if locked else "none (use /lockfeatures to set)"
+
+        if new_val:
+            status_line = "🔒 *ENABLED* — Selected features are now locked for users."
+        else:
+            status_line = "✅ *DISABLED* — All features restored to normal."
+
+        bot.reply_to(
+            message,
+            f"🏆 *Tournament Lock Mode*\n\n"
+            f"{status_line}\n\n"
+            f"🔐 Locked features: `{feat_str}`\n\n"
+            f"_Tip: Use /lockfeatures to change which features get locked._",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin toggled tournament_lock_active → %s", new_val)
+    except Exception as exc:
+        logger.error("togglelock error: %s", exc)
+        bot.reply_to(message, "Server error. Please try again.")
+
+
+@bot.message_handler(commands=["lockfeatures"])
+def lock_features_command(message):
+    """Admin: /lockfeatures <features...> — Tournament lock mein kaunse features lock hon.
+
+    Usage:
+        /lockfeatures tasks spin mining refer rewards lottery bomb_box
+        /lockfeatures tasks spin        ← sirf yeh do lock honge
+        /lockfeatures off               ← sab features unlock, lock mode bhi off
+
+    Valid features: rewards, tasks, spin, mining, lottery, bomb_box, refer
+    Tournament, Leaderboard, Profile are never lockable.
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        parts = message.text.strip().split()[1:]   # command ke baad ke words
+
+        if not parts:
+            bot.reply_to(
+                message,
+                "⚠️ *Usage:*\n"
+                "`/lockfeatures tasks spin mining refer`\n"
+                "`/lockfeatures off` — sab off kar do\n\n"
+                "Valid features:\n"
+                "`rewards` `tasks` `spin` `mining` `lottery` `bomb_box` `refer`",
+                parse_mode="Markdown",
+            )
+            return
+
+        # /lockfeatures off — disable lock mode and clear features
+        if len(parts) == 1 and parts[0].lower() == "off":
+            config_col.update_one(
+                {"_id": "feature_config"},
+                {"$set": {"tournament_lock_active": False, "tournament_lock_features": []}},
+                upsert=True,
+            )
+            _bust_feature_cache()
+            bot.reply_to(
+                message,
+                "✅ *Tournament Lock Mode OFF*\n\nSab features unlock ho gaye.",
+                parse_mode="Markdown",
+            )
+            return
+
+        # Filter only valid feature names
+        valid    = {"rewards", "tasks", "spin", "mining", "lottery", "bomb_box", "refer"}
+        selected = [p.strip().lower() for p in parts if p.strip().lower() in valid]
+        invalid  = [p.strip() for p in parts if p.strip().lower() not in valid and p.strip().lower() != "off"]
+
+        config_col.update_one(
+            {"_id": "feature_config"},
+            {"$set": {"tournament_lock_features": selected}},
+            upsert=True,
+        )
+        _bust_feature_cache()
+
+        cfg        = get_feature_config()
+        lock_on    = cfg.get("tournament_lock_active", False)
+        feat_str   = ", ".join(selected) if selected else "none"
+        warn_str   = f"\n⚠️ Unknown features ignored: `{'`, `'.join(invalid)}`" if invalid else ""
+        active_str = (
+            "🔒 Lock mode is currently *ACTIVE* — these features are locked now."
+            if lock_on else
+            "ℹ️ Lock mode is *OFF*. Use /togglelock to activate."
+        )
+
+        bot.reply_to(
+            message,
+            f"🏆 *Tournament Lock — Features Updated*\n\n"
+            f"🔐 Features set to lock: `{feat_str}`{warn_str}\n\n"
+            f"{active_str}",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin set tournament_lock_features → %s", selected)
+    except Exception as exc:
+        logger.error("lockfeatures error: %s", exc)
         bot.reply_to(message, "Server error. Please try again.")
 
 
