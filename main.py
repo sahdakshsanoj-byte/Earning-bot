@@ -129,7 +129,6 @@ try:
     tournament_registrations_col  = db["tournament_registrations"]
     tournament_winners_col        = db["tournament_winners"]
     tournament_rounds_col         = db["tournament_rounds"]   # Rounds per tournament
-    tournament_results_col        = db["tournament_results"]  # Per-team per-round results
 
     try:
         rate_col.create_index("expires_at", expireAfterSeconds=0)
@@ -169,16 +168,11 @@ try:
         tournament_registrations_col.create_index("user_id", **_idx_opts)
         tournament_registrations_col.create_index("tournament_id", **_idx_opts)
         tournament_winners_col.create_index("tournament_id", **_idx_opts)
-        # Tournament rounds & results indexes
+        # Tournament rounds indexes
         tournament_rounds_col.create_index(
             [("tournament_id", 1), ("round_no", 1)], unique=True, **_idx_opts
         )
         tournament_rounds_col.create_index("tournament_id", **_idx_opts)
-        tournament_results_col.create_index(
-            [("tournament_id", 1), ("round_no", 1), ("team_id", 1)], unique=True, **_idx_opts
-        )
-        tournament_results_col.create_index("tournament_id", **_idx_opts)
-        tournament_results_col.create_index("team_id", **_idx_opts)
         # Referral commissions indexes
         referral_commissions_col.create_index("event_id", unique=True, **_idx_opts)
         referral_commissions_col.create_index("sponsor_id", **_idx_opts)
@@ -290,80 +284,6 @@ def format_team_id(counter: int) -> str:
     """Integer counter ko T001 format mein convert karo."""
     return f"T{counter:03d}"
 
-
-def calculate_tournament_leaderboard(tid: str) -> list:
-    """
-    Ek tournament ka complete leaderboard calculate karo.
-    Returns: list of dicts sorted by (total_points DESC, total_kills DESC)
-    Each dict: {team_id, team_name, total_kills, total_points, rounds: {1: pts, 2: pts, ...}}
-
-    BUG FIX T7: Double-entry protection — agar same team ka same round result
-    dobara add ho jaye (admin galti se), totals galat nahi hone chahiye.
-    Ab round-level deduplication hoti hai: agar kisi round ki entry pehle se
-    hai toh totals ko adjust karke overwrite karo, blindly add nahi.
-    """
-    try:
-        # All results for this tournament
-        results = list(tournament_results_col.find(
-            {"tournament_id": tid}, {"_id": 0}
-        ))
-        if not results:
-            return []
-
-        # Get total_rounds from tournament
-        t = tournaments_col.find_one({"tournament_id": tid}, {"total_rounds": 1})
-        total_rounds = int(t.get("total_rounds", 1)) if t else 1
-
-        # Aggregate by team_id — with per-round deduplication
-        teams: dict = {}
-        for r in results:
-            team_id   = r.get("team_id", "")
-            team_name = r.get("team_name", "—")
-            rnd_no    = int(r.get("round_no", 1))
-            kills     = int(r.get("kills", 0))
-            total_pts = int(r.get("total_points", 0))
-            rank      = int(r.get("rank", 99))
-
-            if team_id not in teams:
-                teams[team_id] = {
-                    "team_id":      team_id,
-                    "team_name":    team_name,
-                    "total_kills":  0,
-                    "total_points": 0,
-                    "best_rank":    rank,
-                    "rounds":       {},       # round_no → {"pts": x, "kills": y}
-                }
-
-            existing_round = teams[team_id]["rounds"].get(rnd_no)
-            if existing_round:
-                # BUG FIX T7: Round already exists — subtract old values before adding new
-                # (handles admin accidentally re-submitting the same round's result)
-                teams[team_id]["total_kills"]  -= existing_round["kills"]
-                teams[team_id]["total_points"] -= existing_round["pts"]
-
-            # Now add the (new or updated) round entry
-            teams[team_id]["total_kills"]  += kills
-            teams[team_id]["total_points"] += total_pts
-            teams[team_id]["rounds"][rnd_no] = {"pts": total_pts, "kills": kills}
-
-            if rank < teams[team_id]["best_rank"]:
-                teams[team_id]["best_rank"] = rank
-
-        # Convert rounds dict to {round_no: pts} for API response compatibility
-        for td in teams.values():
-            td["rounds"] = {rn: v["pts"] for rn, v in td["rounds"].items()}
-
-        board = sorted(
-            teams.values(),
-            key=lambda x: (-x["total_points"], -x["total_kills"], x["best_rank"]),
-        )
-        for i, row in enumerate(board, 1):
-            row["position"] = i
-        return board
-    except Exception as exc:
-        import logging as _l
-        _l.getLogger(__name__).error("calculate_tournament_leaderboard error for %s: %s", tid, exc)
-        return []
 
 
 COMMISSION_RATE          = 0.10   # 10% commission on eligible earnings
@@ -5163,64 +5083,6 @@ def tournament_register_api():
 # 📊 TOURNAMENT LEADERBOARD + ROUNDS — API Endpoints
 # ============================================================
 
-@app.route("/tournament/<string:tid>/leaderboard", methods=["GET"])
-def tournament_leaderboard_api(tid: str):
-    """Tournament ka full leaderboard return karo (per-round breakdown included).
-
-    Query params:
-        user_id (optional) — agar diya gaya toh non-completed tournaments ke liye
-                             registration verify ki jaati hai. Bina registration ke
-                             'not_joined' status return hota hai.
-    """
-    try:
-        t = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"_id": 0})
-        if not t:
-            return jsonify({"status": "error", "message": "Tournament not found."}), 404
-
-        t_status     = t.get("status", "coming_soon")
-        is_completed = (t_status == "completed")
-        is_live      = (t_status == "match_live")
-
-        # ── Registration gate ─────────────────────────────────────────────
-        # PUBLIC  (no gate):  match_live — live scoreboard har koi dekh sakta hai
-        #                     completed  — final results bhi public hain
-        # GATED   (need reg): registration_open / registration_closed / coming_soon
-        # ─────────────────────────────────────────────────────────────────
-        is_public = is_completed or is_live
-        if not is_public:
-            user_id_str = request.args.get("user_id", "").strip()
-            if user_id_str:
-                try:
-                    uid = int(user_id_str)
-                    reg = tournament_registrations_col.find_one(
-                        {"tournament_id": tid, "user_id": uid},
-                        {"_id": 1},
-                    )
-                    if not reg:
-                        return jsonify({
-                            "status":  "not_joined",
-                            "message": "⚠️ Join this tournament to view the leaderboard.",
-                        }), 200
-                except (ValueError, TypeError):
-                    pass  # user_id parse nahi hua — gate skip karo
-        # ─────────────────────────────────────────────────────────────────
-
-        board        = calculate_tournament_leaderboard(tid)
-        total_rounds = int(t.get("total_rounds", 1))
-        return jsonify({
-            "status":        "success",
-            "tournament_id": tid,
-            "title":         t.get("title", ""),
-            "total_rounds":  total_rounds,
-            "current_round": int(t.get("current_round", 0)),
-            "leaderboard":   board,
-            "is_completed":  is_completed,
-            "is_live":       is_live,
-        })
-    except Exception as exc:
-        logger.error("tournament_leaderboard_api error for %s: %s", tid, exc)
-        return jsonify({"status": "error", "message": "Server error."}), 500
-
 
 @app.route("/tournament/<string:tid>/rounds", methods=["GET"])
 def tournament_rounds_api(tid: str):
@@ -5319,31 +5181,6 @@ def tournament_single_round_api(tid: str, round_no: int):
         logger.error("tournament_single_round_api error for %s round %d: %s", tid, round_no, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
-
-@app.route("/tournament/<string:tid>/results/<int:round_no>", methods=["GET"])
-def tournament_round_results_api(tid: str, round_no: int):
-    """Ek specific round ke saare team results return karo."""
-    try:
-        t = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"_id": 0})
-        if not t:
-            return jsonify({"status": "error", "message": "Tournament not found."}), 404
-        results = list(
-            tournament_results_col.find(
-                {"tournament_id": tid, "round_no": round_no}, {"_id": 0}
-            ).sort("rank", 1)
-        )
-        for r in results:
-            if r.get("recorded_at") and hasattr(r["recorded_at"], "isoformat"):
-                r["recorded_at"] = r["recorded_at"].isoformat()
-        return jsonify({
-            "status":        "success",
-            "tournament_id": tid,
-            "round_no":      round_no,
-            "results":       results,
-        })
-    except Exception as exc:
-        logger.error("tournament_round_results_api error: %s", exc)
-        return jsonify({"status": "error", "message": "Server error."}), 500
 
 
 @app.route("/tournament/my_registration/<int:user_id>", methods=["GET"])
@@ -8132,11 +7969,9 @@ def cmd_next_round(message):
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
-@bot.message_handler(commands=["addresult"])
+@bot.message_handler(commands=["addresult_disabled"])
 def cmd_add_result(message):
-    """/addresult <tournament_id> <round_no> <team_id> <rank> <kills>
-    Example: /addresult t_123456 1 T001 3 7
-    """
+    """Removed — leaderboard feature disabled."""
     if int(message.from_user.id) != ADMIN_ID:
         return
     parts = message.text.strip().split()
@@ -8220,120 +8055,11 @@ def cmd_add_result(message):
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
-@bot.message_handler(commands=["tournamentleaderboard"])
-def cmd_tournament_leaderboard(message):
-    """/tournamentleaderboard <tournament_id> — Full leaderboard dekho."""
-    if int(message.from_user.id) != ADMIN_ID:
-        return
-    parts = message.text.strip().split()
-    if len(parts) < 2:
-        return bot.reply_to(
-            message,
-            "📋 *Usage:* `/tournamentleaderboard <tournament_id>`\n\nIDs: `/listtournaments`",
-            parse_mode="Markdown",
-        )
-    tid = parts[1].strip()
-    try:
-        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
-        if not t:
-            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
-
-        board        = calculate_tournament_leaderboard(tid)
-        total_rounds = int(t.get("total_rounds", 1))
-        cur_round    = int(t.get("current_round", 0))
-
-        if not board:
-            return bot.reply_to(
-                message,
-                f"📊 *{t.get('title')} — Leaderboard*\n\nAbhi koi result nahi hai.\n"
-                f"Results add karo: `/addresult {tid} <round> <team_id> <rank> <kills>`",
-                parse_mode="Markdown",
-            )
-
-        # Build header
-        rnd_headers = "  ".join([f"R{r}" for r in range(1, total_rounds + 1)])
-        lines = [
-            f"📊 *{t.get('title', 'Tournament')} — Leaderboard*",
-            f"🔄 Round: {cur_round}/{total_rounds}  |  🆔 `{tid}`\n",
-            f"`{'Pos':<4} {'ID':<5} {'Team':<14} {rnd_headers:<{total_rounds*4}} {'Kills':<6} {'Total'}`",
-            "─" * 52,
-        ]
-        rank_emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
-        for row in board[:20]:
-            pos       = row["position"]
-            emoji     = rank_emojis.get(pos, f"#{pos}")
-            tid_str   = row["team_id"]
-            name      = (row["team_name"] or "—")[:13]
-            rnd_pts   = "  ".join([str(row["rounds"].get(r, 0)) for r in range(1, total_rounds + 1)])
-            kills     = row["total_kills"]
-            total     = row["total_points"]
-            lines.append(f"{str(emoji):<4} {tid_str:<5} {name:<14} {rnd_pts:<{total_rounds*4}} {kills:<6} {total}")
-
-        msg = "\n".join(lines)
-        if len(msg) > 4000:
-            msg = msg[:3980] + "\n_...top 20 shown_"
-
-        bot.reply_to(message, f"```\n{msg}\n```", parse_mode="Markdown")
-    except Exception as exc:
-        logger.error("cmd_tournament_leaderboard error: %s", exc)
-        bot.reply_to(message, "❌ Server error. Please try again.")
-
-
-@bot.message_handler(commands=["roundresults"])
-def cmd_round_results(message):
-    """/roundresults <tournament_id> <round_no> — Specific round ke results dekho."""
-    if int(message.from_user.id) != ADMIN_ID:
-        return
-    parts = message.text.strip().split()
-    if len(parts) < 3:
-        return bot.reply_to(
-            message,
-            "📋 *Usage:* `/roundresults <tournament_id> <round_no>`\n\n"
-            "*Example:* `/roundresults t_123456 2`",
-            parse_mode="Markdown",
-        )
-    tid = parts[1].strip()
-    try:
-        round_no = int(parts[2])
-    except ValueError:
-        return bot.reply_to(message, "❌ round_no sirf number mein dena hai.", parse_mode="Markdown")
-    try:
-        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
-        if not t:
-            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
-
-        results = list(
-            tournament_results_col.find(
-                {"tournament_id": tid, "round_no": round_no}, {"_id": 0}
-            ).sort("rank", 1)
-        )
-        if not results:
-            return bot.reply_to(
-                message,
-                f"📊 *Round {round_no} Results*\n\nKoi result nahi hai.\n"
-                f"Add karo: `/addresult {tid} {round_no} T001 1 8`",
-                parse_mode="Markdown",
-            )
-
-        rank_emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
-        lines       = [f"📊 *Round {round_no} Results — {t.get('title', 'Tournament')}*\n"]
-        for r in results:
-            pos   = int(r.get("rank", 0))
-            emoji = rank_emojis.get(pos, f"#{pos}")
-            lines.append(
-                f"{emoji} `{r.get('team_id','?')}` *{r.get('team_name','—')}*\n"
-                f"   📍 Rank #{pos} | 🔫 Kills: {r.get('kills',0)} | "
-                f"🏅 {r.get('placement_points',0)}+{r.get('kill_points',0)} = *{r.get('total_points',0)} pts*"
-            )
-        bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
-    except Exception as exc:
-        logger.error("cmd_round_results error: %s", exc)
-        bot.reply_to(message, "❌ Server error. Please try again.")
 
 
 @bot.message_handler(commands=["finishtournament"])
 def cmd_finish_tournament(message):
-    """/finishtournament <tournament_id> — Tournament finish karo, final leaderboard se auto-winners declare."""
+    """/finishtournament <tournament_id> — Tournament ko completed mark karo."""
     if int(message.from_user.id) != ADMIN_ID:
         return
     parts = message.text.strip().split()
@@ -8341,7 +8067,8 @@ def cmd_finish_tournament(message):
         return bot.reply_to(
             message,
             "📋 *Usage:* `/finishtournament <tournament_id>`\n\n"
-            "Final leaderboard calculate hoga aur top 3 winners auto-declare ho jaayenge.\n"
+            "Tournament completed mark ho jaayega.\n"
+            "Winners manually set karne ke liye: `/setwinners <id> ...`\n"
             "IDs: `/listtournaments`",
             parse_mode="Markdown",
         )
@@ -8359,62 +8086,23 @@ def cmd_finish_tournament(message):
                 {"$set": {"status": "completed", "ended_at": datetime.utcnow()}},
             )
 
-        # Calculate final leaderboard
-        board = calculate_tournament_leaderboard(tid)
-        if not board:
-            return bot.reply_to(
-                message,
-                f"❌ Koi result nahi hai tournament mein! Pehle results add karo.\n"
-                f"Use: `/addresult {tid} <round> <team_id> <rank> <kills>`",
-                parse_mode="Markdown",
-            )
-
-        # Store top 3 winners
-        rank_emojis  = {1: "🥇", 2: "🥈", 3: "🥉"}
-        rank_labels  = {1: "Winner 🏆", 2: "Runner-up 🥈", 3: "Third Place 🥉"}
-        winner_docs  = []
-        winner_lines = []
-
-        for row in board[:3]:
-            pos  = row["position"]
-            doc  = {
-                "tournament_id": tid,
-                "rank":          pos,
-                "team_id":       row["team_id"],
-                "username":      row["team_name"],
-                "total_points":  row["total_points"],
-                "total_kills":   row["total_kills"],
-                "reward":        "—",
-                "published_at":  datetime.utcnow(),
-            }
-            winner_docs.append(doc)
-            winner_lines.append(
-                f"{rank_emojis.get(pos,'🏅')} *{rank_labels.get(pos, f'#{pos}')}*\n"
-                f"   `{row['team_id']}` {row['team_name']}\n"
-                f"   🎯 {row['total_points']} pts  |  🔫 {row['total_kills']} kills"
-            )
-
-        tournament_winners_col.delete_many({"tournament_id": tid})
-        if winner_docs:
-            tournament_winners_col.insert_many(winner_docs)
-
+        # Mark tournament as completed
         tournaments_col.update_one(
             {"tournament_id": tid},
             {"$set": {"status": "completed"}},
         )
 
-        total_rounds = int(t.get("total_rounds", 1))
         announce_text = (
-            f"🏆 *{t.get('title', 'Tournament')} — Final Results!*\n\n"
-            f"🔄 Rounds Played: {total_rounds}\n\n"
-            + "\n".join(winner_lines)
-            + "\n\n🎉 Congrats to all winners! Stay tuned for more!"
+            f"🏆 *{t.get('title', 'Tournament')} — Tournament Completed!*\n\n"
+            f"🎉 Thanks to all participants! Stay tuned for more tournaments!"
         )
 
         bot.reply_to(
             message,
-            f"✅ *Tournament Finished!*\n\n{announce_text}\n\n"
-            f"💰 Winners ko coins dene ke liye: `/addcoins <user_id> <amount>`\n"
+            f"✅ *Tournament Finished!*\n\n"
+            f"🆔 `{tid}` marked as *completed*.\n\n"
+            f"Winners set karne ke liye: `/setwinners {tid} Nick:Reward | Nick:Reward | Nick:Reward`\n"
+            f"💰 Coins dene ke liye: `/addcoins <user_id> <amount>`\n"
             f"₹ Rupees dene ke liye: `/addrupees <user_id> <amount>`",
             parse_mode="Markdown",
         )
@@ -8431,7 +8119,7 @@ def cmd_finish_tournament(message):
         except Exception as ann_exc:
             logger.warning("Tournament finish announcement failed: %s", ann_exc)
 
-        logger.info("Admin finished tournament %s with %d winners", tid, len(winner_docs))
+        logger.info("Admin finished tournament %s", tid)
     except Exception as exc:
         logger.error("cmd_finish_tournament error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
