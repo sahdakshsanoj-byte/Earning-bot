@@ -3952,11 +3952,18 @@ function _renderTournament(t, winners, roundsData) {
                 `}
             </div>`;
 
-            // ── Team ID display (for squad/duo registrations)
+            // ── Tournament ID + Team ID display (for squad/duo registrations)
             const rd = reg.data || {};
             if (rd.team_id) {
                 html += `
-                <div style="margin-top:8px;padding:10px 14px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.25);border-radius:12px;display:flex;align-items:center;justify-content:space-between;">
+                <div style="margin-top:8px;padding:10px 14px;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.25);border-radius:12px;display:flex;align-items:center;justify-content:space-between;">
+                    <div>
+                        <p style="font-size:10px;color:#fbbf24;margin:0 0 2px;text-transform:uppercase;letter-spacing:0.5px;font-weight:700;">🏆 Tournament ID</p>
+                        <p style="font-size:22px;font-weight:900;color:#e2e8f0;margin:0;letter-spacing:1px;">${_esc(_selectedTid || '')}</p>
+                    </div>
+                    ${_selectedTid ? `<button onclick="navigator.clipboard.writeText('${_esc(_selectedTid)}').then(()=>showToast('Tournament ID copied! ✅','success'))" style="background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.35);border-radius:8px;padding:6px 12px;color:#fbbf24;font-size:11px;font-weight:700;cursor:pointer;">📋 Copy</button>` : ''}
+                </div>
+                <div style="margin-top:6px;padding:10px 14px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.25);border-radius:12px;display:flex;align-items:center;justify-content:space-between;">
                     <div>
                         <p style="font-size:10px;color:#a78bfa;margin:0 0 2px;text-transform:uppercase;letter-spacing:0.5px;font-weight:700;">🛡️ Your Team ID</p>
                         <p style="font-size:22px;font-weight:900;color:#e2e8f0;margin:0;letter-spacing:1px;">${_esc(rd.team_id)}</p>
@@ -4193,6 +4200,233 @@ async function openTournamentLeaderboard(tid) {
                     style="margin-top:8px;display:block;width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
                            border-radius:10px;color:#64748b;font-size:12px;padding:10px;cursor:pointer;">← Back</button>
              </div>`;
+    }
+}
+
+// ============================================================
+// PUBLIC TOURNAMENT LEADERBOARD  (Search by Tournament ID + Team ID)
+// ============================================================
+
+function openPublicLeaderboard() {
+    const modal = document.getElementById('pub-lb-modal');
+    if (!modal) return;
+    // Reset to search form
+    const tidEl    = document.getElementById('pub-lb-tid');
+    const teamEl   = document.getElementById('pub-lb-teamid');
+    const resultEl = document.getElementById('pub-lb-result');
+    const btnEl    = document.getElementById('pub-lb-view-btn');
+    if (tidEl)    tidEl.value = '';
+    if (teamEl)   teamEl.value = '';
+    if (resultEl) resultEl.innerHTML = '';
+    if (btnEl)    { btnEl.disabled = false; btnEl.textContent = '👑 View Leaderboard'; }
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+}
+
+function closePublicLeaderboard() {
+    const modal = document.getElementById('pub-lb-modal');
+    if (!modal) return;
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+async function viewPublicLeaderboard() {
+    const tidInput  = (document.getElementById('pub-lb-tid')?.value     || '').trim();
+    const teamInput = (document.getElementById('pub-lb-teamid')?.value   || '').trim();
+    const resultDiv = document.getElementById('pub-lb-result');
+    const btn       = document.getElementById('pub-lb-view-btn');
+
+    if (!tidInput || !teamInput) {
+        if (resultDiv) resultDiv.innerHTML = `
+        <div style="text-align:center;padding:20px;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.25);border-radius:12px;">
+            <p style="color:#f87171;font-size:13px;font-weight:700;margin:0;">⚠️ Please enter both Tournament ID and Team ID.</p>
+        </div>`;
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Loading...'; }
+    if (resultDiv) resultDiv.innerHTML = `<div style="text-align:center;padding:30px;color:#64748b;font-size:13px;">⏳ Verifying &amp; loading leaderboard...</div>`;
+
+    try {
+        const uid   = window._tgUser?.id || '';
+        const uidQs = uid ? `?user_id=${encodeURIComponent(uid)}` : '';
+        const res   = await fetchWithRetry(
+            `${CONFIG.API_BASE_URL}/tournament/${encodeURIComponent(tidInput)}/leaderboard${uidQs}`
+        );
+        const data  = await res.json();
+
+        // Invalid tournament or API error
+        if (!res.ok || (data.status && data.status !== 'success' && data.status !== 'not_joined')) {
+            if (resultDiv) resultDiv.innerHTML = `
+            <div style="text-align:center;padding:28px 20px;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.25);border-radius:14px;">
+                <span style="font-size:38px;display:block;margin-bottom:10px;">❌</span>
+                <p style="color:#f87171;font-size:14px;font-weight:800;margin:0 0 4px;">Invalid Tournament ID or Team ID</p>
+                <p style="color:#64748b;font-size:12px;margin:0;">Check the IDs and try again.</p>
+            </div>`;
+            return;
+        }
+
+        const board = data.leaderboard || [];
+
+        // Leaderboard not available yet (empty results)
+        if (board.length === 0) {
+            if (resultDiv) resultDiv.innerHTML = `
+            <div style="text-align:center;padding:32px 20px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:14px;">
+                <span style="font-size:38px;display:block;margin-bottom:10px;">⏳</span>
+                <p style="color:#e2e8f0;font-size:14px;font-weight:700;margin:0 0 6px;">Leaderboard not available yet.</p>
+                <p style="color:#64748b;font-size:12px;margin:0;">Results will appear after rounds are submitted by admin.</p>
+            </div>`;
+            return;
+        }
+
+        // Verify Team ID exists in leaderboard
+        const searchTeamId = teamInput.toLowerCase();
+        const teamExists   = board.some(r => (r.team_id || '').toLowerCase() === searchTeamId);
+        if (!teamExists) {
+            if (resultDiv) resultDiv.innerHTML = `
+            <div style="text-align:center;padding:28px 20px;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.25);border-radius:14px;">
+                <span style="font-size:38px;display:block;margin-bottom:10px;">❌</span>
+                <p style="color:#f87171;font-size:14px;font-weight:800;margin:0 0 4px;">Invalid Tournament ID or Team ID</p>
+                <p style="color:#64748b;font-size:12px;margin:0;">This Team ID was not found in the tournament.</p>
+            </div>`;
+            return;
+        }
+
+        // ── Build leaderboard HTML ──────────────────────────────────────────
+        const totalRounds = data.total_rounds || 1;
+        const rankEmoji   = { 1: '🥇', 2: '🥈', 3: '🥉' };
+        const lbTitle = data.is_completed
+            ? '🏆 Final Leaderboard'
+            : data.is_live
+                ? `🔴 Live Leaderboard · Round ${data.current_round || 0}/${totalRounds}`
+                : `📊 Tournament Leaderboard · ${data.current_round || 0}/${totalRounds} rounds played`;
+
+        let html = '';
+
+        // Status banner
+        if (data.is_completed) {
+            html += `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
+                        background:rgba(241,196,15,0.08);border:1px solid rgba(241,196,15,0.25);
+                        border-radius:12px;margin-bottom:12px;">
+                <span style="font-size:20px;">🏆</span>
+                <div>
+                    <p style="font-size:13px;font-weight:800;color:#f1c40f;margin:0;">Tournament Completed</p>
+                    <p style="font-size:11px;color:#64748b;margin:2px 0 0;">Final standings — official results.</p>
+                </div>
+            </div>`;
+        } else if (data.is_live) {
+            html += `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
+                        background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.28);
+                        border-radius:12px;margin-bottom:12px;">
+                <span style="font-size:20px;">🔴</span>
+                <div>
+                    <p style="font-size:13px;font-weight:800;color:#f87171;margin:0;">Match is Live!</p>
+                    <p style="font-size:11px;color:#64748b;margin:2px 0 0;">Scores update after each round.</p>
+                </div>
+            </div>`;
+        }
+
+        html += `<p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">${lbTitle}</p>`;
+
+        // ── Top 3 — special winner cards ──
+        const top3 = board.filter(r => r.position <= 3).sort((a, b) => a.position - b.position);
+        const rest = board.filter(r => r.position > 3);
+
+        top3.forEach(row => {
+            const pos      = row.position;
+            const isMyTeam = (row.team_id || '').toLowerCase() === searchTeamId;
+            const cardCls  = pos === 1 ? 'rank-1' : pos === 2 ? 'rank-2' : 'rank-3';
+            const nameClr  = pos === 1 ? '#f1c40f' : pos === 2 ? '#94a3b8' : '#cd7f32';
+            const myStyle  = isMyTeam
+                ? 'box-shadow:0 0 0 2px #a78bfa,0 0 18px rgba(139,92,246,0.28);'
+                : '';
+            html += `
+            <div class="t-winner-card ${cardCls}" style="${myStyle}">
+                <span style="font-size:30px;flex-shrink:0;">${rankEmoji[pos]}</span>
+                <div style="flex:1;min-width:0;">
+                    <p style="font-size:14px;font-weight:800;color:${nameClr};margin:0;
+                               white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                        ${_esc(row.team_name || row.team_id)}
+                    </p>
+                    <p style="font-size:11px;color:#64748b;margin:2px 0 0;">${_esc(row.team_id)}</p>
+                    ${isMyTeam ? `<span style="display:inline-flex;align-items:center;gap:3px;
+                        background:rgba(139,92,246,0.18);border:1px solid rgba(139,92,246,0.35);
+                        border-radius:20px;padding:2px 9px;font-size:10px;font-weight:800;
+                        color:#a78bfa;margin-top:5px;">⭐ Your Team</span>` : ''}
+                </div>
+                <div style="text-align:right;flex-shrink:0;">
+                    <p style="font-size:20px;font-weight:900;color:#f1c40f;margin:0;">${row.total_points ?? 0}</p>
+                    <p style="font-size:10px;color:#64748b;margin:2px 0 0;">pts</p>
+                    <p style="font-size:10px;color:#94a3b8;margin:1px 0 0;">${row.total_kills ?? 0} kills</p>
+                </div>
+            </div>`;
+        });
+
+        // ── Rest of teams — compact rows ──
+        if (rest.length > 0) {
+            let roundCols = '';
+            for (let rn = 1; rn <= totalRounds; rn++) {
+                roundCols += `<span style="flex:0.8;text-align:center;font-size:10px;color:#64748b;font-weight:700;">R${rn}</span>`;
+            }
+            html += `
+            <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;margin:10px 0 4px;">
+                <span style="width:28px;"></span>
+                <span style="flex:2;font-size:10px;color:#64748b;font-weight:700;">TEAM</span>
+                ${roundCols}
+                <span style="flex:1;text-align:center;font-size:10px;color:#64748b;font-weight:700;">KILLS</span>
+                <span style="flex:1;text-align:center;font-size:10px;color:#f1c40f;font-weight:700;">PTS</span>
+            </div>`;
+
+            rest.forEach(row => {
+                const pos      = row.position || '?';
+                const isMyTeam = (row.team_id || '').toLowerCase() === searchTeamId;
+                let roundPts = '';
+                for (let rn = 1; rn <= totalRounds; rn++) {
+                    const pts = row.rounds?.[rn] ?? '—';
+                    roundPts += `<span style="flex:0.8;text-align:center;font-size:11px;color:${typeof pts === 'number' ? '#e2e8f0' : '#475569'};">${pts}</span>`;
+                }
+                html += `
+                <div style="display:flex;align-items:center;gap:6px;padding:8px;
+                             background:${isMyTeam ? 'rgba(139,92,246,0.10)' : 'rgba(255,255,255,0.025)'};
+                             border:1px solid ${isMyTeam ? 'rgba(139,92,246,0.35)' : 'rgba(255,255,255,0.06)'};
+                             border-radius:10px;margin-bottom:5px;
+                             ${isMyTeam ? 'box-shadow:0 0 10px rgba(139,92,246,0.18);' : ''}">
+                    <span style="width:28px;font-size:12px;text-align:center;color:#64748b;font-weight:700;">#${_esc(String(pos))}</span>
+                    <div style="flex:2;min-width:0;">
+                        <p style="font-size:12px;font-weight:800;
+                                   color:${isMyTeam ? '#a78bfa' : '#e2e8f0'};
+                                   margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                            ${_esc(row.team_name || row.team_id)}
+                        </p>
+                        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                            <p style="font-size:10px;color:#64748b;margin:1px 0 0;">${_esc(row.team_id)}</p>
+                            ${isMyTeam ? `<span style="display:inline-flex;align-items:center;gap:3px;
+                                background:rgba(139,92,246,0.18);border:1px solid rgba(139,92,246,0.35);
+                                border-radius:20px;padding:1px 7px;font-size:10px;font-weight:800;
+                                color:#a78bfa;">⭐ Your Team</span>` : ''}
+                        </div>
+                    </div>
+                    ${roundPts}
+                    <span style="flex:1;text-align:center;font-size:12px;color:#94a3b8;font-weight:700;">${row.total_kills ?? 0}</span>
+                    <span style="flex:1;text-align:center;font-size:13px;color:#f1c40f;font-weight:900;">${row.total_points ?? 0}</span>
+                </div>`;
+            });
+        }
+
+        if (resultDiv) resultDiv.innerHTML = html;
+
+    } catch (_err) {
+        if (resultDiv) resultDiv.innerHTML = `
+        <div style="text-align:center;padding:28px 20px;background:rgba(239,68,68,0.07);
+                    border:1px solid rgba(239,68,68,0.25);border-radius:14px;">
+            <span style="font-size:38px;display:block;margin-bottom:10px;">❌</span>
+            <p style="color:#f87171;font-size:14px;font-weight:800;margin:0 0 4px;">Invalid Tournament ID or Team ID</p>
+            <p style="color:#64748b;font-size:12px;margin:0;">Could not load leaderboard. Check IDs and try again.</p>
+        </div>`;
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '👑 View Leaderboard'; }
     }
 }
 
