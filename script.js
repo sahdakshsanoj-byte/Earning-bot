@@ -1372,8 +1372,9 @@ async function loadVipTasks() {
         }
         list.innerHTML = '';
         tasks.forEach(task => {
-            const done = claimed.includes(task.task_id);
-            const card = document.createElement('div');
+            const done    = claimed.includes(task.task_id);
+            const taskUrl = task.url || null;
+            const card    = document.createElement('div');
             card.className = 'promo-task-card' + (done ? ' completed' : '');
             card.style.border = '1px solid rgba(29,155,240,0.3)';
             card.innerHTML = `
@@ -1381,6 +1382,15 @@ async function loadVipTasks() {
                     <p style="font-size:13px;font-weight:700;color:#38bdf8;margin:0;">💎 ${task.title}</p>
                     <span style="font-size:12px;color:#f1c40f;font-weight:700;white-space:nowrap;margin-left:8px;">+${task.reward||20} 🪙</span>
                 </div>
+                ${taskUrl ? `
+                <a href="${taskUrl}" target="_blank" rel="noopener noreferrer"
+                    style="display:flex;align-items:center;justify-content:center;gap:6px;
+                           width:100%;padding:8px 0;margin-bottom:8px;
+                           background:rgba(56,189,248,0.10);border:1px solid rgba(56,189,248,0.30);
+                           border-radius:10px;color:#38bdf8;font-size:12px;font-weight:700;
+                           text-decoration:none;box-sizing:border-box;">
+                    🔗 Go to Task
+                </a>` : ''}
                 <button class="promo-btn" onclick="claimVipTask('${task.task_id}')" ${done ? 'disabled' : ''}
                     style="background:${done ? '' : 'linear-gradient(135deg,#1a78c2,#1D9BF0)'};">
                     ${done ? '✅ Claimed' : '💎 Claim Reward'}
@@ -4207,10 +4217,38 @@ async function openTournamentLeaderboard(tid) {
 // PUBLIC TOURNAMENT LEADERBOARD  (Search by Tournament ID + Team ID)
 // ============================================================
 
-function openPublicLeaderboard() {
-    const modal = document.getElementById('pub-lb-modal');
-    if (!modal) return;
-    // Reset to search form
+// ── Public Leaderboard session cache (10 min) ────────────────
+const _LB_CACHE_KEY = 'pub_lb_cache';
+const _LB_CACHE_TTL = 10 * 60 * 1000; // 10 minutes in ms
+
+function _lbSaveCache(tid, teamId) {
+    try {
+        sessionStorage.setItem(_LB_CACHE_KEY, JSON.stringify({
+            tid, teamId, ts: Date.now()
+        }));
+    } catch(_) {}
+}
+
+function _lbLoadCache() {
+    try {
+        const raw = sessionStorage.getItem(_LB_CACHE_KEY);
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        if (!obj || !obj.tid || !obj.teamId) return null;
+        if (Date.now() - obj.ts > _LB_CACHE_TTL) {
+            sessionStorage.removeItem(_LB_CACHE_KEY);
+            return null;
+        }
+        return obj;
+    } catch(_) { return null; }
+}
+
+function _lbClearCache() {
+    try { sessionStorage.removeItem(_LB_CACHE_KEY); } catch(_) {}
+}
+
+function clearPublicLeaderboardSearch() {
+    _lbClearCache();
     const tidEl    = document.getElementById('pub-lb-tid');
     const teamEl   = document.getElementById('pub-lb-teamid');
     const resultEl = document.getElementById('pub-lb-result');
@@ -4219,6 +4257,44 @@ function openPublicLeaderboard() {
     if (teamEl)   teamEl.value = '';
     if (resultEl) resultEl.innerHTML = '';
     if (btnEl)    { btnEl.disabled = false; btnEl.textContent = '👑 View Leaderboard'; }
+    // Hide clear btn, show inputs
+    const clearBtn  = document.getElementById('pub-lb-clear-btn');
+    const inputWrap = document.getElementById('pub-lb-inputs');
+    if (clearBtn)  clearBtn.style.display = 'none';
+    if (inputWrap) inputWrap.style.display = 'block';
+}
+
+function openPublicLeaderboard() {
+    const modal = document.getElementById('pub-lb-modal');
+    if (!modal) return;
+
+    // Check session cache
+    const cached = _lbLoadCache();
+    if (cached) {
+        // Pre-fill inputs silently then auto-load
+        const tidEl  = document.getElementById('pub-lb-tid');
+        const teamEl = document.getElementById('pub-lb-teamid');
+        if (tidEl)  tidEl.value  = cached.tid;
+        if (teamEl) teamEl.value = cached.teamId;
+        modal.style.display = 'block';
+        document.body.style.overflow = 'hidden';
+        viewPublicLeaderboard();
+        return;
+    }
+
+    // No cache — show blank form
+    const tidEl    = document.getElementById('pub-lb-tid');
+    const teamEl   = document.getElementById('pub-lb-teamid');
+    const resultEl = document.getElementById('pub-lb-result');
+    const btnEl    = document.getElementById('pub-lb-view-btn');
+    const clearBtn  = document.getElementById('pub-lb-clear-btn');
+    const inputWrap = document.getElementById('pub-lb-inputs');
+    if (tidEl)    tidEl.value = '';
+    if (teamEl)   teamEl.value = '';
+    if (resultEl) resultEl.innerHTML = '';
+    if (btnEl)    { btnEl.disabled = false; btnEl.textContent = '👑 View Leaderboard'; }
+    if (clearBtn)  clearBtn.style.display = 'none';
+    if (inputWrap) inputWrap.style.display = 'block';
     modal.style.display = 'block';
     document.body.style.overflow = 'hidden';
 }
@@ -4235,6 +4311,8 @@ async function viewPublicLeaderboard() {
     const teamInput = (document.getElementById('pub-lb-teamid')?.value   || '').trim();
     const resultDiv = document.getElementById('pub-lb-result');
     const btn       = document.getElementById('pub-lb-view-btn');
+    const clearBtn  = document.getElementById('pub-lb-clear-btn');
+    const inputWrap = document.getElementById('pub-lb-inputs');
 
     if (!tidInput || !teamInput) {
         if (resultDiv) resultDiv.innerHTML = `
@@ -4292,6 +4370,12 @@ async function viewPublicLeaderboard() {
             return;
         }
 
+        // ── Save to session cache (10-min auto-restore) ──────────────
+        _lbSaveCache(tidInput, teamInput);
+        // Show Clear Search button, hide input form
+        if (clearBtn)  { clearBtn.style.display = 'flex'; }
+        if (inputWrap) { inputWrap.style.display = 'none'; }
+
         // ── Build leaderboard HTML ──────────────────────────────────────────
         const totalRounds = data.total_rounds || 1;
         const rankEmoji   = { 1: '🥇', 2: '🥈', 3: '🥉' };
@@ -4335,21 +4419,33 @@ async function viewPublicLeaderboard() {
         const rest = board.filter(r => r.position > 3);
 
         top3.forEach(row => {
-            const pos      = row.position;
-            const isMyTeam = (row.team_id || '').toLowerCase() === searchTeamId;
-            const cardCls  = pos === 1 ? 'rank-1' : pos === 2 ? 'rank-2' : 'rank-3';
-            const nameClr  = pos === 1 ? '#f1c40f' : pos === 2 ? '#94a3b8' : '#cd7f32';
-            const myStyle  = isMyTeam
+            const pos       = row.position;
+            const isMyTeam  = (row.team_id || '').toLowerCase() === searchTeamId;
+            const cardCls   = pos === 1 ? 'rank-1' : pos === 2 ? 'rank-2' : 'rank-3';
+            const nameClr   = pos === 1 ? '#f1c40f' : pos === 2 ? '#94a3b8' : '#cd7f32';
+            const myStyle   = isMyTeam
                 ? 'box-shadow:0 0 0 2px #a78bfa,0 0 18px rgba(139,92,246,0.28);'
+                : '';
+            const booyahCnt = row.total_booyah || 0;
+            const booyahBadge = booyahCnt > 0
+                ? `<span style="display:inline-flex;align-items:center;gap:2px;
+                       background:linear-gradient(135deg,#f1c40f,#f39c12);
+                       border-radius:6px;padding:1px 7px;font-size:11px;font-weight:900;
+                       color:#1a1200;letter-spacing:0.3px;margin-left:6px;flex-shrink:0;">
+                       B!${booyahCnt > 1 ? ' ×' + booyahCnt : ''}
+                   </span>`
                 : '';
             html += `
             <div class="t-winner-card ${cardCls}" style="${myStyle}">
                 <span style="font-size:30px;flex-shrink:0;">${rankEmoji[pos]}</span>
                 <div style="flex:1;min-width:0;">
-                    <p style="font-size:14px;font-weight:800;color:${nameClr};margin:0;
-                               white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                        ${_esc(row.team_name || row.team_id)}
-                    </p>
+                    <div style="display:flex;align-items:center;gap:0;flex-wrap:nowrap;">
+                        <p style="font-size:14px;font-weight:800;color:${nameClr};margin:0;
+                                   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                            ${_esc(row.team_name || row.team_id)}
+                        </p>
+                        ${booyahBadge}
+                    </div>
                     <p style="font-size:11px;color:#64748b;margin:2px 0 0;">${_esc(row.team_id)}</p>
                     ${isMyTeam ? `<span style="display:inline-flex;align-items:center;gap:3px;
                         background:rgba(139,92,246,0.18);border:1px solid rgba(139,92,246,0.35);
@@ -4380,8 +4476,17 @@ async function viewPublicLeaderboard() {
             </div>`;
 
             rest.forEach(row => {
-                const pos      = row.position || '?';
-                const isMyTeam = (row.team_id || '').toLowerCase() === searchTeamId;
+                const pos       = row.position || '?';
+                const isMyTeam  = (row.team_id || '').toLowerCase() === searchTeamId;
+                const booyahCnt = row.total_booyah || 0;
+                const booyahBadge = booyahCnt > 0
+                    ? `<span style="display:inline-flex;align-items:center;
+                           background:linear-gradient(135deg,#f1c40f,#f39c12);
+                           border-radius:5px;padding:0px 5px;font-size:9px;font-weight:900;
+                           color:#1a1200;margin-left:4px;flex-shrink:0;">
+                           B!${booyahCnt > 1 ? ' ×' + booyahCnt : ''}
+                       </span>`
+                    : '';
                 let roundPts = '';
                 for (let rn = 1; rn <= totalRounds; rn++) {
                     const pts = row.rounds?.[rn] ?? '—';
@@ -4395,11 +4500,14 @@ async function viewPublicLeaderboard() {
                              ${isMyTeam ? 'box-shadow:0 0 10px rgba(139,92,246,0.18);' : ''}">
                     <span style="width:28px;font-size:12px;text-align:center;color:#64748b;font-weight:700;">#${_esc(String(pos))}</span>
                     <div style="flex:2;min-width:0;">
-                        <p style="font-size:12px;font-weight:800;
-                                   color:${isMyTeam ? '#a78bfa' : '#e2e8f0'};
-                                   margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                            ${_esc(row.team_name || row.team_id)}
-                        </p>
+                        <div style="display:flex;align-items:center;flex-wrap:nowrap;">
+                            <p style="font-size:12px;font-weight:800;
+                                       color:${isMyTeam ? '#a78bfa' : '#e2e8f0'};
+                                       margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                                ${_esc(row.team_name || row.team_id)}
+                            </p>
+                            ${booyahBadge}
+                        </div>
                         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                             <p style="font-size:10px;color:#64748b;margin:1px 0 0;">${_esc(row.team_id)}</p>
                             ${isMyTeam ? `<span style="display:inline-flex;align-items:center;gap:3px;
