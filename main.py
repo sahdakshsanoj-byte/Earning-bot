@@ -186,6 +186,17 @@ try:
         referral_commissions_col.create_index([("sponsor_id", 1), ("date", 1)], **_idx_opts)
         referral_commissions_col.create_index([("sponsor_id", 1), ("earner_id", 1), ("date", 1)], **_idx_opts)
         referral_commissions_col.create_index("timestamp", **_idx_opts)
+        # Withdrawal sort indexes
+        withdrawals_col.create_index([("user_id", 1), ("timestamp", -1)], **_idx_opts)
+        # Rupee withdrawal sort indexes
+        rupee_withdrawals_col.create_index([("user_id", 1), ("created_at", -1)], **_idx_opts)
+        rupee_withdrawals_col.create_index("status", **_idx_opts)
+        # Lottery indexes
+        lottery_col.create_index("drawn", **_idx_opts)
+        lottery_col.create_index("date", **_idx_opts)
+        lottery_col.create_index([("drawn", 1), ("date", -1)], **_idx_opts)
+        # Users username for admin search
+        users_col.create_index("username", sparse=True, **_idx_opts)
         logger.info("MongoDB indexes ensured.")
     except Exception as idx_err:
         logger.warning("Index creation warning: %s", idx_err)
@@ -326,7 +337,7 @@ SPIN_WEIGHTS = [15, 30, 25, 15, 8,   4,   2,   1  ]
 MINING_ADS_REQUIRED   = 2  # Mining shuru karne ke liye 2 ads dekhne honge
 MINING_COOLDOWN_SECS  = 60  # 1 minute baad hi dubara mine kar sakte ho
 MINING_DURATION_HOURS = 1  # 1 ghante ki mining session
-MINING_REWARD         = 30 # 1 session = 10 coins
+MINING_REWARD         = 30 # 1 session = 30 coins
 MINING_LEVEL_REWARDS  = {1: 30, 2: 50, 3: 75}   # coins per level
 MINING_LEVEL_COSTS    = {2: 200, 3: 500}         # upgrade cost in coins
 MINING_TOKEN_TTL      = 300
@@ -865,10 +876,11 @@ def get_live_task_codes() -> dict:
 # ============================================================
 
 def check_admin_token(req) -> bool:
-    return (
-        req.headers.get("X-Admin-Token", "").strip() == ADMIN_TOKEN
-        and ADMIN_TOKEN != ""
-    )
+    provided = req.headers.get("X-Admin-Token", "").strip()
+    if not ADMIN_TOKEN or not provided:
+        return False
+    # Timing-safe comparison — prevents timing-attack token enumeration
+    return hmac.compare_digest(provided, ADMIN_TOKEN)
 
 
 # ============================================================
@@ -1590,16 +1602,23 @@ def ack_winner_popup(user_id: int):
     """
     if is_rate_limited(f"ack_popup_{user_id}", 5):
         return jsonify({"status": "ok"})   # silently ignore rapid-fire calls
-    users_col.update_one(
-        {"user_id": user_id, "pending_winner_popup": True},   # ← conditional: sirf agar flag set hai
-        {"$set": {"pending_winner_popup": False, "pending_winner_prize": 0}},
-    )
+    try:
+        users_col.update_one(
+            {"user_id": user_id, "pending_winner_popup": True},   # ← conditional: sirf agar flag set hai
+            {"$set": {"pending_winner_popup": False, "pending_winner_prize": 0}},
+        )
+    except Exception as exc:
+        logger.error("ack_winner_popup error for %s: %s", user_id, exc)
     return jsonify({"status": "ok"})
 
 
 @app.route("/get_leaderboard")
 def get_leaderboard_api():
-    return jsonify({"status": "success", "leaderboard": get_leaderboard_cached()})
+    try:
+        return jsonify({"status": "success", "leaderboard": get_leaderboard_cached()})
+    except Exception as exc:
+        logger.error("get_leaderboard_api error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
 
 
 # ── DAILY CLAIM AD TOKEN ──────────────────────────────────────────────────
@@ -1882,6 +1901,13 @@ def withdraw_api():
         return jsonify({"status": "error", "message": "No data received."}), 400
 
     user_id_raw      = data.get("user_id")
+    # Quick in-memory rate-limit before any DB work (complements DB cooldown)
+    try:
+        _uid_for_rl = int(user_id_raw or 0)
+        if _uid_for_rl and is_rate_limited(f"withdraw_{_uid_for_rl}", 30):
+            return jsonify({"status": "error", "message": "Too many requests. Please wait."}), 429
+    except (TypeError, ValueError):
+        pass
     requested_amount = data.get("amount")
 
     method_raw      = sanitize_text(data.get("method", "upi")).lower().strip()
@@ -1960,72 +1986,77 @@ def withdraw_api():
             "message": "Aapki ek withdrawal request already pending hai. Pehle approve/reject hone ka wait karo.",
         }), 400
 
-    result = users_col.find_one_and_update(
-        {"user_id": user_id, "coins": {"$gte": requested_amount}, "blocked": {"$ne": True}},
-        {"$inc": {"coins": -requested_amount}},
-        return_document=True,
-    )
-    if result is not None:
-        _invalidate_user_cache(user_id)
-    if result is None:
-        user = users_col.find_one({"user_id": user_id})
-        if not user:
-            return jsonify({"status": "error", "message": "User not found."}), 404
-        if user.get("blocked"):
-            return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
-        return jsonify({
-            "status":  "error",
-            "message": f"Insufficient balance. You have {user.get('coins', 0)} coins.",
-        }), 400
-
-    inr_value = requested_amount * 0.02
-
-    METHOD_LABELS = {
-        "upi":           "\U0001f3e6 UPI",
-        "usdt_trc20":    "\U0001f48e USDT TRC20",
-        "google_redeem": "\U0001f381 Google Play",
-    }
-    method_label = METHOD_LABELS.get(method, method)
-
-    now_utc    = datetime.utcnow()
-    IST_OFFSET = timedelta(hours=5, minutes=30)
-    now_ist    = now_utc + IST_OFFSET
-    withdrawal = {
-        "user_id":         user_id,
-        "method":          method,
-        "payment_address": payment_address,
-        "upi_id":          payment_address,
-        "amount":          requested_amount,
-        "inr_value":       inr_value,
-        "status":          "Pending \u23f3",
-        "timestamp":       now_utc,
-        "date":            now_ist.strftime("%d %b %Y, %I:%M %p IST"),
-    }
-    withdrawals_col.insert_one(withdrawal)
-
-    addr_display  = payment_address if payment_address != "via_telegram" else "Telegram DM"
-    tg_username   = result.get("username") or ""
-    username_line = ""
-    if method == "google_redeem":
-        username_line = f"Username: @{tg_username}\n" if tg_username else "Username: _(not set)_\n"
-
     try:
-        bot.send_message(
-            ADMIN_ID,
-            f"\U0001f4b8 *New Withdrawal Request*\n\n"
-            f"User ID: `{user_id}`\n"
-            f"{username_line}"
-            f"Method: {method_label}\n"
-            f"Address: `{addr_display}`\n"
-            f"Requested: `{requested_amount}` coins (\u20b9{inr_value:.2f})\n"
-            f"Remaining Balance: `{result.get('coins', 0)}` coins\n"
-            f"Date: {withdrawal['date']}",
-            parse_mode="Markdown",
+        result = users_col.find_one_and_update(
+            {"user_id": user_id, "coins": {"$gte": requested_amount}, "blocked": {"$ne": True}},
+            {"$inc": {"coins": -requested_amount}},
+            return_document=True,
         )
-    except Exception as notify_exc:
-        logger.warning("Admin notify failed for withdrawal: %s", notify_exc)
+        if result is not None:
+            _invalidate_user_cache(user_id)
+        if result is None:
+            user = users_col.find_one({"user_id": user_id})
+            if not user:
+                return jsonify({"status": "error", "message": "User not found."}), 404
+            if user.get("blocked"):
+                return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
+            return jsonify({
+                "status":  "error",
+                "message": f"Insufficient balance. You have {user.get('coins', 0)} coins.",
+            }), 400
 
-    return jsonify({"status": "success", "message": "Withdrawal request submitted successfully!"})
+        inr_value = requested_amount * 0.02
+
+        METHOD_LABELS = {
+            "upi":           "\U0001f3e6 UPI",
+            "usdt_trc20":    "\U0001f48e USDT TRC20",
+            "google_redeem": "\U0001f381 Google Play",
+        }
+        method_label = METHOD_LABELS.get(method, method)
+
+        now_utc    = datetime.utcnow()
+        IST_OFFSET = timedelta(hours=5, minutes=30)
+        now_ist    = now_utc + IST_OFFSET
+        withdrawal = {
+            "user_id":         user_id,
+            "method":          method,
+            "payment_address": payment_address,
+            "upi_id":          payment_address,
+            "amount":          requested_amount,
+            "inr_value":       inr_value,
+            "status":          "Pending \u23f3",
+            "timestamp":       now_utc,
+            "date":            now_ist.strftime("%d %b %Y, %I:%M %p IST"),
+        }
+        withdrawals_col.insert_one(withdrawal)
+
+        addr_display  = payment_address if payment_address != "via_telegram" else "Telegram DM"
+        tg_username   = result.get("username") or ""
+        username_line = ""
+        if method == "google_redeem":
+            username_line = f"Username: @{tg_username}\n" if tg_username else "Username: _(not set)_\n"
+
+        try:
+            bot.send_message(
+                ADMIN_ID,
+                f"\U0001f4b8 *New Withdrawal Request*\n\n"
+                f"User ID: `{user_id}`\n"
+                f"{username_line}"
+                f"Method: {method_label}\n"
+                f"Address: `{addr_display}`\n"
+                f"Requested: `{requested_amount}` coins (\u20b9{inr_value:.2f})\n"
+                f"Remaining Balance: `{result.get('coins', 0)}` coins\n"
+                f"Date: {withdrawal['date']}",
+                parse_mode="Markdown",
+            )
+        except Exception as notify_exc:
+            logger.warning("Admin notify failed for withdrawal: %s", notify_exc)
+
+        return jsonify({"status": "success", "message": "Withdrawal request submitted successfully!"})
+
+    except Exception as exc:
+        logger.error("withdraw_api critical error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
 
 
 @app.route("/get_history/<int:user_id>")
@@ -2462,25 +2493,38 @@ def claim_promo_task_api():
         return jsonify({"status": "error", "message": "Please wait a moment before trying again."}), 429
 
     try:
-        user = users_col.find_one({"user_id": user_id})
-        if not user:
-            return jsonify({"status": "error", "message": "User not found."}), 404
-        if user.get("blocked"):
-            return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
-
-        promo_completions = user.get("promo_task_completions", [])
-        if task_id in promo_completions:
-            return jsonify({"status": "error", "message": "You have already completed this promotion task!"}), 400
-
+        # Fetch task first — cheap, no atomicity needed
         task = promo_tasks_col.find_one({"task_id": task_id, "active": True})
         if not task:
             return jsonify({"status": "error", "message": "Promotion task not found or no longer active."}), 404
 
         reward = task.get("reward", PROMO_TASK_REWARD)
-        users_col.update_one(
-            {"user_id": user_id},
+
+        # Atomic claim: update only if user is NOT blocked AND task NOT already claimed
+        # Prevents double-credit under concurrent requests
+        result = users_col.find_one_and_update(
+            {
+                "user_id":               user_id,
+                "blocked":               {"$ne": True},
+                "promo_task_completions": {"$ne": task_id},
+            },
             {"$inc": {"coins": reward}, "$addToSet": {"promo_task_completions": task_id}},
+            projection={"_id": 1},
         )
+        if result is None:
+            # Determine exact reason for failure
+            existing = users_col.find_one(
+                {"user_id": user_id},
+                {"blocked": 1, "promo_task_completions": 1, "_id": 0},
+            )
+            if not existing:
+                return jsonify({"status": "error", "message": "User not found."}), 404
+            if existing.get("blocked"):
+                return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
+            if task_id in existing.get("promo_task_completions", []):
+                return jsonify({"status": "error", "message": "You have already completed this promotion task!"}), 400
+            return jsonify({"status": "error", "message": "Server error."}), 500
+
         _invalidate_user_cache(user_id)
         return jsonify({
             "status":  "success",
@@ -2753,29 +2797,41 @@ def claim_vip_task_api():
         return jsonify({"status": "error", "message": "Please wait before retrying."}), 429
 
     try:
-        # Premium check
+        # Premium check first — no DB write needed
         if not is_premium(user_id):
             return jsonify({"status": "error", "message": "Premium membership required."}), 403
 
-        user = users_col.find_one({"user_id": user_id}, {"blocked": 1, "vip_task_completions": 1})
-        if not user:
-            return jsonify({"status": "error", "message": "User not found."}), 404
-        if user.get("blocked"):
-            return jsonify({"status": "error", "message": "Account blocked."}), 403
-
-        already_claimed = user.get("vip_task_completions", [])
-        if task_id in already_claimed:
-            return jsonify({"status": "error", "message": "You have already claimed this VIP task!"}), 400
-
+        # Fetch task — cheap read before atomic write
         task = vip_tasks_col.find_one({"task_id": task_id, "active": True})
         if not task:
             return jsonify({"status": "error", "message": "VIP task not found or no longer active."}), 404
 
         reward = int(task.get("reward", 20))
-        users_col.update_one(
-            {"user_id": user_id},
+
+        # Atomic claim: update only if NOT blocked AND task NOT already claimed
+        # Prevents double-credit under concurrent requests
+        result = users_col.find_one_and_update(
+            {
+                "user_id":              user_id,
+                "blocked":              {"$ne": True},
+                "vip_task_completions": {"$ne": task_id},
+            },
             {"$inc": {"coins": reward}, "$addToSet": {"vip_task_completions": task_id}},
+            projection={"_id": 1},
         )
+        if result is None:
+            existing = users_col.find_one(
+                {"user_id": user_id},
+                {"blocked": 1, "vip_task_completions": 1, "_id": 0},
+            )
+            if not existing:
+                return jsonify({"status": "error", "message": "User not found."}), 404
+            if existing.get("blocked"):
+                return jsonify({"status": "error", "message": "Account blocked."}), 403
+            if task_id in existing.get("vip_task_completions", []):
+                return jsonify({"status": "error", "message": "You have already claimed this VIP task!"}), 400
+            return jsonify({"status": "error", "message": "Server error."}), 500
+
         _invalidate_user_cache(user_id)
         logger.info("User %s claimed VIP task %s for %s coins", user_id, task_id, reward)
         return jsonify({
@@ -3852,6 +3908,8 @@ def buy_lottery_ticket():
         return jsonify({"status": "error", "message": "Invalid user ID."}), 400
     if not user_id:
         return jsonify({"status": "error", "message": "User ID required."}), 400
+    if is_rate_limited(f"lottery_{user_id}", 10):
+        return jsonify({"status": "error", "message": "Please wait before buying another ticket."}), 429
 
     cfg = get_lottery_config()
     if not cfg["active"]:
@@ -4280,6 +4338,8 @@ def upgrade_mining_api(user_id: int):
     """User apna mining level upgrade kare."""
     if user_id <= 0:
         return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+    if is_rate_limited(f"upgrade_mining_{user_id}", 10):
+        return jsonify({"status": "error", "message": "Please wait before upgrading again."}), 429
     try:
         user = users_col.find_one({"user_id": user_id}, {"coins": 1, "mining_level": 1, "blocked": 1})
         if not user:
@@ -4296,12 +4356,18 @@ def upgrade_mining_api(user_id: int):
         coins = int(user.get("coins", 0))
         if coins < cost:
             return jsonify({"status": "error", "message": f"Not enough coins! Level {next_level} costs {cost} coins. You have {coins}."}), 400
-        users_col.update_one(
-            {"user_id": user_id},
+
+        # Atomic upgrade: include current_level in condition — prevents concurrent double-upgrade
+        # If level already changed between read and update, modified_count == 0
+        upgraded = users_col.update_one(
+            {"user_id": user_id, "mining_level": current_level, "coins": {"$gte": cost}},
             {"$inc": {"coins": -cost}, "$set": {"mining_level": next_level}},
         )
-        # BUG FIX B: upgrade ke baad user cache clear karo
-        # warna profile section aur userData mein purana mining_level dikhta tha
+        if upgraded.modified_count == 0:
+            return jsonify({
+                "status":  "error",
+                "message": "Upgrade already processed or balance changed. Please refresh.",
+            }), 409
         _invalidate_user_cache(user_id)
         reward = MINING_LEVEL_REWARDS.get(next_level, MINING_REWARD)
         logger.info("User %s upgraded mining to level %s (cost %s coins)", user_id, next_level, cost)
@@ -4319,7 +4385,7 @@ def upgrade_mining_api(user_id: int):
 @app.route("/collect_mining/<int:user_id>", methods=["POST"])
 def collect_mining_api(user_id: int):
     """
-    Step 3: 1 ghante baad collect karo — 10 coins milenge.
+    Step 3: 1 ghante baad collect karo — 30 coins milenge.
     """
     if user_id <= 0:
         return jsonify({"status": "error", "message": "Invalid user ID."}), 400
@@ -5469,23 +5535,26 @@ def tournament_leaderboard_api(tid: str):
             round_no  = int(r.get("round_no", 1))
             pts       = int(r.get("total_points", 0))
             kills     = int(r.get("kills", 0))
+            booyah    = int(r.get("booyah", 0))
 
             if team_id not in teams:
                 teams[team_id] = {
-                    "team_id":     team_id,
-                    "team_name":   team_name,
+                    "team_id":      team_id,
+                    "team_name":    team_name,
                     "total_points": 0,
                     "total_kills":  0,
-                    "rounds":      {},
+                    "total_booyah": 0,
+                    "rounds":       {},
                 }
             teams[team_id]["total_points"] += pts
             teams[team_id]["total_kills"]  += kills
+            teams[team_id]["total_booyah"] += booyah
             teams[team_id]["rounds"][round_no] = pts
 
-        # Sort: highest points first, then kills as tiebreaker
+        # Sort: highest points first, then kills as tiebreaker, then booyah
         sorted_teams = sorted(
             teams.values(),
-            key=lambda x: (-x["total_points"], -x["total_kills"])
+            key=lambda x: (-x["total_points"], -x["total_kills"], -x["total_booyah"])
         )
 
         # Assign positions
@@ -5954,7 +6023,13 @@ def redeem_promo_command(message):
         coins = promo.get("coins", 0)
         if coins <= 0:
             return bot.reply_to(message, "\u274c Invalid promo code value.")
-        promos_col.update_one({"code": code}, {"$push": {"used_by": user_id}})
+        # Atomic claim: $addToSet with $ne condition — prevents concurrent double-claims
+        claim_result = promos_col.update_one(
+            {"code": code, "active": True, "used_by": {"$ne": user_id}},
+            {"$addToSet": {"used_by": user_id}},
+        )
+        if claim_result.modified_count == 0:
+            return bot.reply_to(message, "\u274c Promo code already used, expired, or at usage limit.")
         users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins}})
         logger.info("Promo '%s' redeemed via bot by user %s for %s coins.", code, user_id, coins)
         bot.reply_to(
@@ -6838,7 +6913,8 @@ def server_health(message):
         )
         bot.reply_to(message, text, parse_mode="Markdown")
     except Exception as exc:
-        bot.reply_to(message, f"\u274c Health check failed: {exc}")
+        logger.error("health command error: %s", exc)
+        bot.reply_to(message, "❌ Health check failed. Check server logs.")
 
 
 @bot.message_handler(commands=["server_stats"])
@@ -6874,7 +6950,8 @@ def server_stats_cmd(message):
         )
         bot.reply_to(message, text, parse_mode="Markdown")
     except Exception as exc:
-        bot.reply_to(message, f"\u274c Stats failed: {exc}")
+        logger.error("server_stats command error: %s", exc)
+        bot.reply_to(message, "❌ Stats unavailable. Check server logs.")
 
 
 @bot.message_handler(commands=["cache_clear"])
@@ -6896,7 +6973,8 @@ def cache_clear_cmd(message):
             parse_mode="Markdown",
         )
     except Exception as exc:
-        bot.reply_to(message, f"\u274c Cache clear failed: {exc}")
+        logger.error("cache_clear command error: %s", exc)
+        bot.reply_to(message, "❌ Cache clear failed. Check server logs.")
 
 
 @bot.message_handler(commands=["approve"])
@@ -6970,7 +7048,12 @@ def add_coins(message):
         amount    = int(parts[2])
     except ValueError:
         return bot.reply_to(message, "Invalid user ID or amount.")
-    users_col.update_one({"user_id": target_id}, {"$inc": {"coins": amount}})
+    try:
+        users_col.update_one({"user_id": target_id}, {"$inc": {"coins": amount}})
+        _invalidate_user_cache(target_id)
+    except Exception as exc:
+        logger.error("addcoins DB error for %s: %s", target_id, exc)
+        return bot.reply_to(message, "❌ DB error. Coins not updated. Check logs.")
     try:
         bot.send_message(target_id, f"\U0001f381 Admin has gifted you *{amount} coins*!", parse_mode="Markdown")
     except Exception as notify_exc:
@@ -7020,7 +7103,8 @@ def send_personal_message_cmd(message):
         bot.reply_to(message, f"\u2705 Message sent to User {target_id}!")
         logger.info("Admin sent personal message to user %s.", target_id)
     except Exception as exc:
-        bot.reply_to(message, f"\u274c Failed to send message: {exc}")
+        logger.error("msg command failed for user %s: %s", target_id, exc)
+        bot.reply_to(message, "❌ Failed to send message. User may have blocked the bot.")
 
 
 @bot.message_handler(commands=["block"])
@@ -7034,7 +7118,12 @@ def block_user(message):
         target_id = int(parts[1])
     except ValueError:
         return bot.reply_to(message, "Invalid user ID.")
-    users_col.update_one({"user_id": target_id}, {"$set": {"blocked": True}})
+    try:
+        users_col.update_one({"user_id": target_id}, {"$set": {"blocked": True}})
+        _invalidate_user_cache(target_id)
+    except Exception as exc:
+        logger.error("block DB error for %s: %s", target_id, exc)
+        return bot.reply_to(message, "❌ DB error. User not blocked. Check logs.")
     try:
         bot.send_message(target_id, "\u26d4 Your account has been blocked for violating our terms of service.")
     except Exception as notify_exc:
@@ -7053,10 +7142,15 @@ def unblock_user(message):
         target_id = int(parts[1])
     except ValueError:
         return bot.reply_to(message, "Invalid user ID.")
-    users_col.update_one(
-        {"user_id": target_id},
-        {"$set": {"blocked": False, "fp_flagged": False, "ip_flagged": False}},
-    )
+    try:
+        users_col.update_one(
+            {"user_id": target_id},
+            {"$set": {"blocked": False, "fp_flagged": False, "ip_flagged": False}},
+        )
+        _invalidate_user_cache(target_id)
+    except Exception as exc:
+        logger.error("unblock DB error for %s: %s", target_id, exc)
+        return bot.reply_to(message, "❌ DB error. User not unblocked. Check logs.")
     try:
         bot.send_message(target_id, "\u2705 Your account has been unblocked!", parse_mode="Markdown")
     except Exception as notify_exc:
@@ -8198,27 +8292,31 @@ def cmd_next_round(message):
 
 @bot.message_handler(commands=["addresult"])
 def cmd_add_result(message):
-    """Admin: /addresult <tournament_id> <round_no> <team_id> <rank> <kills>"""
+    """Admin: /addresult <tournament_id> <round_no> <team_id> <rank> <kills> [booyah]"""
     if int(message.from_user.id) != ADMIN_ID:
         return
     parts = message.text.strip().split()
     if len(parts) < 6:
         return bot.reply_to(
             message,
-            "📋 *Usage:* `/addresult <tournament_id> <round_no> <team_id> <rank> <kills>`\n\n"
-            "*Example:* `/addresult t_123456 1 T001 3 7`\n"
-            "_T001 ne Round 1 mein 3rd place liya aur 7 kills mare_\n\n"
+            "📋 *Usage:* `/addresult <tournament_id> <round_no> <team_id> <rank> <kills> [booyah]`\n\n"
+            "*Example:* `/addresult t_123456 1 T001 3 7 1`\n"
+            "_T001 ne Round 1 mein 3rd place liya, 7 kills aur 1 Booyah_\n\n"
+            "• booyah optional hai (default: 0)\n"
+            "• Har Booyah = +5 Bonus Points\n"
             "Team IDs dekhne ke liye: `/tournamentregs <tid>`",
             parse_mode="Markdown",
         )
     tid, round_str, team_id_raw, rank_str, kills_str = parts[1], parts[2], parts[3], parts[4], parts[5]
+    booyah_str = parts[6] if len(parts) >= 7 else "0"
     try:
         round_no = int(round_str)
         rank     = int(rank_str)
         kills    = max(0, int(kills_str))
+        booyah   = max(0, int(booyah_str))
         team_id  = team_id_raw.upper().strip()
     except ValueError:
-        return bot.reply_to(message, "❌ round_no, rank aur kills sirf number mein dena hai.", parse_mode="Markdown")
+        return bot.reply_to(message, "❌ round_no, rank, kills aur booyah sirf number mein dena hai.", parse_mode="Markdown")
 
     if rank < 1:
         return bot.reply_to(message, "❌ Rank 1 ya usse zyada hona chahiye.", parse_mode="Markdown")
@@ -8244,7 +8342,8 @@ def cmd_add_result(message):
         team_name         = reg.get("team_name") or reg.get("ff_nickname") or team_id
         placement_points  = get_placement_points(rank)
         kill_points       = kills
-        total_points      = placement_points + kill_points
+        booyah_bonus      = booyah * 5
+        total_points      = placement_points + kill_points + booyah_bonus
 
         tournament_results_col.update_one(
             {"tournament_id": tid, "round_no": round_no, "team_id": team_id},
@@ -8255,8 +8354,10 @@ def cmd_add_result(message):
                 "team_name":        team_name,
                 "rank":             rank,
                 "kills":            kills,
+                "booyah":           booyah,
                 "placement_points": placement_points,
                 "kill_points":      kill_points,
+                "booyah_bonus":     booyah_bonus,
                 "total_points":     total_points,
                 "recorded_at":      datetime.utcnow(),
             }},
@@ -8265,18 +8366,20 @@ def cmd_add_result(message):
 
         rank_emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
         rank_emoji  = rank_emojis.get(rank, "🏅")
+        booyah_line = f"🟡 *Booyah:* {booyah} × 5 → {booyah_bonus} pts\n" if booyah > 0 else ""
         bot.reply_to(
             message,
             f"✅ *Result Saved!*\n\n"
             f"🆔 *Team:* `{team_id}` — {team_name}\n"
             f"{rank_emoji} *Placement:* #{rank} → {placement_points} pts\n"
             f"🔫 *Kills:* {kills} → {kill_points} pts\n"
+            f"{booyah_line}"
             f"📊 *Total Round {round_no} Points:* *{total_points}*\n\n"
-            f"Next team: `/addresult {tid} {round_no} T00X <rank> <kills>`\n"
+            f"Next team: `/addresult {tid} {round_no} T00X <rank> <kills> [booyah]`\n"
             f"Leaderboard: `/tournamentleaderboard {tid}`",
             parse_mode="Markdown",
         )
-        logger.info("Result added: tournament=%s round=%s team=%s rank=%s kills=%s pts=%s", tid, round_no, team_id, rank, kills, total_points)
+        logger.info("Result added: tournament=%s round=%s team=%s rank=%s kills=%s booyah=%s pts=%s", tid, round_no, team_id, rank, kills, booyah, total_points)
     except Exception as exc:
         logger.error("cmd_add_result error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
@@ -9235,16 +9338,17 @@ def cmd_reject_rupee(message):
     except ValueError:
         return bot.reply_to(message, "❌ Invalid user ID.")
     reason = parts[2] if len(parts) > 2 else "Admin rejected the request."
-    wd = rupee_withdrawals_col.find_one({"user_id": target_id, "status": "Pending ⏳"})
+    # Atomic status flip — prevents double-rejection/double-refund under concurrent calls
+    wd = rupee_withdrawals_col.find_one_and_update(
+        {"user_id": target_id, "status": "Pending ⏳"},
+        {"$set": {"status": "Rejected ❌", "rejected_at": datetime.utcnow().isoformat(), "reject_reason": reason}},
+        return_document=False,  # returns OLD doc (with amount) before update
+    )
     if not wd:
         return bot.reply_to(message, f"❌ No pending rupee withdrawal for user {target_id}.")
-    # Refund the rupees
+    # Refund after atomic status flip (idempotent: only happens once)
     users_col.update_one({"user_id": target_id}, {"$inc": {"rupees": wd.get("amount", 0)}})
     _invalidate_user_cache(target_id)
-    rupee_withdrawals_col.update_one(
-        {"_id": wd["_id"]},
-        {"$set": {"status": "Rejected ❌", "rejected_at": datetime.utcnow().isoformat(), "reject_reason": reason}},
-    )
     try:
         bot.send_message(
             target_id,
@@ -9358,7 +9462,8 @@ def cmd_list_vip_tasks(message):
             return
         lines = ["💎 *Active VIP Tasks:*\n"]
         for t in tasks:
-            lines.append(f"• `{t['task_id']}` — {t['title']} (+{t.get('reward', 0)} 🪙)")
+            url_part = f"\n  🔗 {t['url']}" if t.get("url") else ""
+            lines.append(f"• `{t['task_id']}` — {t['title']} (+{t.get('reward', 0)} 🪙){url_part}")
         bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
     except Exception as exc:
         logger.error("cmd_list_vip_tasks error: %s", exc)
@@ -9562,14 +9667,28 @@ def uptime_ping() -> None:
 # Pehle sirf `if __name__ == "__main__"` mein tha — Gunicorn se run karne
 # par __name__ = "main" hota hai, isliye threads kabhi start nahi hote the.
 # Ab ye function Gunicorn aur direct python dono mein kaam karega.
+#
+# SAFETY: Gunicorn multi-worker mein har worker apna process hai, isliye
+# per-process lock kaafi hai. Lekin agar preload=True ho toh fork ke baad
+# dono workers module-level code run karte hain — _bg_started flag
+# prevents double-start within the same process.
+_bg_started       = False
+_bg_started_lock  = threading.Lock()
+
 def _start_background_threads() -> None:
-    Thread(target=run_bot,                    daemon=True).start()
-    Thread(target=uptime_ping,                daemon=True).start()
-    Thread(target=refresh_leaderboard_loop,   daemon=True).start()
-    Thread(target=_cleanup_rate_cache,        daemon=True).start()
-    Thread(target=auto_lottery_draw_loop,     daemon=True).start()
-    Thread(target=_cleanup_security_caches,   daemon=True).start()
-    logger.info("Background threads started.")
+    global _bg_started
+    with _bg_started_lock:
+        if _bg_started:
+            logger.info("Background threads already running in this process — skipping.")
+            return
+        _bg_started = True
+    Thread(target=run_bot,                    daemon=True, name="bot-polling").start()
+    Thread(target=uptime_ping,                daemon=True, name="uptime-ping").start()
+    Thread(target=refresh_leaderboard_loop,   daemon=True, name="lb-refresh").start()
+    Thread(target=_cleanup_rate_cache,        daemon=True, name="rate-cache-gc").start()
+    Thread(target=auto_lottery_draw_loop,     daemon=True, name="lottery-draw").start()
+    Thread(target=_cleanup_security_caches,   daemon=True, name="security-gc").start()
+    logger.info("Background threads started (pid=%s).", os.getpid())
 
 _start_background_threads()
 
