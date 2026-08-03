@@ -533,8 +533,8 @@
 
             <!-- Content -->
             <div style="padding:16px;">
-                <!-- Search form -->
-                <div style="margin-bottom:14px;">
+                <!-- Search form (hidden after results load) -->
+                <div id="pub-lb-inputs" style="margin-bottom:14px;">
                     <input type="text" id="pub-lb-tid"
                         class="t-input"
                         placeholder="Enter Tournament ID (e.g. FF25-A8KQ)"
@@ -553,6 +553,16 @@
                         👑 View Leaderboard
                     </button>
                 </div>
+                <!-- Clear Search button (shown after results load) -->
+                <button id="pub-lb-clear-btn"
+                    onclick="clearPublicLeaderboardSearch()"
+                    style="display:none; align-items:center; justify-content:center; gap:7px;
+                           width:100%; padding:9px 0; margin-bottom:12px;
+                           background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12);
+                           border-radius:10px; color:#94a3b8; font-size:12px; font-weight:700;
+                           cursor:pointer; letter-spacing:0.3px;">
+                    🔍 Clear Search &amp; Search Another
+                </button>
                 <!-- Results -->
                 <div id="pub-lb-result"></div>
             </div>
@@ -1640,9 +1650,12 @@
                 <p class="policy-bullet">• Fake registrations may be rejected.</p>
                 <p class="policy-bullet">• Violators may be <b style="color:#f87171;">disqualified or banned</b> from future tournaments.</p>
 
-                <!-- Leaderboard -->
-                <p class="policy-section-title">🏆 Leaderboard</p>
-                <p class="policy-text">Rankings are calculated automatically using total points, total kills and tournament tie-breaker rules.</p>
+                <!-- Leaderboard & Scoring -->
+                <p class="policy-section-title">🏆 Leaderboard & Scoring System</p>
+                <p class="policy-bullet">🔫 <b style="color:#e2e8f0;">1 Kill = 1 Point</b></p>
+                <p class="policy-bullet">🟡 <b style="color:#f1c40f;">1 Booyah = +5 Bonus Points</b> — displayed as <b style="background:linear-gradient(135deg,#f1c40f,#f39c12);color:#1a1200;padding:0 5px;border-radius:4px;font-size:11px;">B!</b> badge next to team name</p>
+                <p class="policy-bullet">🥇 <b style="color:#e2e8f0;">Final Ranking = Placement Points + Kill Points + Booyah Bonus Points</b></p>
+                <p class="policy-text" style="margin-top:6px;">Rankings are calculated automatically after each round. Leaderboard updates live as admin submits results.</p>
 
                 <!-- Tournament Policy -->
                 <p class="policy-section-title">📅 Tournament Policy</p>
