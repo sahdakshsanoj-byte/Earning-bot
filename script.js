@@ -96,7 +96,10 @@ function showToast(msg, type = "info") {
         toast.id = 'toast';
         document.body.appendChild(toast);
     }
-    toast.textContent = msg;
+    toast.textContent = String(msg || '')
+        .replace(/\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*/gu, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
     toast.className = `show ${type}`;
     setTimeout(() => { toast.className = ''; }, 3500);
 }
@@ -548,11 +551,8 @@ async function loadLotteryStatus() {
         card.style.display = 'block';
         if (!card.querySelector('.lottery-lock-overlay')) {
             const ov = document.createElement('div');
-            ov.className = 'lottery-lock-overlay';
-            ov.innerHTML = `
-                <span class="lottery-lock-icon">🔒</span>
-                <span class="lottery-lock-label">Lottery Coming Soon!</span>
-                <span class="lottery-lock-sub">Stay tuned for updates</span>`;
+            ov.className = 'lottery-lock-overlay app-lock-pill';
+            ov.innerHTML = '<span class="lottery-lock-label">Coming Soon</span>';
             card.appendChild(ov);
         }
         return;
@@ -661,20 +661,10 @@ function _applyFeatureLock(card, overlayClass, label) {
     if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
     card.style.overflow = 'hidden';
     const ov = document.createElement('div');
-    ov.className = overlayClass;
-    ov.style.cssText =
-        'position:absolute;inset:0;display:flex;flex-direction:column;' +
-        'align-items:center;justify-content:center;' +
-        'background:rgba(15,23,42,0.88);border-radius:16px;' +
-        'z-index:10;backdrop-filter:blur(3px);pointer-events:all;cursor:default;';
-    ov.innerHTML =
-        '<span style="font-size:36px;animation:lock-pulse 1.6s ease-in-out infinite;display:block;">🔒</span>' +
-        '<span style="font-size:13px;color:#e8d5ff;margin-top:8px;font-weight:700;letter-spacing:0.5px;">' + label + '</span>' +
-        '<span style="font-size:11px;color:#94a3b8;margin-top:3px;">Coming Soon</span>';
-    // Click/touch ko parent card tak bubble hone se rokta hai — warna
-    // parent ka onclick (jaise showPremiumModal) lock ke bawajood fire ho jaata tha.
-    ov.addEventListener('click',      function(e) { e.stopPropagation(); });
-    ov.addEventListener('touchstart', function(e) { e.stopPropagation(); }, { passive: true });
+    ov.className = overlayClass + ' app-lock-pill';
+    ov.innerHTML = '<span class="lock-label">' +
+        String(label || 'Coming Soon').replace(/Coming Soon!?/i, 'Coming Soon') +
+        '</span>';
     card.appendChild(ov);
 }
 
@@ -1391,7 +1381,7 @@ async function loadVipTasks() {
                            text-decoration:none;box-sizing:border-box;">
                     🔗 Go to Task
                 </a>` : ''}
-                <button class="promo-btn" onclick="claimVipTask('${task.task_id}')" ${done ? 'disabled' : ''}
+                <button class="promo-btn vip-task-claim-btn" data-task-id="${escapeHtml(task.task_id)}" onclick="claimVipTask('${task.task_id}')" ${done ? 'disabled' : ''}
                     style="background:${done ? '' : 'linear-gradient(135deg,#1a78c2,#1D9BF0)'};">
                     ${done ? '✅ Claimed' : '💎 Claim Reward'}
                 </button>`;
@@ -1404,7 +1394,24 @@ async function loadVipTasks() {
 
 async function claimVipTask(taskId) {
     if (!userId) return showToast('User ID not found!', 'error');
+    const reqKey = `vip_task_${taskId}`;
+    if (_pendingRequests.has(reqKey)) return;
+    _pendingRequests.add(reqKey);
+
+    const btn = Array.from(document.querySelectorAll('.vip-task-claim-btn'))
+        .find(el => el.dataset.taskId === String(taskId));
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '📺 Watching Ad...';
+    }
+
     try {
+        // VIP task rewards are ad-gated like the other earning actions.
+        // requireAdWatch() handles the configured Monetag SDK and rejects
+        // unless the ad reports a valued/rewarded completion.
+        await requireAdWatch();
+        if (btn) btn.innerText = 'Claiming Reward...';
+
         const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_vip_task`, {
             method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({user_id: userId, task_id: taskId}),
@@ -1417,7 +1424,20 @@ async function claimVipTask(taskId) {
         } else {
             showToast(data.message || 'Error claiming task.', 'error');
         }
-    } catch(e) { showToast('⚠️ Server error.', 'error'); }
+    } catch(e) {
+        showToast(
+            e?.message === 'ad_skipped'
+                ? 'Watch the full ad to claim this VIP task.'
+                : 'Ad could not be completed. No reward was claimed.',
+            'error'
+        );
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = '💎 Claim Reward';
+        }
+    } finally {
+        _pendingRequests.delete(reqKey);
+    }
 }
 
 // ============================================================
@@ -2734,7 +2754,7 @@ async function requestRupeeWithdraw() {
     const method   = _selectedRupeeMethod;
 
     if (!rawAmt || isNaN(amount)) return showToast("Please enter a valid amount!", "error");
-    if (amount < 50)              return showToast("Minimum withdrawal is ₹50.", "error");
+    if (amount < 30)              return showToast("Minimum withdrawal is ₹30.", "error");
 
     // ── 5 Referral Check for Rupee Withdrawal ─────────────────────────────
     if (CONFIG.REFERRAL_ACTIVE === true) {
@@ -3346,27 +3366,8 @@ function _tl_applyOverlay(el, cls) {
     el.style.overflow = 'hidden';
 
     const ov = document.createElement('div');
-    ov.className  = cls + ' tl-overlay';
-    ov.style.cssText =
-        'position:absolute;inset:0;z-index:9990;' +
-        'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
-        'background:rgba(7,13,26,0.93);backdrop-filter:blur(8px);' +
-        '-webkit-backdrop-filter:blur(8px);' +
-        'padding:28px 20px;text-align:center;pointer-events:all;cursor:default;' +
-        'border-radius:inherit;';
-    ov.innerHTML =
-        '<span style="font-size:48px;display:block;margin-bottom:14px;' +
-        'animation:lock-pulse 1.8s ease-in-out infinite;">🔒</span>' +
-        '<p style="font-size:15px;font-weight:800;color:#f1c40f;margin:0 0 8px;letter-spacing:0.3px;">' +
-        'Tournament Mode Active</p>' +
-        '<p style="font-size:12px;color:#94a3b8;line-height:1.65;margin:0 0 20px;">' +
-        _TL_MSG + '</p>' +
-        '<button onclick="openTournamentHub(event)" ' +
-        'style="padding:10px 22px;background:linear-gradient(135deg,#f1c40f,#e67e22);' +
-        'color:#000;font-size:12px;font-weight:800;border:none;border-radius:12px;cursor:pointer;">' +
-        '🏆 View Tournament</button>';
-    ov.addEventListener('click',      e => e.stopPropagation());
-    ov.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+    ov.className  = cls + ' tl-overlay app-lock-pill';
+    ov.innerHTML = '<p>Tournament Mode Active</p>';
     el.appendChild(ov);
 }
 
