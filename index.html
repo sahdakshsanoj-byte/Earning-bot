@@ -665,10 +665,13 @@
         }
         .lock-overlay, .lottery-lock-overlay, .spin-lock-overlay,
         .mining-lock-overlay, .tl-overlay {
-            /* BUG FIX #2: was bottom-right (auto 12px 12px auto), which sat right on
-               top of the CTA button at the bottom of these cards. Moved to top-right
-               so it never overlaps the action button. */
-            inset: 12px 12px auto auto !important;
+            /* BUG FIX #4: was absolutely pinned to a corner (first bottom-right,
+               then top-right) — every corner collides with something different
+               on some card (CTA button, rate badge, etc). Now a normal in-flow
+               line at the top of the card, so it can never overlap anything. */
+            position: static !important;
+            inset: auto !important;
+            margin: 0 0 10px 0 !important;
             width: auto !important;
             height: auto !important;
             min-height: 0 !important;
@@ -686,9 +689,9 @@
             pointer-events: none !important;
         }
         .app-lock-pill {
-            position: absolute !important;
-            /* BUG FIX #2: moved to top-right, see note above. */
-            inset: 12px 12px auto auto !important;
+            position: static !important;
+            inset: auto !important;
+            margin: 0 0 10px 0 !important;
             z-index: 20 !important;
             display: inline-flex !important;
             align-items: center !important;
