@@ -234,6 +234,7 @@ TASK_REWARDS = {
 }
 
 ONE_TIME_TASK_IDS      = {"slot3", "slot4"}
+WEB_TASK_IDS            = {"web1", "web2", "web3"}  # "Visit Site" cards — gated by web_tasks_active
 MAX_YT_TASKS_PER_DAY  = 3
 MAX_WEB_TASKS_PER_DAY = 3
 
@@ -2099,6 +2100,14 @@ def verify_task_api():
         return jsonify({"status": "error", "message": "Missing task ID or code."}), 400
     if task_id not in VALID_TASK_IDS:
         return jsonify({"status": "error", "message": "Invalid task ID."}), 400
+
+    # BUG FIX: web_tasks_active tha sirf frontend-enforced — is endpoint mein
+    # koi check hi nahi tha, isliye lock UI ke bawajood koi bhi seedha
+    # /verify_task call karke reward le sakta tha. Ab yahan bhi backend-side
+    # se block karte hain (VALID_TASK_IDS ke andar sirf web-visit task ids
+    # ko is gate se guzarna chahiye).
+    if task_id in WEB_TASK_IDS and not get_feature_config().get("web_tasks_active", True):
+        return jsonify({"status": "error", "message": "Web tasks are currently disabled."}), 400
 
     _u = users_col.find_one({"user_id": user_id}, {"blocked": 1})
     if _u and _u.get("blocked"):
