@@ -6429,7 +6429,8 @@ def feature_status_command(message):
             f"🏆 *Tournament Lock Mode:* {tl_s}\n"
             f"🔐 Locked features: `{tl_feat_str}`\n\n"
             f"Commands: /togglespin /togglemining /togglebomb /togglewebtasks /togglepremium\n"
-            f"Lock cmds: /togglelock · /lockfeatures",
+            f"Lock cmds: /togglelock · /lockfeatures\n"
+            f"Sponsor cmds: /resetsponsor slot1 · /resetsponsor slot2",
             parse_mode="Markdown",
         )
     except Exception as exc:
@@ -6858,6 +6859,72 @@ def toggle_web_tasks(message):
     except Exception as exc:
         logger.error("togglewebtasks error: %s", exc)
         bot.reply_to(message, "⚠️ Error toggling Web Tasks. Check logs.")
+
+
+# ============================================================
+# 🔄 /resetsponsor — Admin command (reset a sponsor slot claim
+#     for everyone, so it becomes claimable again)
+# ============================================================
+# Usage:
+#   /resetsponsor slot1        — reset slot1 for ALL users
+#   /resetsponsor slot2 12345  — reset slot2 for a single user_id only
+# Note: only slot1/slot2 (type "channel" in config.js) use this
+# channel_claims-based storage. slot3/slot4 (type "verify") are tracked
+# in task_completions instead and aren't covered by this command.
+
+@bot.message_handler(commands=["resetsponsor"])
+def reset_sponsor_command(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        parts = message.text.strip().split()[1:]
+        if not parts or parts[0].lower() not in ("slot1", "slot2"):
+            bot.reply_to(
+                message,
+                "⚠️ *Usage:*\n"
+                "`/resetsponsor slot1` — reset for ALL users\n"
+                "`/resetsponsor slot1 123456789` — reset for one user only\n\n"
+                "_(Only slot1/slot2 supported — slot3/slot4 use a different system.)_",
+                parse_mode="Markdown",
+            )
+            return
+
+        slot_id = parts[0].lower()
+
+        if len(parts) >= 2:
+            try:
+                target_user_id = int(parts[1])
+            except ValueError:
+                bot.reply_to(message, "⚠️ Invalid user ID.")
+                return
+            result = users_col.update_one(
+                {"user_id": target_user_id},
+                {"$unset": {f"channel_claims.{slot_id}": ""}},
+            )
+            if result.matched_count:
+                bot.reply_to(
+                    message,
+                    f"✅ {slot_id} reset for user `{target_user_id}`. They can claim it again now.",
+                    parse_mode="Markdown",
+                )
+            else:
+                bot.reply_to(message, "⚠️ User not found.")
+        else:
+            result = users_col.update_many(
+                {f"channel_claims.{slot_id}": {"$exists": True}},
+                {"$unset": {f"channel_claims.{slot_id}": ""}},
+            )
+            bot.reply_to(
+                message,
+                f"✅ *{slot_id} reset for everyone!*\n\n"
+                f"👥 Affected users: {result.modified_count}\n\n"
+                f"Sab users ab is slot ko dobara claim kar sakte hain.",
+                parse_mode="Markdown",
+            )
+        logger.info("Admin reset sponsor claim: %s (%s)", slot_id, message.text)
+    except Exception as exc:
+        logger.error("resetsponsor error: %s", exc)
+        bot.reply_to(message, "⚠️ Error resetting sponsor slot. Check logs.")
 
 
 # ============================================================
