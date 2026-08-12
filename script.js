@@ -2,10 +2,57 @@
 // SCRIPT.JS — Daksh Grand Earn (Clean Rewrite)
 // ============================================================
 
-const tg = window.Telegram.WebApp;
+// Telegram WebApp is not available when the page is opened directly in a
+// browser. The old code accessed window.Telegram.WebApp immediately, so one
+// missing global stopped the entire script and made every button appear dead.
+const tg = window.Telegram?.WebApp ?? {
+    initDataUnsafe: {},
+    ready() {},
+    expand() {},
+    enableClosingConfirmation() {},
+    openTelegramLink(url) { window.open(url, '_blank', 'noopener,noreferrer'); },
+    openLink(url) { window.open(url, '_blank', 'noopener,noreferrer'); },
+};
+
 tg.ready();
 tg.expand();
 tg.enableClosingConfirmation();
+
+// config.js is optional during local/browser previews. Keep all properties
+// present so a missing config shows a useful toast instead of a ReferenceError.
+// If config.js declares `const CONFIG`, merge defaults into that same object
+// instead of creating a second disconnected configuration object.
+const DAKSH_DEFAULT_CONFIG = {
+    API_BASE_URL: '',
+    BOT_USERNAME: '',
+    ADMIN_TELEGRAM: '',
+    ADMIN_UPI: '',
+    ADMIN_QR_URL: '',
+    MONETAG_ZONE_ID: '',
+    MONETAG_SDK_URL: '',
+    CLAIM_AD_ENABLED: true,
+    REFERRAL_ACTIVE: true,
+    LOTTERY_ACTIVE: false,
+    YT_TASKS_ACTIVE: true,
+    WEB_LINKS: {},
+    YT_LINKS: {},
+    PARTNER_LINKS: {},
+    CHANNELS: {
+        official: '#',
+        channel2: '#',
+        channel3: '#',
+    },
+    SPONSORS: {},
+};
+
+if (typeof CONFIG === 'undefined') {
+    window.CONFIG = DAKSH_DEFAULT_CONFIG;
+} else {
+    Object.keys(DAKSH_DEFAULT_CONFIG).forEach(key => {
+        if (CONFIG[key] === undefined) CONFIG[key] = DAKSH_DEFAULT_CONFIG[key];
+    });
+    window.CONFIG = CONFIG;
+}
 
 const userId = tg.initDataUnsafe?.user?.id;
 
@@ -96,6 +143,8 @@ function showToast(msg, type = "info") {
         toast.id = 'toast';
         document.body.appendChild(toast);
     }
+    // Some older handlers use "ok"; keep the visual state consistent.
+    if (type === 'ok') type = 'success';
     toast.textContent = String(msg || '')
         .replace(/\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*/gu, '')
         .replace(/\s{2,}/g, ' ')
@@ -104,22 +153,52 @@ function showToast(msg, type = "info") {
     setTimeout(() => { toast.className = ''; }, 3500);
 }
 
+function openExternalLink(url) {
+    const target = String(url || '').trim();
+    if (!target || target === '#') return false;
+
+    try {
+        // Telegram's WebApp APIs are more reliable than window.open inside
+        // the Mini App iframe and preserve the user's expected navigation.
+        if (target.startsWith('https://t.me/') && tg?.openTelegramLink) {
+            tg.openTelegramLink(target);
+        } else if (tg?.openLink) {
+            tg.openLink(target);
+        } else {
+            window.open(target, '_blank', 'noopener,noreferrer');
+        }
+        return true;
+    } catch (error) {
+        // Browser previews can still open regular links even if Telegram's
+        // bridge rejects the call.
+        try {
+            window.open(target, '_blank', 'noopener,noreferrer');
+            return true;
+        } catch (_) {
+            showToast('Unable to open this link. Please try again.', 'error');
+            return false;
+        }
+    }
+}
+
 // ============================================================
 // FETCH WITH RETRY — 3 retries, 10s timeout
 // ============================================================
 async function fetchWithRetry(url, options = {}, retries = 3, delayMs = 2000) {
     for (let attempt = 1; attempt <= retries; attempt++) {
+        let timeout;
         try {
             const controller = new AbortController();
-            const timeout    = setTimeout(() => controller.abort(), 10000);
+            timeout = setTimeout(() => controller.abort(), 10000);
             const res        = await fetch(url, { ...options, signal: controller.signal });
-            clearTimeout(timeout);
             if (!res.ok && res.status >= 400 && res.status < 500) return res;
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res;
         } catch (err) {
             if (attempt === retries) throw err;
             await new Promise(r => setTimeout(r, delayMs));
+        } finally {
+            if (timeout) clearTimeout(timeout);
         }
     }
 }
@@ -2031,8 +2110,11 @@ function openTask(taskKey, type) {
     const link = type === 'yt'      ? CONFIG.YT_LINKS[taskKey]
                : type === 'partner' ? CONFIG.PARTNER_LINKS?.[taskKey]
                : CONFIG.WEB_LINKS[taskKey];
-    if (link && link !== '#') window.open(link, '_blank');
-    else showToast("Link will be updated soon!", "error");
+    if (link && link !== '#') {
+        openExternalLink(link);
+    } else {
+        showToast("Link will be updated soon!", "error");
+    }
 }
 
 async function verifyTask(taskId, inputId, sponsorLink) {
@@ -2144,7 +2226,7 @@ async function claimChannel(channelId, channelUrl) {
 
     if (['slot1', 'slot2', 'slot3', 'slot4'].includes(channelId)) trackSponsorClick(channelId, channelUrl);
 
-    window.open(channelUrl, '_blank');
+    if (!openExternalLink(channelUrl)) return;
     _pendingRequests.add(reqKey);
 
     const btn = document.getElementById(`ch-btn-${channelId}`);
@@ -2696,9 +2778,31 @@ function copyReferralLink() {
     const link   = (linkEl && linkEl.textContent.trim() !== 'Loading...')
         ? linkEl.textContent.trim()
         : `https://t.me/${CONFIG.BOT_USERNAME}?start=${userId}`;
-    navigator.clipboard.writeText(link)
-        .then(() => showToast('✅ Referral link copied!', 'success'))
-        .catch(() => showToast('Copy failed, try again.', 'error'));
+    copyText(link, 'Referral link copied!');
+}
+
+async function copyText(value, successMessage = 'Copied!') {
+    const text = String(value || '');
+    if (!text) return showToast('Nothing to copy.', 'error');
+
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+        } else {
+            const helper = document.createElement('textarea');
+            helper.value = text;
+            helper.setAttribute('readonly', '');
+            helper.style.position = 'fixed';
+            helper.style.opacity = '0';
+            document.body.appendChild(helper);
+            helper.select();
+            document.execCommand('copy');
+            helper.remove();
+        }
+        showToast(`✅ ${successMessage}`, 'success');
+    } catch (_) {
+        showToast('Copy failed. Please copy it manually.', 'error');
+    }
 }
 
 function updateReferralList(referrals) {
@@ -2956,7 +3060,7 @@ function showBlockedView() {
 }
 
 function copyEmail() {
-    navigator.clipboard.writeText('cdoternsupport@gmail.com').catch(() => {});
+    copyText('cdoternsupport@gmail.com', 'Email copied!');
     const status = document.getElementById('copy-status');
     if (status) { status.style.display = 'block'; setTimeout(() => { status.style.display = 'none'; }, 2000); }
 }
@@ -3125,7 +3229,7 @@ function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
                 ${isVerifyDone
                     ? `<button class="btn-sm" style="width:100%;background:#334155;color:#64748b;" disabled>✅ Completed (One-time)</button>`
                     : `<button class="btn-sm" style="background:#3498db;width:100%;margin-bottom:8px;font-weight:700;"
-                            onclick="window.open('${link}', '_blank')">🌐 Visit Site</button>
+                            onclick="openExternalLink('${escapeHtml(link)}')">🌐 Visit Site</button>
                         <div style="display:flex;gap:8px;">
                             <input type="text" id="${inputId}" placeholder="Enter code"
                                 style="flex:1;padding:8px 10px;background:#1e293b;border:1px solid #334155;
@@ -4784,6 +4888,12 @@ async function _initTournamentIndicator() {
 // APP INIT
 // ============================================================
 window.addEventListener('DOMContentLoaded', () => {
+    // Buttons in this page are actions, not form submits. Explicitly setting
+    // the type also protects future HTML changes from accidental reloads.
+    document.querySelectorAll('button:not([type])').forEach(button => {
+        button.type = 'button';
+    });
+
     const adminEl = document.getElementById('admin-tg-username');
     if (adminEl && CONFIG.ADMIN_TELEGRAM) {
         const u = String(CONFIG.ADMIN_TELEGRAM);
@@ -4928,22 +5038,7 @@ function copyUpi() {
         showToast('⚠️ UPI ID not configured. Contact admin.', 'error');
         return;
     }
-    try {
-        navigator.clipboard.writeText(adminUpi).then(() => {
-            showToast('✅ UPI ID copied!', 'ok');
-        }).catch(() => {
-            // Fallback
-            const el = document.createElement('textarea');
-            el.value = adminUpi;
-            document.body.appendChild(el);
-            el.select();
-            document.execCommand('copy');
-            document.body.removeChild(el);
-            showToast('✅ UPI ID copied!', 'ok');
-        });
-    } catch (e) {
-        showToast('❌ Copy failed. Copy manually: ' + adminUpi, 'error');
-    }
+    copyText(adminUpi, 'UPI ID copied!');
 }
 
 function validateTxnInput() {
@@ -4988,11 +5083,7 @@ function openBotForPayment() {
     const uid    = userId || 'unknown';
     const botUrl = `https://t.me/${botUN.replace('@','')}?start=premium_pay_${_selectedPlan}_${uid}_${encodeURIComponent(txnId)}`;
     hidePremiumModal();
-    if (window.Telegram && window.Telegram.WebApp) {
-        window.Telegram.WebApp.openTelegramLink(botUrl);
-    } else {
-        window.open(botUrl, '_blank');
-    }
+    openExternalLink(botUrl);
     showToast('📤 Bot opened — send your screenshot!', 'ok');
 }
 
