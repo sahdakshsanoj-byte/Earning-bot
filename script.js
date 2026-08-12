@@ -637,7 +637,7 @@ async function loadLotteryStatus() {
             const ov = document.createElement('div');
             ov.className = 'lottery-lock-overlay app-lock-pill';
             ov.innerHTML = '<span class="lottery-lock-label">Coming Soon</span>';
-            card.appendChild(ov);
+            card.prepend(ov);
         }
         return;
     }
@@ -753,21 +753,42 @@ function _applyFeatureLock(card, overlayClass, label) {
     card.querySelectorAll('button').forEach(b => { b.disabled = true; });
 
     if (card.querySelector('.' + overlayClass)) return;
-    if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
     card.style.overflow = 'hidden';
     const ov = document.createElement('div');
+    // BUG FIX #4: was position:absolute pinned to a corner, which kept colliding
+    // with whatever badge/button already lived in that corner (rate badge, CTA
+    // button, etc — a different collision on every card). Inserted in normal
+    // flow as the card's first line instead, so it can never overlap anything.
     ov.className = overlayClass + ' app-lock-pill';
     ov.innerHTML = '<span class="lock-label">' +
         String(label || 'Coming Soon').replace(/Coming Soon!?/i, 'Coming Soon') +
         '</span>';
-    card.appendChild(ov);
+    card.prepend(ov);
+}
+
+// Shared by both lock systems (feature-lock + tournament-lock) since the
+// same card can be locked by either one independently. Re-derives the
+// dimmed/disabled visual state from whatever lock pills are actually still
+// present, instead of one system blindly clearing what the other just set.
+function _syncCardLockVisual(card) {
+    if (!card) return;
+    if (card.querySelector('.app-lock-pill')) {
+        card.classList.add('locked-card');
+        card.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    } else {
+        card.classList.remove('locked-card');
+        // Safe to blanket re-enable: every card that reaches here (spin/mining/
+        // bomb-box/lottery/tabs) immediately re-renders its own correct
+        // per-button state right after this runs.
+        card.querySelectorAll('button').forEach(b => { b.disabled = false; });
+    }
 }
 
 function _removeFeatureLock(card, overlayClass) {
     if (!card) return;
-    card.classList.remove('locked-card');
     const ov = card.querySelector('.' + overlayClass);
     if (ov) ov.remove();
+    _syncCardLockVisual(card);
 }
 
 // ============================================================
@@ -3355,7 +3376,13 @@ function applyReferralLock() {
 
     // ── CASE 1: Referrals not yet completed ───────────────────────────────────
     if (lockActive) {
-        _removeWithdrawLock(withdrawTab); // ensure no stale overlay
+        // BUG FIX #6: this used to call _removeWithdrawLock here — the exact
+        // opposite of what CASE 1 means (refs NOT met yet). No function ever
+        // applied the withdraw lock, so the withdraw card never visually
+        // showed as locked even when referrals were incomplete. (The actual
+        // withdrawal request was still safely blocked server-side either way —
+        // this fixes the visual/UX bypass, not a money bug.)
+        _applyWithdrawLock(withdrawTab, refCount);
         if (refBox)  { refBox.style.borderColor = '#e74c3c'; refBox.style.opacity = '1'; }
         if (refText) { refText.style.color = '#e74c3c'; }
         if (helpRef) helpRef.innerHTML = '• Referral Requirement: <b style="color:#f1c40f;">5 Users</b>';
@@ -3386,7 +3413,22 @@ function _removeWithdrawLock(withdrawTab) {
     if (withdrawTab) {
         const stale = withdrawTab.querySelector('.refer-lock-overlay');
         if (stale) stale.remove();
+        const btn = withdrawTab.querySelector('[onclick="requestWithdraw()"]');
+        if (btn) btn.disabled = false;
     }
+}
+
+/** BUG FIX #6: was never defined/called — see CASE 1 above. */
+function _applyWithdrawLock(withdrawTab, refCount) {
+    if (!withdrawTab) withdrawTab = document.getElementById('withdraw-card');
+    if (!withdrawTab) return;
+    const btn = withdrawTab.querySelector('[onclick="requestWithdraw()"]');
+    if (btn) btn.disabled = true;
+    if (withdrawTab.querySelector('.refer-lock-overlay')) return;
+    const ov = document.createElement('div');
+    ov.className = 'refer-lock-overlay app-lock-pill';
+    ov.innerHTML = `<span class="lock-label">Refer ${5 - (refCount || 0)} more to unlock withdrawal</span>`;
+    withdrawTab.prepend(ov);
 }
 
 // ============================================================
@@ -3496,14 +3538,20 @@ function applyTournamentLock(cfg) {
 /** Inject a tournament-lock overlay onto a container element. */
 function _tl_applyOverlay(el, cls) {
     if (!el) return;
-    if (el.querySelector('.' + cls)) return;   // already present
-    if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+    // BUG FIX #5: this overlay only ever added a decorative pill — it never
+    // disabled anything underneath, so Tournament Lock Mode showed "Locked"
+    // on spin/mining/bomb-box/lottery/tabs while every button inside stayed
+    // fully clickable. Now matches _applyFeatureLock: dim + disable buttons.
+    el.classList.add('locked-card');
+    el.querySelectorAll('button').forEach(b => { b.disabled = true; });
+
+    if (el.querySelector('.' + cls)) return;
     el.style.overflow = 'hidden';
 
     const ov = document.createElement('div');
     ov.className  = cls + ' tl-overlay app-lock-pill';
     ov.innerHTML = '<p>Tournament Mode Active</p>';
-    el.appendChild(ov);
+    el.prepend(ov);
 }
 
 /** Remove a tournament-lock overlay from an element. */
@@ -3511,6 +3559,10 @@ function _tl_removeOverlay(el, cls) {
     if (!el) return;
     const ov = el.querySelector('.' + cls);
     if (ov) ov.remove();
+    // BUG FIX #5: re-derive locked/disabled state instead of blindly clearing —
+    // the regular feature-lock (_applyFeatureLock) may still have its own pill
+    // on this same card, and must stay in charge if so.
+    _syncCardLockVisual(el);
 }
 
 // ============================================================
