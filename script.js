@@ -1385,9 +1385,15 @@ async function loadWebTasksStatus() {
         const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
         const cfg    = await cfgRes.json();
         if (!cfg.web_tasks_active) {
+            if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
+            card.style.overflow = 'hidden';
             _applyFeatureLock(card, 'web-tasks-lock-overlay', '🌐 Web Tasks Coming Soon!');
+            card.style.pointerEvents = 'none';
+            card.style.cursor = 'default';
         } else {
             _removeFeatureLock(card, 'web-tasks-lock-overlay');
+            card.style.pointerEvents = '';
+            card.style.cursor = '';
         }
     } catch (e) { /* ignore */ }
 }
@@ -1399,10 +1405,13 @@ async function loadPremiumCardStatus() {
     if (!userId) return;
     const card = document.getElementById('premium-buy-card');
     if (!card) return;
+    // Don't show the "Coming Soon" lock over a user who already has active premium —
+    // that lock is only meant to block NEW purchases, not hide existing status.
+    const alreadyPremium = !!(userData && userData.premium_info && userData.premium_info.premium);
     try {
         const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
         const cfg    = await cfgRes.json();
-        if (!cfg.premium_active) {
+        if (!cfg.premium_active && !alreadyPremium) {
             if (card.style.position !== 'relative') card.style.position = 'relative';
             card.style.overflow = 'hidden';
             _applyFeatureLock(card, 'premium-lock-overlay', '💎 Premium Coming Soon!');
@@ -3189,10 +3198,6 @@ function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
             <div style="position:relative;display:flex;align-items:center;gap:12px;padding:10px;
                         background:rgba(255,255,255,0.04);border-radius:10px;margin-bottom:8px;
                         overflow:hidden;min-height:58px;">
-                <div class="lock-overlay">
-                    <span class="lock-icon">🔒</span>
-                    <span class="lock-label">Slot Available</span>
-                </div>
                 <div style="font-size:26px;">${icon}</div>
                 <div style="flex:1;">
                     <p style="font-size:13px;font-weight:600;color:#475569;margin:0;">${name}</p>
