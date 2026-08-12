@@ -628,6 +628,11 @@ async function loadLotteryStatus() {
 
     if (CONFIG.LOTTERY_ACTIVE === false) {
         card.style.display = 'block';
+        // BUG FIX #3/#1: dim via plain class (not just :has()) and always
+        // disable the ticket button so a locked lottery can't be bought.
+        card.classList.add('locked-card');
+        const lockedBtn = document.getElementById('lottery-btn');
+        if (lockedBtn) lockedBtn.disabled = true;
         if (!card.querySelector('.lottery-lock-overlay')) {
             const ov = document.createElement('div');
             ov.className = 'lottery-lock-overlay app-lock-pill';
@@ -637,6 +642,7 @@ async function loadLotteryStatus() {
         return;
     }
 
+    card.classList.remove('locked-card');
     const staleOv = card.querySelector('.lottery-lock-overlay');
     if (staleOv) staleOv.remove();
 
@@ -691,6 +697,9 @@ async function loadLotteryStatus() {
 
 async function buyLotteryTicket() {
     if (!userId) return showToast('⚠️ User ID error.', 'error');
+    // BUG FIX #1: defense-in-depth — never allow purchase while the feature is locked,
+    // even if something re-enabled the button by mistake.
+    if (CONFIG.LOTTERY_ACTIVE === false) return showToast('🎫 Lottery coming soon!', 'error');
     const btn = document.getElementById('lottery-btn');
     if (btn?.disabled) return;
     if (btn) { btn.disabled = true; btn.innerText = '📺 Loading Ad...'; }
@@ -736,6 +745,13 @@ async function buyLotteryTicket() {
 // ============================================================
 function _applyFeatureLock(card, overlayClass, label) {
     if (!card) return;
+    // BUG FIX #3: force-dim the card via a plain class instead of relying only
+    // on the CSS :has() selector (unsupported in some Telegram in-app WebViews),
+    // and disable every actionable button inside so the lock can't be bypassed
+    // by tapping the button that sits underneath the pill.
+    card.classList.add('locked-card');
+    card.querySelectorAll('button').forEach(b => { b.disabled = true; });
+
     if (card.querySelector('.' + overlayClass)) return;
     if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
     card.style.overflow = 'hidden';
@@ -749,6 +765,7 @@ function _applyFeatureLock(card, overlayClass, label) {
 
 function _removeFeatureLock(card, overlayClass) {
     if (!card) return;
+    card.classList.remove('locked-card');
     const ov = card.querySelector('.' + overlayClass);
     if (ov) ov.remove();
 }
@@ -998,6 +1015,9 @@ async function loadSpinStatus() {
 
 async function doSpin() {
     if (!userId) return showToast('User ID not found!', 'error');
+    // BUG FIX #1: defense-in-depth — card carries .locked-card while spin is locked.
+    const spinCard = document.getElementById('spin-card');
+    if (spinCard?.classList.contains('locked-card')) return showToast('🎡 Spin Wheel coming soon!', 'error');
     if (_pendingRequests.has('doSpin')) return;
     _pendingRequests.add('doSpin');
 
@@ -1238,6 +1258,9 @@ async function loadMiningStatus() {
 
 async function watchMiningAd() {
     if (!userId) return showToast('User ID not found!', 'error');
+    // BUG FIX #1: defense-in-depth — card carries .locked-card while mining is locked.
+    const miningCard = document.getElementById('mining-card');
+    if (miningCard?.classList.contains('locked-card')) return showToast('⛏️ Coin Mining coming soon!', 'error');
     if (_pendingRequests.has('miningAd')) return;
     _pendingRequests.add('miningAd');
 
