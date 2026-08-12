@@ -2485,7 +2485,7 @@ def claim_promo_task_api():
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Invalid user ID."}), 400
 
-    task_id = sanitize_text(data.get("task_id", "")).strip()
+    task_id = sanitize_text(data.get("task_id", "")).strip().lower()
     if not task_id:
         return jsonify({"status": "error", "message": "Missing task ID."}), 400
 
@@ -2632,7 +2632,7 @@ def withdraw_rupees_api():
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Invalid amount."}), 400
 
-    MIN_RUPEE_WITHDRAW = 10.0
+    MIN_RUPEE_WITHDRAW = 30.0
     MAX_RUPEE_WITHDRAW = 10000.0
 
     if amount < MIN_RUPEE_WITHDRAW:
@@ -9400,20 +9400,38 @@ def cmd_add_vip_task(message):
         return
 
     try:
-        existing = vip_tasks_col.find_one({"task_id": task_id})
-        if existing:
-            bot.reply_to(message, f"❌ VIP task `{task_id}` already exists!", parse_mode="Markdown")
-            return
-        vip_tasks_col.insert_one({
+        task_doc = {
             "task_id":    task_id,
             "title":      title,
-            "reward":     reward,
-            "active":     True,
-            "created_at": datetime.utcnow().isoformat(),
-        })
+            "reward":      reward,
+            "active":      True,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        existing = vip_tasks_col.find_one({"task_id": task_id}, {"active": 1, "_id": 0})
+        if existing and existing.get("active", True):
+            bot.reply_to(message, f"❌ VIP task `{task_id}` already exists!", parse_mode="Markdown")
+            return
+
+        # /delviptask deactivates the document instead of deleting it. Reuse
+        # that inactive document so the unique task_id index does not block
+        # recreating the same ID.
+        if existing:
+            vip_tasks_col.update_one(
+                {"task_id": task_id},
+                {
+                    "$set": task_doc,
+                    "$unset": {"deactivated_at": ""},
+                },
+            )
+            action_label = "re-activated"
+        else:
+            task_doc["created_at"] = datetime.utcnow().isoformat()
+            vip_tasks_col.insert_one(task_doc)
+            action_label = "added"
+
         bot.reply_to(
             message,
-            f"✅ *VIP Task Added!*\n\n"
+            f"✅ *VIP Task {action_label.title()}!*\n\n"
             f"🆔 ID: `{task_id}`\n"
             f"📌 Title: {title}\n"
             f"🪙 Reward: {reward} coins\n\n"
