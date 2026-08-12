@@ -1744,6 +1744,9 @@ async function loadBombBoxStatus() {
 
 async function watchBombBoxAd() {
     if (!userId) return showToast('User ID not found!', 'error');
+    // BUG FIX #1: defense-in-depth — card carries .locked-card while bomb box is locked.
+    const bombCard = document.getElementById('bomb-box-card');
+    if (bombCard?.classList.contains('locked-card')) return showToast('💣 Bomb Box coming soon!', 'error');
     if (_pendingRequests.has('bombBoxAd')) return;
     _pendingRequests.add('bombBoxAd');
 
