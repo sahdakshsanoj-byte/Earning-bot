@@ -646,16 +646,29 @@
         .btn:active, .btn-sm:active, button:active { transform: scale(.98); }
 
         /* Locked features are compact dimmed cards with a gray pill, never a modal overlay. */
+        /* BUG FIX #3: :has() isn't supported in every Telegram in-app WebView, so the
+           dimming used to silently fail there and the card looked fully active.
+           .locked-card is now toggled directly in JS as the reliable fallback,
+           the :has() rule stays only as a belt-and-braces enhancement. */
         #lottery-card:has(.lottery-lock-overlay),
         #spin-card:has(.spin-lock-overlay),
         #mining-card:has(.mining-lock-overlay),
         #bomb-box-card:has(.tl-card-lock-bomb_box),
-        #yt-tasks-section:has(.lock-overlay) {
+        #yt-tasks-section:has(.lock-overlay),
+        .locked-card {
             opacity: .62 !important;
+        }
+        /* BUG FIX #1: belt-and-braces — even if a button's `disabled` attribute
+           somehow gets missed, clicks inside a locked card never reach it. */
+        .locked-card button, .locked-card .btn, .locked-card .btn-sm {
+            pointer-events: none !important;
         }
         .lock-overlay, .lottery-lock-overlay, .spin-lock-overlay,
         .mining-lock-overlay, .tl-overlay {
-            inset: auto 12px 12px auto !important;
+            /* BUG FIX #2: was bottom-right (auto 12px 12px auto), which sat right on
+               top of the CTA button at the bottom of these cards. Moved to top-right
+               so it never overlaps the action button. */
+            inset: 12px 12px auto auto !important;
             width: auto !important;
             height: auto !important;
             min-height: 0 !important;
@@ -674,7 +687,8 @@
         }
         .app-lock-pill {
             position: absolute !important;
-            inset: auto 12px 12px auto !important;
+            /* BUG FIX #2: moved to top-right, see note above. */
+            inset: 12px 12px auto auto !important;
             z-index: 20 !important;
             display: inline-flex !important;
             align-items: center !important;
