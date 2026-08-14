@@ -445,7 +445,16 @@ async function fetchLiveData() {
         // This prevents a Render cold-start or temp error from hiding all tabs.
         if (data.status === "blocked") {
             _blockVotes++;
-            if (_blockVotes >= 2) { showBlockedView(); return; }
+            if (_blockVotes >= 2) {
+                // BUG FIX: backend now still sends profile fields (coins, referrals,
+                // rank, etc.) alongside status:"blocked" — populate the Profile tab
+                // with them before switching to the blocked view, so a banned user
+                // can still see their own profile, not just Support.
+                userData = data;
+                loadProfileTab();
+                showBlockedView();
+                return;
+            }
             // First vote — retry once after a short delay to confirm
             setTimeout(fetchLiveData, 5000);
             _fetchLiveDataRunning = false;
@@ -1645,7 +1654,9 @@ const _RANK_TIERS = [
 ];
 
 function loadProfileTab() {
-    if (!userData || userData.status !== 'success') return;
+    // BUG FIX: allow rendering for blocked users too (backend now sends
+    // profile fields alongside status:"blocked") — see showBlockedView().
+    if (!userData || (userData.status !== 'success' && userData.status !== 'blocked')) return;
     const d        = userData;
     const coins    = d.coins || 0;
     const refCount = getRefCount(d.referrals);
@@ -3105,8 +3116,24 @@ async function sendSupport() {
 // ============================================================
 function showBlockedView() {
     document.querySelectorAll('.tab-content').forEach(el => { el.style.display = 'none'; el.classList.remove('active-tab'); });
+
+    // BUG FIX: bottom-nav used to be hidden completely, so a blocked user could
+    // only ever see the Support tab. Keep the nav visible but only let them
+    // reach Support (default) and Profile — Home/Tasks/Top/Refer stay disabled
+    // since those involve earning/spending coins, which stays locked while banned.
     const nav = document.querySelector('.bottom-nav');
-    if (nav) nav.style.display = 'none';
+    if (nav) nav.style.display = 'flex';
+    ['nav-home', 'nav-tasks', 'nav-leaderboard', 'nav-refer'].forEach(id => {
+        const item = document.getElementById(id);
+        if (item) {
+            item.style.opacity = '0.35';
+            item.style.pointerEvents = 'none';
+            item.onclick = null;
+        }
+    });
+    const profileNav = document.getElementById('nav-profile');
+    if (profileNav) profileNav.style.opacity = '1';
+
     const helpTab = document.getElementById('help');
     if (helpTab) { helpTab.style.display = 'block'; helpTab.classList.add('active-tab'); }
     const banner = document.getElementById('blocked-banner');
@@ -3590,6 +3617,8 @@ function closeTournamentHub() {
     if (!modal) return;
     modal.classList.remove('open');
     document.body.style.overflow = '';
+    // Stop the countdown ticking in the background once the hub is closed.
+    if (_matchCountdownInterval) { clearInterval(_matchCountdownInterval); _matchCountdownInterval = null; }
 }
 
 document.addEventListener('click', function(e) {
@@ -3874,6 +3903,15 @@ function _renderTournament(t, winners, roundsData) {
     } else if (t.status === 'registration_open') {
         const reg      = _tournamentRegCache[_selectedTid] || { registered: false };
         const _tmode   = (t.mode || 'Solo').toLowerCase();
+
+        // ── Countdown: registration open → match live ──────────────────────
+        if (t.match_time_iso) {
+            html += `
+            <div id="match-countdown-box" style="text-align:center;padding:12px 14px;background:rgba(241,196,15,0.08);border:1px solid rgba(241,196,15,0.3);border-radius:12px;margin-bottom:12px;">
+                <p style="font-size:11px;color:#94a3b8;margin:0 0 4px;text-transform:uppercase;letter-spacing:0.5px;">⏱ Match Starts In</p>
+                <p id="match-countdown-timer" style="font-size:20px;font-weight:800;color:#f1c40f;margin:0;font-variant-numeric:tabular-nums;letter-spacing:1px;">--:--:--</p>
+            </div>`;
+        }
 
         // ── Round info banner at top of registration section
         const _roTotalRnds = parseInt(t.total_rounds || 1);
@@ -4193,6 +4231,43 @@ function _renderTournament(t, winners, roundsData) {
     </div>`;  // close t-body
 
     content.innerHTML = html;
+    // Countdown only applies while registration is open; any other status
+    // (registration_closed, match_live, etc.) stops it — matches "registration
+    // open tak → match live hone tak" requirement.
+    _startMatchCountdown(t.status === 'registration_open' ? t.match_time_iso : null);
+}
+
+let _matchCountdownInterval = null;
+
+function _startMatchCountdown(matchTimeIso) {
+    if (_matchCountdownInterval) { clearInterval(_matchCountdownInterval); _matchCountdownInterval = null; }
+    if (!matchTimeIso) return;
+
+    const target = new Date(matchTimeIso).getTime();
+    if (isNaN(target)) return;
+
+    const tick = () => {
+        const el = document.getElementById('match-countdown-timer');
+        if (!el) { clearInterval(_matchCountdownInterval); _matchCountdownInterval = null; return; }
+        const diff = target - Date.now();
+        if (diff <= 0) {
+            el.textContent = '🔴 Match is starting...';
+            clearInterval(_matchCountdownInterval);
+            _matchCountdownInterval = null;
+            return;
+        }
+        const totalSec = Math.floor(diff / 1000);
+        const days = Math.floor(totalSec / 86400);
+        const hrs  = Math.floor((totalSec % 86400) / 3600);
+        const mins = Math.floor((totalSec % 3600) / 60);
+        const secs = totalSec % 60;
+        const pad  = n => String(n).padStart(2, '0');
+        el.textContent = days > 0
+            ? `${days}d ${pad(hrs)}h ${pad(mins)}m ${pad(secs)}s`
+            : `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+    };
+    tick();
+    _matchCountdownInterval = setInterval(tick, 1000);
 }
 
 // Per-tournament leaderboard — every tournament has its own separate leaderboard.
