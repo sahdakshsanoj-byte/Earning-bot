@@ -1523,8 +1523,13 @@ def get_user_data_api(user_id: int):
         user = users_col.find_one({"user_id": user_id})
         if not user:
             return jsonify({"status": "error", "message": "User not found."}), 404
-        if user.get("blocked"):
-            return jsonify({"status": "blocked"})
+
+        is_blocked = bool(user.get("blocked"))
+        # BUG FIX: blocked users used to get literally nothing back but
+        # {"status":"blocked"} — so even their own Profile tab (coins,
+        # referrals, rank, etc.) couldn't render. Now we still compute and
+        # return the read-only profile fields, just flagged as blocked so
+        # the frontend can keep every other tab locked out.
 
         today    = str(date.today())
         ads_date  = user.get("ads_date", "")
@@ -1565,7 +1570,7 @@ def get_user_data_api(user_id: int):
         promo_task_completions = user.get("promo_task_completions", [])
 
         resp = {
-            "status":                 "success",
+            "status":                 "blocked" if is_blocked else "success",
             "coins":                  user.get("coins", 0),
             "leaderboard":            get_leaderboard_cached(),
             "referrals":              get_referral_list(user_id),
@@ -1586,9 +1591,14 @@ def get_user_data_api(user_id: int):
             "pending_winner_popup":   user.get("pending_winner_popup", False),
             "pending_winner_prize":   user.get("pending_winner_prize", 0),
             "premium_info":           get_premium_info(user_id),
+            "username":               user.get("username", ""),
+            "first_name":             user.get("first_name", ""),
         }
-        # Cache response — invalidated whenever user data is written
-        _set_user_cache(user_id, resp)
+        # Cache response — invalidated whenever user data is written.
+        # Blocked snapshots aren't cached: as soon as an admin unblocks the
+        # user, the very next request must reflect that immediately.
+        if not is_blocked:
+            _set_user_cache(user_id, resp)
         return jsonify(resp)
     except Exception as exc:
         logger.error("get_user error for %s: %s", user_id, exc)
@@ -4935,6 +4945,31 @@ def claim_milestone_api(user_id: int):
 # TOURNAMENT HUB API ENDPOINTS
 # ============================================================
 
+def _parse_tournament_datetime(date_str: str, time_str: str):
+    """Best-effort parse of the free-text Date + Time fields (as typed by the
+    admin in /createtournament, e.g. "20 June 2026" + "7:00 PM") into a UTC
+    datetime — used only to drive the registration-open countdown timer.
+    Admin is assumed to type IST (matches the rest of the bot's convention).
+    Returns None if it can't confidently parse — the countdown is then just
+    hidden on the frontend, nothing else breaks.
+    """
+    date_str = (date_str or "").strip()
+    time_str = (time_str or "").strip()
+    if not date_str or not time_str:
+        return None
+    date_formats = ["%d %B %Y", "%d %b %Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"]
+    time_formats = ["%I:%M %p", "%I:%M%p", "%I %p", "%H:%M"]
+    IST_OFFSET = timedelta(hours=5, minutes=30)
+    for df in date_formats:
+        for tf in time_formats:
+            try:
+                dt_naive = datetime.strptime(f"{date_str} {time_str}", f"{df} {tf}")
+                return dt_naive - IST_OFFSET  # IST → UTC for storage
+            except ValueError:
+                continue
+    return None
+
+
 def _format_tournament(t, include_registrations=True):
     """Tournament dict ko user-friendly format mein convert karo."""
     if not t:
@@ -4952,6 +4987,12 @@ def _format_tournament(t, include_registrations=True):
     if t.get("status") != "match_live":
         t.pop("room_id",       None)
         t.pop("room_password", None)
+
+    # BUG-FREE ADD-ON: expose match_time as ISO 8601 (UTC) separately, since the
+    # generic human-readable format below isn't reliably parseable in JS. Powers
+    # the "registration open → match live" countdown timer on the tournament card.
+    if isinstance(t.get("match_time"), datetime):
+        t["match_time_iso"] = t["match_time"].strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # datetime → string
     for k in list(t.keys()):
@@ -7861,6 +7902,7 @@ def cmd_create_tournament(message):
             )
 
         tid = f"t_{int(time.time())}"
+        match_dt = _parse_tournament_datetime(date, t_time)
         tournaments_col.update_one(
             {"tournament_id": tid},
             {"$setOnInsert": {"team_id_counter": 0},
@@ -7871,6 +7913,7 @@ def cmd_create_tournament(message):
                 "map":           sanitize_text(map_, max_length=30),
                 "date":          sanitize_text(date, max_length=30),
                 "time":          sanitize_text(t_time, max_length=30),
+                "match_time":    match_dt,   # used for the countdown timer; None if unparseable
                 "entry_fee":     entry_fee,
                 "max_players":   max_players,
                 "prize_pool":    sanitize_text(prize_pool, max_length=200),
@@ -7886,6 +7929,7 @@ def cmd_create_tournament(message):
             upsert=True,
         )
         mode_emoji = {"Solo": "🎯", "Duo": "🤝", "Squad": "🛡️"}.get(mode, "🎮")
+        timer_note = "" if match_dt else "\n⚠️ *Date/Time format samajh nahi aaya — countdown timer nahi dikhega.* `/setmatchtime` se fix kar sakte ho."
         bot.reply_to(
             message,
             f"✅ *Tournament Created!*\n\n"
@@ -7898,7 +7942,8 @@ def cmd_create_tournament(message):
             f"🔄 *Rounds:* {total_rounds}\n\n"
             f"📌 *Status:* Coming Soon\n"
             f"📝 *Description:* {description[:80] + '...' if description and len(description) > 80 else description or '—'}\n"
-            f"🆔 *Tournament ID:* `{tid}`\n\n"
+            f"🆔 *Tournament ID:* `{tid}`\n"
+            f"{timer_note}\n\n"
             f"*Next steps:*\n"
             f"• Prizes: `/setprizes {tid} 1st:5000 Coins | 2nd:3000 Coins | 3rd:1000 Coins`\n"
             f"• Registration open: `/tournamentstatus {tid} registration_open`\n"
@@ -7909,6 +7954,65 @@ def cmd_create_tournament(message):
         logger.info("Admin created tournament: %s", tid)
     except Exception as exc:
         logger.error("cmd_create_tournament error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["setmatchtime"])
+def cmd_set_match_time(message):
+    """Admin: /setmatchtime <tournament_id> <Date> <Time>
+    Sets/fixes the exact match datetime that drives the registration-open
+    countdown timer, without needing to recreate the tournament.
+    Example: /setmatchtime t_123456 20 June 2026 7:00 PM
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split(None, 2)
+    if len(parts) < 3:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:*\n"
+            "`/setmatchtime <tournament_id> <Date> <Time>`\n\n"
+            "*Example:* `/setmatchtime t_123456 20 June 2026 7:00 PM`\n\n"
+            "Tournament IDs dekhne ke liye: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    rest = parts[2].strip()
+    # Time is always the trailing "H:MM AM/PM" (or "HH:MM") token(s); date is everything before it.
+    m = re.search(r"(\d{1,2}(:\d{2})?\s*(AM|PM|am|pm)?)\s*$", rest)
+    if not m:
+        return bot.reply_to(message, "❌ Time samajh nahi aaya. Example: `20 June 2026 7:00 PM`", parse_mode="Markdown")
+    time_str = m.group(1).strip()
+    date_str = rest[:m.start()].strip()
+
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid}, {"tournament_id": 1})
+        if not t:
+            return bot.reply_to(message, "❌ Tournament nahi mila. `/listtournaments` check karo.")
+
+        match_dt = _parse_tournament_datetime(date_str, time_str)
+        if not match_dt:
+            return bot.reply_to(
+                message,
+                "❌ Date/Time format samajh nahi aaya.\n"
+                "Supported: `20 June 2026 7:00 PM`, `20/06/2026 19:00`, `2026-06-20 7:00 PM`",
+                parse_mode="Markdown",
+            )
+
+        tournaments_col.update_one(
+            {"tournament_id": tid},
+            {"$set": {"date": date_str, "time": time_str, "match_time": match_dt}},
+        )
+        bot.reply_to(
+            message,
+            f"✅ Match time set for `{tid}`:\n"
+            f"📅 {date_str} ⏰ {time_str} (IST)\n\n"
+            f"Countdown timer ab registration-open card pe dikhega.",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin set match_time for %s: %s %s", tid, date_str, time_str)
+    except Exception as exc:
+        logger.error("setmatchtime error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
