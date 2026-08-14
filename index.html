@@ -2027,19 +2027,19 @@
         display: flex; justify-content: space-around; align-items: center;
         padding: 8px 0 14px 0; z-index: 999;
     ">
-        <div class="nav-item active" onclick="switchTab('rewards', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
+        <div class="nav-item active" id="nav-home" onclick="switchTab('rewards', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
             <span style="font-size:20px;">🏠</span><span>Home</span>
         </div>
-        <div class="nav-item" onclick="switchTab('tasks', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
+        <div class="nav-item" id="nav-tasks" onclick="switchTab('tasks', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
             <span style="font-size:20px;">✅</span><span>Tasks</span>
         </div>
-        <div class="nav-item" onclick="switchTab('leaderboard', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
+        <div class="nav-item" id="nav-leaderboard" onclick="switchTab('leaderboard', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
             <span style="font-size:20px;">🏆</span><span>Top</span>
         </div>
-        <div class="nav-item" onclick="switchTab('refer', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
+        <div class="nav-item" id="nav-refer" onclick="switchTab('refer', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
             <span style="font-size:20px;">👥</span><span>Refer</span>
         </div>
-        <div class="nav-item" onclick="switchTab('profile', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
+        <div class="nav-item" id="nav-profile" onclick="switchTab('profile', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
             <span style="font-size:20px;">👤</span><span>Profile</span>
         </div>
     </div>
