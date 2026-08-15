@@ -1269,17 +1269,18 @@ def add_security_headers(response):
 def get_leaderboard() -> str:
     try:
         top_users = list(
-            users_col.find({}, {"user_id": 1, "coins": 1, "username": 1, "_id": 0})
+            users_col.find({}, {"user_id": 1, "coins": 1, "_id": 0})
             .sort("coins", -1)
             .limit(10)
         )
-        # SECURITY FIX: this used to encode only "user_id:coins" — the raw
-        # numeric Telegram ID was then rendered directly in the public
-        # leaderboard UI ("User 5839201...") with zero auth required to view
-        # it. Now includes username too so the frontend can show "@handle"
-        # (or a generic "Player N" fallback) instead of leaking the ID.
-        # Telegram usernames can't contain ':', so it's a safe delimiter.
-        data = [f"{u['user_id']}:{u.get('coins', 0)}:{u.get('username', '') or ''}" for u in top_users]
+        # PRIVACY: frontend renders only "Player #N" (or "You") for the
+        # leaderboard now — no username, no raw ID shown to anyone. user_id
+        # still travels in this payload (needed for the "is this me"
+        # highlight), but username is deliberately left out: it's directly
+        # searchable/messageable on Telegram, so sending it here — even if
+        # the UI never renders it — would still leak it to anyone checking
+        # the raw API response in DevTools.
+        data = [f"{u['user_id']}:{u.get('coins', 0)}" for u in top_users]
         return "|".join(data) if data else "none"
     except Exception as exc:
         logger.error("get_leaderboard error: %s", exc)
