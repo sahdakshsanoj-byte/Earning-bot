@@ -2033,9 +2033,15 @@ function updateLeaderboardUI(leaderboardData) {
         // Previously this showed "User <raw telegram id>" for every other
         // player, publicly leaking real Telegram IDs to anyone opening the
         // app (no login required to view the leaderboard).
-        const [id, coins, username] = p.split(':');
+        const [id, coins] = p.split(':');
         const isMe   = String(id) === String(userId);
-        const label  = isMe ? '👤 You' : (username ? `@${_esc(username)}` : `Player #${i + 1}`);
+        // Generic rank-based label only — no username or ID shown for anyone
+        // but the viewer themself. @username is directly searchable/messageable
+        // on Telegram, so showing it is arguably worse for privacy than the
+        // raw numeric ID it replaced; a plain "Player #N" still lets the
+        // leaderboard do its job (show relative ranking) without exposing
+        // who anyone actually is.
+        const label = isMe ? '👤 You' : `Player #${i + 1}`;
         return `
             <div class="lb-item" style="${isMe ? 'background:rgba(99,102,241,0.1);border-radius:8px;padding:10px;' : ''}">
                 <span class="lb-rank">${medals[i] || `#${i + 1}`}</span>
