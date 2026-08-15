@@ -1269,11 +1269,17 @@ def add_security_headers(response):
 def get_leaderboard() -> str:
     try:
         top_users = list(
-            users_col.find({}, {"user_id": 1, "coins": 1, "_id": 0})
+            users_col.find({}, {"user_id": 1, "coins": 1, "username": 1, "_id": 0})
             .sort("coins", -1)
             .limit(10)
         )
-        data = [f"{u['user_id']}:{u.get('coins', 0)}" for u in top_users]
+        # SECURITY FIX: this used to encode only "user_id:coins" — the raw
+        # numeric Telegram ID was then rendered directly in the public
+        # leaderboard UI ("User 5839201...") with zero auth required to view
+        # it. Now includes username too so the frontend can show "@handle"
+        # (or a generic "Player N" fallback) instead of leaking the ID.
+        # Telegram usernames can't contain ':', so it's a safe delimiter.
+        data = [f"{u['user_id']}:{u.get('coins', 0)}:{u.get('username', '') or ''}" for u in top_users]
         return "|".join(data) if data else "none"
     except Exception as exc:
         logger.error("get_leaderboard error: %s", exc)
@@ -1804,8 +1810,23 @@ def claim_daily_api(user_id: int):
         reward     = get_streak_reward(streak_day)
         tier       = get_streak_tier(streak_day)
 
-        users_col.update_one(
-            {"user_id": user_id},
+        # RACE-CONDITION FIX: the check above (read user, compare last_claim_ts)
+        # and the credit below used to be two separate steps — two simultaneous
+        # requests could both pass the "not claimed in 24h" check before either
+        # one's update landed, and both would credit the reward. This condition
+        # is now enforced INSIDE the same atomic update: only a document whose
+        # last_claim_ts is still more than 24h old (or absent) matches, so only
+        # one of two concurrent requests can possibly succeed.
+        cutoff_iso = (now - timedelta(hours=24)).isoformat()
+        updated = users_col.find_one_and_update(
+            {
+                "user_id": user_id,
+                "$or": [
+                    {"last_claim_ts": {"$exists": False}},
+                    {"last_claim_ts": ""},
+                    {"last_claim_ts": {"$lt": cutoff_iso}},
+                ],
+            },
             {
                 "$inc": {"coins": reward},
                 "$set": {
@@ -1813,7 +1834,15 @@ def claim_daily_api(user_id: int):
                     "streak_day":    streak_day,
                 },
             },
+            return_document=True,
         )
+        if not updated:
+            # Lost the race — a concurrent request already claimed it first.
+            return jsonify({
+                "status":  "error",
+                "message": "Already claimed! Come back later.",
+            }), 400
+
         _invalidate_user_cache(user_id)
         return jsonify({
             "status":  "success",
@@ -2068,27 +2097,6 @@ def withdraw_api():
     except Exception as exc:
         logger.error("withdraw_api critical error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
-
-
-@app.route("/get_history/<int:user_id>")
-def get_history_api(user_id: int):
-    if is_rate_limited(f"history_{user_id}", 5):
-        return jsonify({"status": "error", "message": "Please wait before refreshing."}), 429
-    try:
-        history = list(
-            withdrawals_col.find({"user_id": user_id}, {"_id": 0})
-            .sort("timestamp", -1)
-            .limit(10)
-        )
-        # BUG FIX #4: MongoDB datetime objects ko ISO string mein convert karo
-        # warna JSON serialization fail ho sakta tha
-        for h in history:
-            if "timestamp" in h and hasattr(h["timestamp"], "isoformat"):
-                h["timestamp"] = h["timestamp"].isoformat()
-        return jsonify({"status": "success", "data": {"history": history}})
-    except Exception as exc:
-        logger.error("get_history error for %s: %s", user_id, exc)
-        return jsonify({"status": "error", "message": "Server error."}), 500
 
 
 @app.route("/verify_task", methods=["POST"])
@@ -3451,7 +3459,7 @@ def admin_login():
             "message": f"Too many failed attempts. Try again in {mins}m {secs}s.",
         }), 429
 
-    if submitted and submitted == ADMIN_TOKEN:
+    if submitted and hmac.compare_digest(submitted, ADMIN_TOKEN):
         check_admin_login_attempt(ip, success=True)
         logger.info("Admin login success from IP %s", ip)
         return jsonify({"status": "success", "message": "Authenticated"})
@@ -5194,6 +5202,16 @@ def tournament_register_api():
             "team_id":  team_id,
         })
     except pymongo.errors.DuplicateKeyError:
+        # BUG FIX: entry fee was already deducted (atomic $inc above) before this
+        # insert ran. A same-user double-submit race can hit this branch after
+        # the coins are gone but with no registration recorded — refund so the
+        # race costs the user nothing.
+        if entry_fee > 0:
+            try:
+                users_col.update_one({"user_id": user_id}, {"$inc": {"coins": entry_fee}})
+                logger.warning("Duplicate tournament registration race: refunded %s coins to user=%s tournament=%s", entry_fee, user_id, tid)
+            except Exception:
+                logger.error("Failed to refund entry fee after duplicate registration race: user=%s tournament=%s", user_id, tid)
         return jsonify({"status": "error", "message": "You are already registered!"}), 400
     except Exception as exc:
         logger.error("tournament_register_api error for %s: %s", user_id, exc)
@@ -5213,6 +5231,21 @@ def tournament_rounds_api(tid: str):
         t = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"_id": 0})
         if not t:
             return jsonify({"status": "error", "message": "Tournament not found."}), 404
+
+        # SECURITY FIX: this endpoint was fully public with no auth — anyone who
+        # knew (or guessed) the tournament_id could fetch a live round's
+        # room_id/room_password without ever registering. Now room credentials
+        # only go out to a user_id that's an actual registered participant.
+        is_registered = False
+        try:
+            req_user_id = int(request.args.get("user_id", 0))
+        except (TypeError, ValueError):
+            req_user_id = 0
+        if req_user_id:
+            is_registered = tournament_registrations_col.find_one(
+                {"tournament_id": tid, "user_id": req_user_id}, {"_id": 1}
+            ) is not None
+
         rounds = list(
             tournament_rounds_col.find(
                 {"tournament_id": tid}, {"_id": 0}
@@ -5222,8 +5255,8 @@ def tournament_rounds_api(tid: str):
             for k in ("started_at", "ended_at"):
                 if r.get(k) and hasattr(r[k], "isoformat"):
                     r[k] = r[k].isoformat()
-            # Hide room credentials unless round is live
-            if r.get("status") != "live":
+            # Hide room credentials unless round is live AND caller is registered
+            if r.get("status") != "live" or not is_registered:
                 r.pop("room_id",       None)
                 r.pop("room_password", None)
         return jsonify({
@@ -5276,7 +5309,8 @@ def admin_set_round_room_api():
 
 @app.route("/tournament/<string:tid>/rounds/<int:round_no>", methods=["GET"])
 def tournament_single_round_api(tid: str, round_no: int):
-    """Specific round ki details return karo — room credentials sirf live round mein dikhenge."""
+    """Specific round ki details return karo — room credentials sirf live round
+    mein, aur sirf registered participant ko dikhenge (?user_id=<id>)."""
     try:
         t = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"_id": 0})
         if not t:
@@ -5289,7 +5323,20 @@ def tournament_single_round_api(tid: str, round_no: int):
         for k in ("started_at", "ended_at"):
             if r.get(k) and hasattr(r[k], "isoformat"):
                 r[k] = r[k].isoformat()
-        if r.get("status") != "live":
+
+        # SECURITY FIX: same leak as /tournament/<tid>/rounds — require the
+        # caller to be a registered participant before handing out room creds.
+        is_registered = False
+        try:
+            req_user_id = int(request.args.get("user_id", 0))
+        except (TypeError, ValueError):
+            req_user_id = 0
+        if req_user_id:
+            is_registered = tournament_registrations_col.find_one(
+                {"tournament_id": tid, "user_id": req_user_id}, {"_id": 1}
+            ) is not None
+
+        if r.get("status") != "live" or not is_registered:
             r.pop("room_id",       None)
             r.pop("room_password", None)
         return jsonify({
