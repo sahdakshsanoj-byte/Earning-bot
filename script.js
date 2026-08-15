@@ -2028,12 +2028,18 @@ function updateLeaderboardUI(leaderboardData) {
     const medals  = ['🥇', '🥈', '🥉'];
     const players = leaderboardData.split('|');
     list.innerHTML = players.map((p, i) => {
-        const [id, coins] = p.split(':');
-        const isMe = String(id) === String(userId);
+        // SECURITY FIX: backend now sends "user_id:coins:username" — user_id
+        // is only used internally to detect "isMe" and is never rendered.
+        // Previously this showed "User <raw telegram id>" for every other
+        // player, publicly leaking real Telegram IDs to anyone opening the
+        // app (no login required to view the leaderboard).
+        const [id, coins, username] = p.split(':');
+        const isMe   = String(id) === String(userId);
+        const label  = isMe ? '👤 You' : (username ? `@${_esc(username)}` : `Player #${i + 1}`);
         return `
             <div class="lb-item" style="${isMe ? 'background:rgba(99,102,241,0.1);border-radius:8px;padding:10px;' : ''}">
                 <span class="lb-rank">${medals[i] || `#${i + 1}`}</span>
-                <span class="lb-user">${isMe ? '👤 You' : `User ${id}`}</span>
+                <span class="lb-user">${label}</span>
                 <span class="lb-coins">${parseInt(coins) || 0} 🪙</span>
             </div>`;
     }).join('');
@@ -3045,36 +3051,6 @@ async function loadRupeeHistory() {
 // ============================================================
 // WITHDRAWAL HISTORY
 // ============================================================
-async function loadHistory() {
-    const list = document.getElementById('history-list');
-    if (!list || !userId) return;
-    list.innerHTML = "<p class='spinner'>Loading...</p>";
-    try {
-        const res     = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_history/${userId}`);
-        const data    = await res.json();
-        const history = data.history || data.data?.history;
-        if (history && history.length > 0) {
-            const methodIcons = { upi: '🏦', google_redeem: '🎁' };
-            const methodNames = { upi: 'UPI', google_redeem: 'Google Play' };
-            list.innerHTML = history.map(h => {
-                const color  = h.status.includes('Approved') ? '#22c55e' : h.status.includes('Rejected') ? '#e74c3c' : '#f1c40f';
-                const m      = h.method || 'upi';
-                const addr   = h.payment_address || h.upi_id || '—';
-                const addrDisplay = addr === 'via_telegram' ? 'via Telegram DM' : addr;
-                return `
-                    <div class="history-item">
-                        <div>${methodIcons[m] || '💸'} <b>${h.amount} coins</b> — ${methodNames[m] || 'UPI'}: <span style="color:#94a3b8;font-size:12px;">${addrDisplay}</span></div>
-                        <div class="history-status" style="color:${color}">${h.status} • ${h.date}</div>
-                    </div>`;
-            }).join('');
-        } else {
-            list.innerHTML = "<p style='color:#94a3b8;text-align:center;'>No withdrawal history found.</p>";
-        }
-    } catch (e) {
-        list.innerHTML = "<p style='color:#94a3b8;text-align:center;'>Failed to load history.</p>";
-    }
-}
-
 // ============================================================
 // SUPPORT
 // ============================================================
@@ -3115,12 +3091,27 @@ async function sendSupport() {
 // UTILITY
 // ============================================================
 function showBlockedView() {
-    document.querySelectorAll('.tab-content').forEach(el => { el.style.display = 'none'; el.classList.remove('active-tab'); });
+    // BUG FIX: this used to unconditionally wipe every tab and force Help/Support
+    // back open on EVERY call — and fetchLiveData() re-calls this every 5 minutes
+    // (plus after most actions). So a blocked user who navigated to Profile got
+    // yanked back to Support automatically within minutes. Now: only force a tab
+    // open the first time (nothing allowed is showing yet); once help or profile
+    // is already active, leave it exactly as the user left it.
+    const currentlyOnAllowedTab =
+        document.getElementById('help')?.classList.contains('active-tab') ||
+        document.getElementById('profile')?.classList.contains('active-tab');
 
-    // BUG FIX: bottom-nav used to be hidden completely, so a blocked user could
-    // only ever see the Support tab. Keep the nav visible but only let them
-    // reach Support (default) and Profile — Home/Tasks/Top/Refer stay disabled
-    // since those involve earning/spending coins, which stays locked while banned.
+    if (!currentlyOnAllowedTab) {
+        document.querySelectorAll('.tab-content').forEach(el => { el.style.display = 'none'; el.classList.remove('active-tab'); });
+        const helpTab = document.getElementById('help');
+        if (helpTab) { helpTab.style.display = 'block'; helpTab.classList.add('active-tab'); }
+        const titleEl = document.getElementById('tab-title');
+        if (titleEl) titleEl.textContent = '🚫 Account Blocked';
+    }
+
+    // Bottom-nav: keep visible but only let them reach Support (default) and
+    // Profile — Home/Tasks/Top/Refer stay disabled since those involve
+    // earning/spending coins, which stays locked while banned.
     const nav = document.querySelector('.bottom-nav');
     if (nav) nav.style.display = 'flex';
     ['nav-home', 'nav-tasks', 'nav-leaderboard', 'nav-refer'].forEach(id => {
@@ -3134,12 +3125,8 @@ function showBlockedView() {
     const profileNav = document.getElementById('nav-profile');
     if (profileNav) profileNav.style.opacity = '1';
 
-    const helpTab = document.getElementById('help');
-    if (helpTab) { helpTab.style.display = 'block'; helpTab.classList.add('active-tab'); }
     const banner = document.getElementById('blocked-banner');
     if (banner) banner.style.display = 'block';
-    const titleEl = document.getElementById('tab-title');
-    if (titleEl) titleEl.textContent = '🚫 Account Blocked';
 }
 
 function copyEmail() {
@@ -3190,7 +3177,7 @@ function openAdminTelegram() {
 function switchTab(tabId, el) {
     // ── Tournament Lock Mode intercept ────────────────────────────────────
     // Leaderboard, Profile, and Tournament Hub are NEVER blocked.
-    const _TL_SAFE_TABS = new Set(['leaderboard', 'profile', 'tournament', 'history']);
+    const _TL_SAFE_TABS = new Set(['leaderboard', 'profile', 'tournament']);
     if (!_TL_SAFE_TABS.has(tabId)) {
         const tlCfg = window._featureCfgCache;
         if (tlCfg && tlCfg.tournament_lock_active) {
@@ -3219,7 +3206,6 @@ function switchTab(tabId, el) {
         tasks:       'Daily Tasks',
         leaderboard: 'Top Earners',
         refer:       'Refer & Earn',
-        history:     'Withdrawal History',
         help:        'Help & Support',
         spin:        '🎡 Spin Wheel',
         mining:      '⛏️ Coin Mining',
@@ -3236,7 +3222,6 @@ function switchTab(tabId, el) {
         }
         refreshLeaderboard();
     }
-    if (tabId === 'history')     loadHistory();
     if (tabId === 'refer')       loadReferralDashboard();
 
     // Re-apply referral lock on tab switch (for both rewards and refer tabs)
@@ -3742,7 +3727,7 @@ async function loadTournamentById(tid, forceRefresh) {
         try {
             const t = tData.tournament;
             if (t && (parseInt(t.total_rounds||1) > 1 || t.status === 'match_live' || t.status === 'registration_closed' || t.status === 'registration_open')) {
-                const rRes  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/tournament/${encodeURIComponent(tid)}/rounds`);
+                const rRes  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/tournament/${encodeURIComponent(tid)}/rounds?user_id=${encodeURIComponent(userId)}`);
                 const rData = await rRes.json();
                 if (rData.status === 'success') roundsData = rData;
             }
