@@ -6688,6 +6688,17 @@ def get_stats(message):
         top_name  = top.get("username") or top.get("first_name") or "Unknown" if top else "—"
         top_coins = top.get("coins", 0) if top else 0
 
+        # BUG FIX: top_name is a raw Telegram username/first_name straight from
+        # the DB, inserted into a Markdown-formatted message unescaped. Telegram
+        # usernames commonly contain "_" (italic marker in Markdown) — an
+        # unbalanced one makes Telegram's API reject the whole message with a
+        # "can't parse entities" error. That error was thrown by bot.reply_to()
+        # OUTSIDE this try/except (see below), so it was never caught — /stats
+        # just silently did nothing while every other admin command (which
+        # never inserts raw user text into Markdown) worked fine.
+        for ch in ("_", "*", "`", "["):
+            top_name = top_name.replace(ch, "\\" + ch)
+
         text = (
             "\U0001f4ca *Daksh Grand Earn — Full Stats*\n"
             "\n"
@@ -6715,7 +6726,15 @@ def get_stats(message):
         logger.error("get_stats error: %s", exc)
         text = "\u26a0\ufe0f Error fetching stats. Check logs."
 
-    bot.reply_to(message, text, parse_mode="Markdown")
+    # BUG FIX: send itself is now guarded too — if Markdown parsing ever fails
+    # again for any reason, fall back to a plain-text reply instead of the
+    # exception silently vanishing into telebot's internal handler with no
+    # reply sent at all.
+    try:
+        bot.reply_to(message, text, parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("get_stats send error: %s", exc)
+        bot.reply_to(message, re.sub(r"[*_`\[\\]", "", text))
 
 
 @bot.message_handler(commands=["monetag"])
