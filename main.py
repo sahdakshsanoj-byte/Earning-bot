@@ -227,9 +227,9 @@ TASK_REWARDS = {
     "yt1":   10,
     "yt2":   10,
     "yt3":   10,
-    "web1":  10,
-    "web2":  10,
-    "web3":  10,
+    "web1":  20,
+    "web2":  20,
+    "web3":  20,
     "slot3": 30,
     "slot4": 30,
 }
@@ -242,8 +242,8 @@ MAX_WEB_TASKS_PER_DAY = 3
 CHANNEL_IDS                = ["official", "channel2", "channel3", "slot1", "slot2", "slot3", "slot4"]
 CHANNEL_REWARD_PER_CHANNEL = 5          # default reward for official channels
 CHANNEL_REWARDS            = {          # per-channel override (sponsor slots earn less)
-    "slot1": 20,
-    "slot2": 20,
+    "slot1": 15,
+    "slot2": 15,
 }
 CHANNEL_TOTAL_REWARD       = 15
 
@@ -645,7 +645,7 @@ def _check_and_flag_already_done(user_id: int, task_id: str) -> None:
 # --- Constants ---
 IP_RATE_LIMIT_REQUESTS  = 50    # Max requests per IP per minute
 IP_RATE_LIMIT_WINDOW    = 60    # Window in seconds
-IP_BAN_DURATION         = 900   # 15 min ban after exceeding limit
+IP_BAN_DURATION         = 120   # 2 min ban after exceeding limit
 
 ADMIN_MAX_FAIL_ATTEMPTS = 5     # Wrong admin tokens allowed
 ADMIN_LOCKOUT_SECONDS   = 900   # 15 min lockout after 5 fails
