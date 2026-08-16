@@ -20,6 +20,7 @@ Environment Variables Required:
 
 import hmac
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -659,16 +660,40 @@ _suspicious_alerted:  dict = {}   # { ip: last_alert_timestamp }
 _security_lock = threading.Lock()
 
 
+def _is_private_ip(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_private
+    except ValueError:
+        return False
+
+
 def _get_client_ip() -> str:
     """Request context se real IP nikalo.
-    X-Forwarded-For ke last IP ko use karo — Render proxy real IP append karta hai end mein.
-    Pehla IP attacker set kar sakta hai (spoofing), isliye last trusted hai.
+
+    BUG FIX: this used to take the LAST entry in X-Forwarded-For, on the
+    (wrong) assumption that Render appends the real client IP at the end.
+    Standard X-Forwarded-For convention is the opposite: the FIRST entry is
+    the original client, and each proxy hop APPENDS its own address as the
+    request passes through — so the last entry is actually the closest
+    internal hop to us, which on Render is a private 10.x.x.x address, not a
+    real visitor. That bug meant every single visitor was being bucketed
+    under that one internal IP for rate-limiting, so any burst of normal
+    combined traffic (or one page load, which alone fires 5 separate
+    /get_feature_config calls) could trip the "suspicious activity" ban and
+    lock out ALL real users for 15 minutes at once.
+
+    Now takes the first PUBLIC (non-private) address in the chain — falling
+    back to the first entry, then to remote_addr — so it survives extra
+    internal hops being appended on either end.
     """
     forwarded = request.headers.get("X-Forwarded-For", "")
     if forwarded:
         ips = [ip.strip() for ip in forwarded.split(",") if ip.strip()]
+        public_ips = [ip for ip in ips if not _is_private_ip(ip)]
+        if public_ips:
+            return public_ips[0]
         if ips:
-            return ips[-1]
+            return ips[0]
     return request.remote_addr or ""
 
 
@@ -7251,7 +7276,13 @@ def broadcast(message):
         return
     msg_text = message.text.replace("/broadcast ", "", 1)
     if not msg_text or msg_text == "/broadcast":
-        return bot.reply_to(message, "Usage: /broadcast [Message]")
+        return bot.reply_to(
+            message,
+            "Usage: `/broadcast <message>`\n\n"
+            "📷 Photo ke saath bhejni ho to: photo attach karo aur uski "
+            "*caption* mein `/broadcast <message>` likho.",
+            parse_mode="Markdown",
+        )
     all_users = list(users_col.find({}, {"user_id": 1}))
     sent = failed = 0
     for u in all_users:
@@ -7262,6 +7293,33 @@ def broadcast(message):
         except Exception:
             failed += 1
     bot.reply_to(message, f"\U0001f4e2 Sent: {sent} | Failed: {failed}")
+
+
+@bot.message_handler(content_types=["photo"], func=lambda m: (m.caption or "").strip().startswith("/broadcast"))
+def broadcast_photo(message):
+    """Admin: photo bhejo caption mein '/broadcast <message>' likh ke — sabko
+    wahi photo (aur caption ka baaki text) bhej diya jaayega."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    caption  = (message.caption or "").strip()
+    msg_text = caption[len("/broadcast"):].strip()  # caption ke baad ka text — empty ho sakta hai
+    file_id  = message.photo[-1].file_id  # highest resolution
+
+    all_users = list(users_col.find({}, {"user_id": 1}))
+    sent = failed = 0
+    for u in all_users:
+        try:
+            bot.send_photo(
+                u["user_id"],
+                file_id,
+                caption=msg_text or None,
+                parse_mode="Markdown" if msg_text else None,
+            )
+            sent += 1
+            time.sleep(0.05)
+        except Exception:
+            failed += 1
+    bot.reply_to(message, f"\U0001f4e2\U0001f4f7 Photo broadcast sent: {sent} | Failed: {failed}")
 
 
 @bot.message_handler(commands=["msg"])
@@ -9742,6 +9800,15 @@ def cmd_list_vip_tasks(message):
 def handle_photo(message):
     """When a user sends a photo, forward it to admin as payment proof."""
     if is_group_chat(message):
+        return
+
+    # BUG FIX: admin's own broadcast photos (caption starting with
+    # "/broadcast", handled by broadcast_photo() above) were also matching
+    # this generic handler — since telebot fires every matching handler, the
+    # admin's broadcast image was getting forwarded back to the admin as a
+    # fake "payment screenshot from admin". Skip it here, it's already
+    # handled.
+    if int(message.from_user.id) == ADMIN_ID and (message.caption or "").strip().startswith("/broadcast"):
         return
 
     user_id   = message.from_user.id
