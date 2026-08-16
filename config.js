@@ -121,7 +121,7 @@ const CONFIG = {
             name:   "Sponsor Slot 1",
             desc:   "Contact admin to advertise here",
             link:   "https://youtube.com/shorts/E2g3GuGeDtw?si=p0KQ0f7C37Tc-n9J",
-            reward: 3,
+            reward: 15,
             type:   "channel"
         },
 
@@ -131,7 +131,7 @@ const CONFIG = {
             name:   "Sponsor Channel",
             desc:   "Join the channel & earn instantly",
             link:   "https://t.me/Cdotchat",
-            reward: 3,
+            reward: 15,
             type:   "channel"
         },
 
@@ -141,7 +141,7 @@ const CONFIG = {
             name:   "Code Verification Partner",
             desc:   "Visit the channel & enter the code to earn",
             link:   "https://t.me/cdoternoffical",
-            reward: 4,
+            reward: 30,
             type:   "verify"
         },
 
@@ -151,7 +151,7 @@ const CONFIG = {
             name:   "Sponsor Website Task",
             desc:   "Visit the site & enter code to earn",
             link:   "https://your-sponsor-link.com",
-            reward: 4,
+            reward: 30,
             type:   "verify"
         }
 
