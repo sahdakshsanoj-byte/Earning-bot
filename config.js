@@ -1,4 +1,4 @@
-// ============================================================
+se// ============================================================
 // CONFIG.JS — Daksh Grand Earn
 // Update the values below before deploying
 // ============================================================
@@ -116,7 +116,7 @@ const CONFIG = {
     SPONSORS: {
 
         slot1: {
-            active: true,
+            active: false,
             icon:   "💼",
             name:   "Sponsor Slot 1",
             desc:   "Contact admin to advertise here",
@@ -126,7 +126,7 @@ const CONFIG = {
         },
 
         slot2: {
-            active: true,
+            active: false,
             icon:   "👀",
             name:   "Sponsor Channel",
             desc:   "Join the channel & earn instantly",
@@ -136,7 +136,7 @@ const CONFIG = {
         },
 
         slot3: {
-            active: true,
+            active: false,
             icon:   "☎️",
             name:   "Code Verification Partner",
             desc:   "Visit the channel & enter the code to earn",
@@ -146,7 +146,7 @@ const CONFIG = {
         },
 
         slot4: {
-            active: true,
+            active: false,
             icon:   "🌐",
             name:   "Sponsor Website Task",
             desc:   "Visit the site & enter code to earn",
