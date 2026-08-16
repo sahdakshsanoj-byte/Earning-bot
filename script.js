@@ -204,6 +204,42 @@ async function fetchWithRetry(url, options = {}, retries = 3, delayMs = 2000) {
 }
 
 // ============================================================
+// SHARED /get_feature_config FETCH — dedupe + short cache
+// ============================================================
+// BUG FIX: spin/mining/premium/web-tasks/bomb-box each fetched this same
+// endpoint independently on every refresh — 5 separate network calls for
+// data that's identical across all of them. Beyond the waste, this made it
+// far too easy to trip the backend's per-IP rate-limit/ban from completely
+// normal usage (a handful of real users refreshing around the same time).
+// Now: one in-flight request is shared by all callers, and the result is
+// cached for a few seconds so a full refresh cycle costs 1 call, not 5.
+let _featureCfgCache        = null;
+let _featureCfgCacheTime    = 0;
+let _featureCfgInFlight     = null;
+const FEATURE_CFG_CACHE_MS  = 4000;
+
+async function getFeatureConfig() {
+    const now = Date.now();
+    if (_featureCfgCache && (now - _featureCfgCacheTime) < FEATURE_CFG_CACHE_MS) {
+        return _featureCfgCache;
+    }
+    if (_featureCfgInFlight) return _featureCfgInFlight;
+
+    _featureCfgInFlight = (async () => {
+        try {
+            const res = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
+            const cfg = await res.json();
+            _featureCfgCache     = cfg;
+            _featureCfgCacheTime = Date.now();
+            return cfg;
+        } finally {
+            _featureCfgInFlight = null;
+        }
+    })();
+    return _featureCfgInFlight;
+}
+
+// ============================================================
 // COUNTDOWN HELPER
 // ============================================================
 function startCountdown(seconds, updateFn, doneFn) {
@@ -1001,8 +1037,7 @@ async function loadSpinStatus() {
     const card = document.getElementById('spin-card');
     if (!card) return;
     try {
-        const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
-        const cfg    = await cfgRes.json();
+        const cfg = await getFeatureConfig();
 
         // ── Tournament Lock Mode — applied once per feature-config fetch ──
         // This reuses the existing /get_feature_config call so no extra API
@@ -1208,8 +1243,7 @@ async function loadMiningStatus() {
     if (!card) return;
 
     try {
-        const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
-        const cfg    = await cfgRes.json();
+        const cfg = await getFeatureConfig();
 
         if (!cfg.mining_active) {
             _applyFeatureLock(card, 'mining-lock-overlay', '⛏️ Coin Mining Coming Soon!');
@@ -1435,8 +1469,7 @@ async function loadWebTasksStatus() {
     const card = document.getElementById('web-tasks-card');
     if (!card) return;
     try {
-        const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
-        const cfg    = await cfgRes.json();
+        const cfg = await getFeatureConfig();
         if (!cfg.web_tasks_active) {
             if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
             card.style.overflow = 'hidden';
@@ -1462,8 +1495,7 @@ async function loadPremiumCardStatus() {
     // that lock is only meant to block NEW purchases, not hide existing status.
     const alreadyPremium = !!(userData && userData.premium_info && userData.premium_info.premium);
     try {
-        const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
-        const cfg    = await cfgRes.json();
+        const cfg = await getFeatureConfig();
         if (!cfg.premium_active && !alreadyPremium) {
             if (card.style.position !== 'relative') card.style.position = 'relative';
             card.style.overflow = 'hidden';
@@ -1728,8 +1760,7 @@ async function loadBombBoxStatus() {
     if (!card) return;
 
     try {
-        const cfgRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
-        const cfg    = await cfgRes.json();
+        const cfg = await getFeatureConfig();
 
         if (!cfg.bomb_box_active) {
             _applyFeatureLock(card, 'bomb-lock-overlay', '💣 Bomb Box Coming Soon!');
