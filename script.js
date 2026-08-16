@@ -3531,7 +3531,7 @@ function applyTournamentLock(cfg) {
         if (lockActive && locked.has(key)) {
             _tl_applyOverlay(tabEl, 'tl-tab-lock-' + key);
         } else {
-            _tl_removeOverlay(tabEl, 'tl-tab-lock-' + key);
+            _tl_removeOverlay(tabEl, 'tl-tab-lock-' + key, /* skipButtonToggle */ true);
         }
     });
 
@@ -3617,14 +3617,32 @@ function _tl_applyOverlay(el, cls) {
     el.prepend(ov);
 }
 
-/** Remove a tournament-lock overlay from an element. */
-function _tl_removeOverlay(el, cls) {
+/** Remove a tournament-lock overlay from an element.
+ * @param {boolean} skipButtonToggle — TAB-level containers (rewards/tasks/
+ *   refer) hold MANY independently-managed buttons (ad-watch, task-verify,
+ *   channel-claim, streak-claim, etc.) that each own their own disabled
+ *   state. Blindly re-enabling every button here on every normal refresh
+ *   (the common case, since tournament lock usually isn't even active) was
+ *   wiping out legitimate states — most visibly, a just-completed task's
+ *   button going back to "active" a moment later, and unrelated
+ *   already-locked cards (e.g. Bomb Box marked Coming Soon) making the
+ *   ENTIRE tab look dimmed/disabled. Card-level calls (spin/mining/
+ *   bomb-box/lottery) don't pass this — those each have their own loader
+ *   that re-derives every button's correct state right after this runs in
+ *   the same call, so syncing there is safe.
+ */
+function _tl_removeOverlay(el, cls, skipButtonToggle) {
     if (!el) return;
     const ov = el.querySelector('.' + cls);
+    const wasLocked = !!ov;
     if (ov) ov.remove();
-    // BUG FIX #5: re-derive locked/disabled state instead of blindly clearing —
-    // the regular feature-lock (_applyFeatureLock) may still have its own pill
-    // on this same card, and must stay in charge if so.
+
+    if (skipButtonToggle) {
+        if (wasLocked && !el.querySelector('.app-lock-pill')) {
+            el.classList.remove('locked-card');
+        }
+        return;
+    }
     _syncCardLockVisual(el);
 }
 
