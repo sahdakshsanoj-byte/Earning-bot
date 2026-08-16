@@ -230,8 +230,8 @@ TASK_REWARDS = {
     "web1":  10,
     "web2":  10,
     "web3":  10,
-    "slot3": 4,
-    "slot4": 4,
+    "slot3": 30,
+    "slot4": 30,
 }
 
 ONE_TIME_TASK_IDS      = {"slot3", "slot4"}
@@ -242,8 +242,8 @@ MAX_WEB_TASKS_PER_DAY = 3
 CHANNEL_IDS                = ["official", "channel2", "channel3", "slot1", "slot2", "slot3", "slot4"]
 CHANNEL_REWARD_PER_CHANNEL = 5          # default reward for official channels
 CHANNEL_REWARDS            = {          # per-channel override (sponsor slots earn less)
-    "slot1": 3,
-    "slot2": 3,
+    "slot1": 20,
+    "slot2": 20,
 }
 CHANNEL_TOTAL_REWARD       = 15
 
