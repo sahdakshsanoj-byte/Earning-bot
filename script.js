@@ -2264,6 +2264,20 @@ async function verifyTask(taskId, inputId, sponsorLink) {
                 const data = await res.json();
                 if (data.status === "success") {
                     showToast(`✅ ${data.message}`, "success");
+                    // BUG FIX: this used to only call fetchLiveData() and rely
+                    // on the delayed refresh to mark the task done — but that
+                    // only ever added the dimming CSS class to the task-item,
+                    // it never reset THIS button's text/disabled state (still
+                    // stuck showing "Verifying..." from a few lines up). So
+                    // the button looked permanently stuck until a full app
+                    // reload. Now updated immediately, no refresh needed.
+                    if (verifyBtn) {
+                        verifyBtn.disabled  = true;
+                        verifyBtn.innerText = '✅ Completed';
+                        verifyBtn.style.background = '#2ecc71';
+                    }
+                    const taskItem = verifyBtn?.closest('.task-item');
+                    if (taskItem) taskItem.classList.add('done');
                     fetchLiveData();
                 } else {
                     showToast(data.message, "error");
