@@ -227,11 +227,11 @@ TASK_REWARDS = {
     "yt1":   10,
     "yt2":   10,
     "yt3":   10,
-    "web1":  20,
-    "web2":  20,
-    "web3":  20,
-    "slot3": 30,
-    "slot4": 30,
+    "web1":  10,
+    "web2":  10,
+    "web3":  10,
+    "slot3": 4,
+    "slot4": 4,
 }
 
 ONE_TIME_TASK_IDS      = {"slot3", "slot4"}
@@ -242,8 +242,8 @@ MAX_WEB_TASKS_PER_DAY = 3
 CHANNEL_IDS                = ["official", "channel2", "channel3", "slot1", "slot2", "slot3", "slot4"]
 CHANNEL_REWARD_PER_CHANNEL = 5          # default reward for official channels
 CHANNEL_REWARDS            = {          # per-channel override (sponsor slots earn less)
-    "slot1": 15,
-    "slot2": 15,
+    "slot1": 3,
+    "slot2": 3,
 }
 CHANNEL_TOTAL_REWARD       = 15
 
@@ -670,30 +670,33 @@ def _is_private_ip(ip: str) -> bool:
 def _get_client_ip() -> str:
     """Request context se real IP nikalo.
 
-    BUG FIX: this used to take the LAST entry in X-Forwarded-For, on the
-    (wrong) assumption that Render appends the real client IP at the end.
-    Standard X-Forwarded-For convention is the opposite: the FIRST entry is
-    the original client, and each proxy hop APPENDS its own address as the
-    request passes through — so the last entry is actually the closest
-    internal hop to us, which on Render is a private 10.x.x.x address, not a
-    real visitor. That bug meant every single visitor was being bucketed
-    under that one internal IP for rate-limiting, so any burst of normal
-    combined traffic (or one page load, which alone fires 5 separate
-    /get_feature_config calls) could trip the "suspicious activity" ban and
-    lock out ALL real users for 15 minutes at once.
+    HISTORY: originally took the LAST entry in X-Forwarded-For (this worked
+    correctly for a long time on Render). One incident showed a private
+    10.x.x.x address as the last entry (likely an internal health-check hop),
+    which triggered a false "suspicious activity" ban — so a previous fix
+    switched to taking the FIRST public entry instead, on the assumption that
+    Render appends internal hops at the end.
 
-    Now takes the first PUBLIC (non-private) address in the chain — falling
-    back to the first entry, then to remote_addr — so it survives extra
-    internal hops being appended on either end.
+    BUG FIX: that assumption was wrong for this deployment — switching to
+    "first" caused MANY distinct real users to get bucketed under the same
+    detected IP (apparently Render's edge/entry hop, shared across users, was
+    ending up first), so their combined traffic tripped the rate-limit and
+    got everyone blocked together within minutes — exactly what was reported
+    (tournament/coins/spin all stuck loading shortly after each deploy).
+
+    Reverted to trusting the LAST entry (the original, working assumption for
+    this specific Render setup) — but still skips any private/internal
+    address if one shows up in that position, so the original edge-case bug
+    stays fixed without breaking the common case.
     """
     forwarded = request.headers.get("X-Forwarded-For", "")
     if forwarded:
         ips = [ip.strip() for ip in forwarded.split(",") if ip.strip()]
         public_ips = [ip for ip in ips if not _is_private_ip(ip)]
         if public_ips:
-            return public_ips[0]
+            return public_ips[-1]
         if ips:
-            return ips[0]
+            return ips[-1]
     return request.remote_addr or ""
 
 
@@ -1269,6 +1272,14 @@ def ip_firewall():
     ip = _get_client_ip()
     if not ip:
         return None
+
+    # DIAGNOSTIC: sampled logging of the raw X-Forwarded-For chain vs what we
+    # resolved it to, so a future IP-detection issue can be root-caused from
+    # real evidence instead of guesswork (which is exactly how the last two
+    # "fixes" here went wrong). ~1-in-200 requests, cheap enough to leave on.
+    if random.randint(1, 200) == 1:
+        logger.info("IP-DEBUG raw_xff=%r resolved=%r path=%s",
+                    request.headers.get("X-Forwarded-For", ""), ip, request.path)
 
     allowed, reason = check_ip_security(request.path)
     if not allowed:
