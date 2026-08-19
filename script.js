@@ -136,6 +136,39 @@ async function preloadMonetagAd() {
 // ============================================================
 // TOAST
 // ============================================================
+// ============================================================
+// POLISH: coin balance count-up animation
+// ============================================================
+// Ticks the header balance from its current value up (or down) to the new
+// one over a short duration, instead of the number just snapping — matches
+// the reward-app pattern where earning coins feels satisfying to watch.
+let _balanceAnimFrame = null;
+function animateBalance(el, newValue) {
+    const current = parseInt((el.innerText || '0').replace(/[^\d-]/g, ''), 10) || 0;
+    if (current === newValue) { el.innerText = `${newValue} 🪙`; return; }
+
+    if (_balanceAnimFrame) cancelAnimationFrame(_balanceAnimFrame);
+
+    const start    = current;
+    const delta    = newValue - start;
+    const duration = Math.min(900, Math.max(300, Math.abs(delta) * 15)); // bigger jumps animate a touch longer
+    const startTs  = performance.now();
+
+    function tick(now) {
+        const progress = Math.min(1, (now - startTs) / duration);
+        const eased    = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+        const value    = Math.round(start + delta * eased);
+        el.innerText   = `${value} 🪙`;
+        if (progress < 1) {
+            _balanceAnimFrame = requestAnimationFrame(tick);
+        } else {
+            el.innerText = `${newValue} 🪙`;
+            _balanceAnimFrame = null;
+        }
+    }
+    _balanceAnimFrame = requestAnimationFrame(tick);
+}
+
 function showToast(msg, type = "info") {
     let toast = document.getElementById('toast');
     if (!toast) {
@@ -512,7 +545,7 @@ async function fetchLiveData() {
             const _refNeeded = isPremium ? 2 : 5;
 
             const balEl = document.getElementById('balance');
-            if (balEl) balEl.innerText = `${coins} 🪙`;
+            if (balEl) animateBalance(balEl, coins);
 
             // Rupee balance display
             const rupees = parseFloat(data.rupees || 0).toFixed(2);
@@ -1513,6 +1546,10 @@ async function loadPremiumCardStatus() {
 // ============================================================
 // 💎 VIP TASKS
 // ============================================================
+// Tracks which VIP task links have been opened THIS session — a task's
+// claim button stays disabled until its link has been visited.
+const _vipTaskVisited = new Set();
+
 async function loadVipTasks() {
     if (!userId) return;
     const section = document.getElementById('vip-tasks-section');
@@ -1537,6 +1574,13 @@ async function loadVipTasks() {
         tasks.forEach(task => {
             const done    = claimed.includes(task.task_id);
             const taskUrl = task.url || null;
+            // BUG FIX: the "🔗 Go to Task" link and "💎 Claim Reward" button
+            // used to be completely independent — claiming never checked
+            // whether the link had actually been opened, so the ad+claim
+            // flow fired immediately on tap without the task ever "opening".
+            // Now: if the task has a link, Claim starts disabled and only
+            // unlocks once that link has been tapped (tracked per session).
+            const needsVisit = !!taskUrl && !_vipTaskVisited.has(task.task_id);
             const card    = document.createElement('div');
             card.className = 'promo-task-card' + (done ? ' completed' : '');
             card.style.border = '1px solid rgba(29,155,240,0.3)';
@@ -1546,22 +1590,33 @@ async function loadVipTasks() {
                     <span style="font-size:12px;color:#f1c40f;font-weight:700;white-space:nowrap;margin-left:8px;">+${task.reward||20} 🪙</span>
                 </div>
                 ${taskUrl ? `
-                <a href="${taskUrl}" target="_blank" rel="noopener noreferrer"
+                <button type="button" onclick="_openVipTaskLink('${task.task_id}', '${escapeHtml(taskUrl)}')"
                     style="display:flex;align-items:center;justify-content:center;gap:6px;
                            width:100%;padding:8px 0;margin-bottom:8px;
                            background:rgba(56,189,248,0.10);border:1px solid rgba(56,189,248,0.30);
                            border-radius:10px;color:#38bdf8;font-size:12px;font-weight:700;
-                           text-decoration:none;box-sizing:border-box;">
+                           cursor:pointer;box-sizing:border-box;">
                     🔗 Go to Task
-                </a>` : ''}
-                <button class="promo-btn vip-task-claim-btn" data-task-id="${escapeHtml(task.task_id)}" onclick="claimVipTask('${task.task_id}')" ${done ? 'disabled' : ''}
+                </button>` : ''}
+                <button class="promo-btn vip-task-claim-btn" data-task-id="${escapeHtml(task.task_id)}" onclick="claimVipTask('${task.task_id}')" ${(done || needsVisit) ? 'disabled' : ''}
                     style="background:${done ? '' : 'linear-gradient(135deg,#1a78c2,#1D9BF0)'};">
-                    ${done ? '✅ Claimed' : '💎 Claim Reward'}
+                    ${done ? '✅ Claimed' : (needsVisit ? '👆 Visit the link first' : '💎 Claim Reward')}
                 </button>`;
             list.appendChild(card);
         });
     } catch(e) {
         list.innerHTML = '<p style="color:#475569;text-align:center;font-size:13px;">Failed to load VIP tasks.</p>';
+    }
+}
+
+function _openVipTaskLink(taskId, url) {
+    openExternalLink(url);
+    _vipTaskVisited.add(taskId);
+    const btn = document.querySelector(`.vip-task-claim-btn[data-task-id="${taskId}"]`);
+    if (btn && !btn.classList.contains('completed')) {
+        btn.disabled = false;
+        btn.innerText = '💎 Claim Reward';
+        btn.style.background = 'linear-gradient(135deg,#1a78c2,#1D9BF0)';
     }
 }
 
@@ -1990,7 +2045,7 @@ async function refreshBalance() {
         const data = await res.json();
         if (data.status === 'success') {
             const balEl = document.getElementById('balance');
-            if (balEl) balEl.innerText = `${data.coins || 0} 🪙`;
+            if (balEl) animateBalance(balEl, data.coins || 0);
             userData = data;
             updateAllBonusUI(data);
         }
