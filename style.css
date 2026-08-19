@@ -358,6 +358,18 @@ textarea {
    TAB CONTENT
    ============================================================ */
 .tab-content  { display: none; }
+
+/* POLISH: tabs fade + settle in instead of snapping into view */
+@keyframes tab-fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.tab-content.active-tab {
+    animation: tab-fade-in 0.22s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+    .tab-content.active-tab { animation: none; }
+}
 .active-tab   { display: block; }
 
 /* ============================================================
@@ -367,7 +379,7 @@ textarea {
     position: fixed;
     bottom: 80px;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translateX(-50%) translateY(8px);
     background: #0d1017;
     border: 1px solid var(--border);
     color: var(--text-primary);
@@ -377,14 +389,14 @@ textarea {
     font-weight: 500;
     z-index: 9999;
     opacity: 0;
-    transition: opacity 0.3s;
+    transition: opacity 0.25s ease-out, transform 0.25s ease-out;
     white-space: nowrap;
     max-width: 90vw;
     text-align: center;
     pointer-events: none;
 }
 
-#toast.show    { opacity: 1; }
+#toast.show    { opacity: 1; transform: translateX(-50%) translateY(0); }
 #toast.success { border-color: rgba(61,189,110,0.40); color: var(--success-text); }
 #toast.error   { border-color: rgba(192,57,43,0.40);  color: #c0392b; }
 
