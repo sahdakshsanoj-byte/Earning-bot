@@ -4539,21 +4539,27 @@ async function openTournamentLeaderboard(tid) {
             board.forEach(row => {
                 const pos     = row.position || '?';
                 const isTop3  = pos <= 3;
-                const teamBg  = pos === 1 ? 'rgba(241,196,15,0.07)' : pos === 2 ? 'rgba(148,163,184,0.06)' : pos === 3 ? 'rgba(180,83,9,0.07)' : 'rgba(255,255,255,0.025)';
-                const teamBdr = pos === 1 ? 'rgba(241,196,15,0.25)' : pos === 2 ? 'rgba(148,163,184,0.18)' : pos === 3 ? 'rgba(180,83,9,0.20)' : 'rgba(255,255,255,0.06)';
+                const isDQ    = !!row.disqualified;
+                const teamBg  = isDQ ? 'rgba(239,68,68,0.07)' : pos === 1 ? 'rgba(241,196,15,0.07)' : pos === 2 ? 'rgba(148,163,184,0.06)' : pos === 3 ? 'rgba(180,83,9,0.07)' : 'rgba(255,255,255,0.025)';
+                const teamBdr = isDQ ? 'rgba(239,68,68,0.30)' : pos === 1 ? 'rgba(241,196,15,0.25)' : pos === 2 ? 'rgba(148,163,184,0.18)' : pos === 3 ? 'rgba(180,83,9,0.20)' : 'rgba(255,255,255,0.06)';
 
                 let roundPts = '';
                 for (let rn = 1; rn <= totalRounds; rn++) {
                     const pts = row.rounds?.[rn] ?? '—';
                     roundPts += `<span style="flex:0.8;text-align:center;font-size:11px;color:${typeof pts === 'number' ? '#e2e8f0' : '#475569'};">${pts}</span>`;
                 }
+                const dqBadge = isDQ
+                    ? `<span style="display:inline-block;margin-left:6px;padding:1px 6px;background:rgba(239,68,68,0.15);
+                             border:1px solid rgba(239,68,68,0.4);border-radius:6px;font-size:9px;font-weight:800;
+                             color:#f87171;letter-spacing:0.3px;vertical-align:middle;">⛔ DISQUALIFIED</span>`
+                    : '';
                 html += `
                 <div style="display:flex;align-items:center;gap:6px;padding:8px;
                              background:${teamBg};border:1px solid ${teamBdr};
-                             border-radius:10px;margin-bottom:5px;">
-                    <span style="width:28px;font-size:${isTop3 ? '18px' : '12px'};text-align:center;">${rankEmoji[pos] || ('#' + pos)}</span>
+                             border-radius:10px;margin-bottom:5px;${isDQ ? 'opacity:0.7;' : ''}">
+                    <span style="width:28px;font-size:${isTop3 ? '18px' : '12px'};text-align:center;">${isDQ ? '⛔' : (rankEmoji[pos] || ('#' + pos))}</span>
                     <div style="flex:2;min-width:0;">
-                        <p style="font-size:12px;font-weight:800;color:#e2e8f0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(row.team_name || row.team_id)}</p>
+                        <p style="font-size:12px;font-weight:800;color:#e2e8f0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(row.team_name || row.team_id)}${dqBadge}</p>
                         <p style="font-size:10px;color:#64748b;margin:1px 0 0;">${_esc(row.team_id)}</p>
                     </div>
                     ${roundPts}
@@ -4793,8 +4799,9 @@ async function viewPublicLeaderboard() {
         top3.forEach(row => {
             const pos       = row.position;
             const isMyTeam  = (row.team_id || '').toLowerCase() === searchTeamId;
+            const isDQ      = !!row.disqualified;
             const cardCls   = pos === 1 ? 'rank-1' : pos === 2 ? 'rank-2' : 'rank-3';
-            const nameClr   = pos === 1 ? '#f1c40f' : pos === 2 ? '#94a3b8' : '#cd7f32';
+            const nameClr   = isDQ ? '#f87171' : pos === 1 ? '#f1c40f' : pos === 2 ? '#94a3b8' : '#cd7f32';
             const myStyle   = isMyTeam
                 ? 'box-shadow:0 0 0 2px #a78bfa,0 0 18px rgba(139,92,246,0.28);'
                 : '';
@@ -4807,16 +4814,22 @@ async function viewPublicLeaderboard() {
                        B!${booyahCnt > 1 ? ' ×' + booyahCnt : ''}
                    </span>`
                 : '';
+            const dqBadgeTop3 = isDQ
+                ? `<span style="display:inline-block;margin-left:6px;padding:1px 6px;background:rgba(239,68,68,0.15);
+                         border:1px solid rgba(239,68,68,0.4);border-radius:6px;font-size:9px;font-weight:800;
+                         color:#f87171;letter-spacing:0.3px;flex-shrink:0;">⛔ DISQUALIFIED</span>`
+                : '';
             html += `
-            <div class="t-winner-card ${cardCls}" style="${myStyle}">
-                <span style="font-size:30px;flex-shrink:0;">${rankEmoji[pos]}</span>
+            <div class="t-winner-card ${cardCls}" style="${myStyle}${isDQ ? 'opacity:0.7;' : ''}">
+                <span style="font-size:30px;flex-shrink:0;">${isDQ ? '⛔' : rankEmoji[pos]}</span>
                 <div style="flex:1;min-width:0;">
-                    <div style="display:flex;align-items:center;gap:0;flex-wrap:nowrap;">
+                    <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;">
                         <p style="font-size:14px;font-weight:800;color:${nameClr};margin:0;
                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                             ${_esc(row.team_name || row.team_id)}
                         </p>
                         ${booyahBadge}
+                        ${dqBadgeTop3}
                     </div>
                     <p style="font-size:11px;color:#64748b;margin:2px 0 0;">${_esc(row.team_id)}</p>
                     ${isMyTeam ? `<span style="display:inline-flex;align-items:center;gap:3px;
@@ -4850,6 +4863,7 @@ async function viewPublicLeaderboard() {
             rest.forEach(row => {
                 const pos       = row.position || '?';
                 const isMyTeam  = (row.team_id || '').toLowerCase() === searchTeamId;
+                const isDQ      = !!row.disqualified;
                 const booyahCnt = row.total_booyah || 0;
                 const booyahBadge = booyahCnt > 0
                     ? `<span style="display:inline-flex;align-items:center;
@@ -4859,6 +4873,11 @@ async function viewPublicLeaderboard() {
                            B!${booyahCnt > 1 ? ' ×' + booyahCnt : ''}
                        </span>`
                     : '';
+                const dqBadgeRest = isDQ
+                    ? `<span style="display:inline-block;margin-left:4px;padding:1px 6px;background:rgba(239,68,68,0.15);
+                             border:1px solid rgba(239,68,68,0.4);border-radius:6px;font-size:9px;font-weight:800;
+                             color:#f87171;letter-spacing:0.3px;flex-shrink:0;">⛔ DISQUALIFIED</span>`
+                    : '';
                 let roundPts = '';
                 for (let rn = 1; rn <= totalRounds; rn++) {
                     const pts = row.rounds?.[rn] ?? '—';
@@ -4866,19 +4885,20 @@ async function viewPublicLeaderboard() {
                 }
                 html += `
                 <div style="display:flex;align-items:center;gap:6px;padding:8px;
-                             background:${isMyTeam ? 'rgba(139,92,246,0.10)' : 'rgba(255,255,255,0.025)'};
-                             border:1px solid ${isMyTeam ? 'rgba(139,92,246,0.35)' : 'rgba(255,255,255,0.06)'};
-                             border-radius:10px;margin-bottom:5px;
+                             background:${isDQ ? 'rgba(239,68,68,0.06)' : isMyTeam ? 'rgba(139,92,246,0.10)' : 'rgba(255,255,255,0.025)'};
+                             border:1px solid ${isDQ ? 'rgba(239,68,68,0.28)' : isMyTeam ? 'rgba(139,92,246,0.35)' : 'rgba(255,255,255,0.06)'};
+                             border-radius:10px;margin-bottom:5px;${isDQ ? 'opacity:0.7;' : ''}
                              ${isMyTeam ? 'box-shadow:0 0 10px rgba(139,92,246,0.18);' : ''}">
-                    <span style="width:28px;font-size:12px;text-align:center;color:#64748b;font-weight:700;">#${_esc(String(pos))}</span>
+                    <span style="width:28px;font-size:12px;text-align:center;color:#64748b;font-weight:700;">${isDQ ? '⛔' : '#' + _esc(String(pos))}</span>
                     <div style="flex:2;min-width:0;">
-                        <div style="display:flex;align-items:center;flex-wrap:nowrap;">
+                        <div style="display:flex;align-items:center;flex-wrap:wrap;">
                             <p style="font-size:12px;font-weight:800;
-                                       color:${isMyTeam ? '#a78bfa' : '#e2e8f0'};
+                                       color:${isDQ ? '#f87171' : isMyTeam ? '#a78bfa' : '#e2e8f0'};
                                        margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                                 ${_esc(row.team_name || row.team_id)}
                             </p>
                             ${booyahBadge}
+                            ${dqBadgeRest}
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                             <p style="font-size:10px;color:#64748b;margin:1px 0 0;">${_esc(row.team_id)}</p>
