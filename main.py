@@ -5233,9 +5233,10 @@ def tournament_register_api():
 
         fee_msg  = f" {entry_fee} coins deducted as entry fee." if entry_fee > 0 else ""
         type_msg = "🎉 Duo registered!" if is_duo else "🎉 Squad registered!" if is_squad else "🎉 Registration successful!"
+        policy_msg = " ⚠️ Anti-cheat policy: hack/cheat panel use karte pakde jaane par poori team turant disqualify ho jaayegi aur tournament ke baaki rounds nahi khel paayegi."
         return jsonify({
             "status":   "success",
-            "message":  f"{type_msg}{fee_msg} Good luck in the tournament!",
+            "message":  f"{type_msg}{fee_msg} Good luck in the tournament!{policy_msg}",
             "team_id":  team_id,
         })
     except pymongo.errors.DuplicateKeyError:
@@ -5692,9 +5693,19 @@ def tournament_leaderboard_api(tid: str):
         )
 
         # Assign positions
+        # Disqualified teams ko flag karo (results waise hi dikhte hain, bas badge lagta hai)
+        dq_team_ids = set(
+            d.get("team_id", "")
+            for d in tournament_registrations_col.find(
+                {"tournament_id": tid, "status": "disqualified"},
+                {"team_id": 1, "_id": 0},
+            )
+        )
+
         leaderboard = []
         for pos, team in enumerate(sorted_teams, start=1):
-            team["position"] = pos
+            team["position"]     = pos
+            team["disqualified"] = team["team_id"] in dq_team_ids
             leaderboard.append(team)
 
         return jsonify({
@@ -8645,13 +8656,21 @@ def cmd_add_result(message):
         # Get team info from registration
         reg = tournament_registrations_col.find_one(
             {"tournament_id": tid, "team_id": team_id},
-            {"team_name": 1, "ff_nickname": 1, "_id": 0},
+            {"team_name": 1, "ff_nickname": 1, "status": 1, "disqualified_reason": 1, "_id": 0},
         )
         if not reg:
             return bot.reply_to(
                 message,
                 f"❌ Team `{team_id}` is tournament mein registered nahi hai.\n"
                 f"Team IDs dekhne ke liye: `/tournamentregs {tid}`",
+                parse_mode="Markdown",
+            )
+
+        if reg.get("status") == "disqualified":
+            return bot.reply_to(
+                message,
+                f"\u26d4 Team `{team_id}` disqualified hai (Reason: {reg.get('disqualified_reason', 'N/A')}).\n"
+                f"Is team ke liye naye results add nahi kiye ja sakte.",
                 parse_mode="Markdown",
             )
 
@@ -8701,6 +8720,85 @@ def cmd_add_result(message):
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
+@bot.message_handler(commands=["disqualifyteam"])
+def cmd_disqualify_team(message):
+    """Admin: /disqualifyteam <tournament_id> <team_id> [reason]
+    Hack/cheat panel use karte pakde gaye team ko current tournament ke
+    baaki rounds se disqualify karta hai. Purane rounds ke results untouched
+    rehte hain — sirf aage ke rounds ke liye team block ho jaati hai.
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split(maxsplit=3)
+    if len(parts) < 3:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/disqualifyteam <tournament_id> <team_id> [reason]`\n\n"
+            "*Example:* `/disqualifyteam t_123456 T004 Hack panel use karte pakda gaya`\n\n"
+            "Team is tournament ke baaki rounds se disqualify ho jaayegi.\n"
+            "Team IDs dekhne ke liye: `/tournamentregs <tid>`",
+            parse_mode="Markdown",
+        )
+    tid, team_id_raw = parts[1], parts[2]
+    reason  = parts[3].strip() if len(parts) >= 4 else "Tournament policy violation (hack/cheat panel)"
+    team_id = team_id_raw.upper().strip()
+
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
+
+        reg = tournament_registrations_col.find_one({"tournament_id": tid, "team_id": team_id})
+        if not reg:
+            return bot.reply_to(
+                message,
+                f"❌ Team `{team_id}` is tournament mein registered nahi hai.\n"
+                f"Team IDs dekhne ke liye: `/tournamentregs {tid}`",
+                parse_mode="Markdown",
+            )
+
+        if reg.get("status") == "disqualified":
+            return bot.reply_to(message, f"⚠️ Team `{team_id}` already disqualified hai.", parse_mode="Markdown")
+
+        tournament_registrations_col.update_one(
+            {"tournament_id": tid, "team_id": team_id},
+            {"$set": {
+                "status":              "disqualified",
+                "disqualified_reason": reason,
+                "disqualified_at":     datetime.utcnow(),
+            }},
+        )
+
+        team_name = reg.get("team_name") or reg.get("ff_nickname") or team_id
+        captain_id = reg.get("user_id")
+
+        try:
+            bot.send_message(
+                captain_id,
+                f"\u26d4 *Team Disqualified*\n\n"
+                f"Aapki team `{team_id}` ({team_name}) tournament `{tid}` ke baaki rounds "
+                f"se disqualify kar di gayi hai.\n\n"
+                f"*Reason:* {reason}\n\n"
+                f"Policy: Hack/cheat panel use karte pakde jaane par poori team turant "
+                f"disqualify ho jaati hai aur unhe is tournament ke aage ke rounds "
+                f"khelne nahi diye jaate.",
+                parse_mode="Markdown",
+            )
+        except Exception as notify_exc:
+            logger.warning("Disqualify notify failed for captain %s: %s", captain_id, notify_exc)
+
+        bot.reply_to(
+            message,
+            f"\u2705 Team `{team_id}` ({team_name}) disqualify kar di gayi.\n"
+            f"Reason: {reason}\n\n"
+            f"Purane rounds ke results waise hi rahenge — team ab is tournament ke "
+            f"naye results submit hone se automatically excluded rahegi.",
+            parse_mode="Markdown",
+        )
+        logger.info("Team disqualified: tournament=%s team=%s captain=%s reason=%s", tid, team_id, captain_id, reason)
+    except Exception as exc:
+        logger.error("cmd_disqualify_team error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
 
 
 @bot.message_handler(commands=["finishtournament"])
