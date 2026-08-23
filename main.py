@@ -265,7 +265,7 @@ PREMIUM_SPIN_PER_DAY      = 15   # Premium: 15 spins/day (free: SPIN_PER_DAY)
 PREMIUM_MIN_WITHDRAW      = 10000 # Premium: lower withdrawal minimum
 PREMIUM_REFERRAL_NEEDED   = 2    # Premium: sirf 2 referrals chahiye
 PREMIUM_AD_REWARD         = 10   # Premium: 10 coins/ad (normal: AD_COIN_REWARD=5)
-PREMIUM_REFERRAL_BONUS    = 200  # Premium: 2x referral join bonus (normal: REFERRAL_JOIN_BONUS=30... wait its commission based)
+PREMIUM_REFERRAL_BONUS    = 200  # Premium sponsor: coins earned when a referral joins (2x the normal REFERRAL_JOIN_BONUS)
 PREMIUM_PLANS = {
     "weekly":    {"label": "Weekly",    "days": 7,   "price": 29},
     "monthly":   {"label": "Monthly",   "days": 30,  "price": 79},
@@ -306,7 +306,7 @@ def format_team_id(counter: int) -> str:
 
 
 COMMISSION_RATE          = 0.10   # 10% commission on eligible earnings
-COMMISSION_DAILY_LIMIT   = 200    # Max commission coins a sponsor earns per day
+COMMISSION_DAILY_LIMIT   = 600    # Max commission coins a sponsor earns per day
 COMMISSION_PER_REF_LIMIT = 50     # Max commission from a single referral per day
 ACTIVE_REF_MIN_COINS     = 10     # Referral is "active" if they've earned >= this many coins
 REFERRAL_JOIN_BONUS      = 30     # Coins sponsor earns when referral joins (existing)
@@ -1502,15 +1502,16 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
             if referrer_id and str(referrer_id) != str(user_id):
                 referrer = users_col.find_one({"user_id": int(referrer_id)})
                 if referrer:
+                    join_bonus = PREMIUM_REFERRAL_BONUS if is_premium(int(referrer_id)) else REFERRAL_JOIN_BONUS
                     users_col.update_one(
                         {"user_id": int(referrer_id)},
-                        {"$inc": {"coins": 30, "referral_count": 1}},
+                        {"$inc": {"coins": join_bonus, "referral_count": 1}},
                     )
                     new_user["referred_by"] = str(referrer_id)
                     try:
                         bot.send_message(
                             int(referrer_id),
-                            "\U0001f38a *Referral Bonus!*\n\nYou earned 30 coins for inviting a friend!",
+                            f"\U0001f38a *Referral Bonus!*\n\nYou earned {join_bonus} coins for inviting a friend!",
                             parse_mode="Markdown",
                         )
                     except Exception as notify_exc:
@@ -2590,6 +2591,10 @@ def claim_promo_task_api():
             return jsonify({"status": "error", "message": "Server error."}), 500
 
         _invalidate_user_cache(user_id)
+
+        # Referral commission — non-blocking, 10% to sponsor
+        _fire_commission(user_id, reward, "task", f"promotask_{user_id}_{task_id}")
+
         return jsonify({
             "status":  "success",
             "message": f"{reward} coins added for completing the promotion task!",
@@ -2898,6 +2903,10 @@ def claim_vip_task_api():
 
         _invalidate_user_cache(user_id)
         logger.info("User %s claimed VIP task %s for %s coins", user_id, task_id, reward)
+
+        # Referral commission — non-blocking, 10% to sponsor
+        _fire_commission(user_id, reward, "task", f"viptask_{user_id}_{task_id}")
+
         return jsonify({
             "status":  "success",
             "message": f"💎 +{reward} coins for completing VIP task!",
