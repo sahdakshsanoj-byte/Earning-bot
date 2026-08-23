@@ -9784,17 +9784,17 @@ def cmd_reject_rupee(message):
 @bot.message_handler(commands=["addviptask"])
 def cmd_add_vip_task(message):
     """
-    /addviptask <task_id> <reward_coins> <task title>
-    Example: /addviptask join_channel 50 Join our official channel
+    /addviptask <task_id> <reward_coins> <url> <task title>
+    Example: /addviptask watch_short1 20 https://youtube.com/shorts/FjRjxMAQNkA Watch this short video
     """
     if int(message.from_user.id) != ADMIN_ID:
         return
-    parts = message.text.strip().split(None, 3)
-    if len(parts) < 4:
+    parts = message.text.strip().split(None, 4)
+    if len(parts) < 5:
         bot.reply_to(
             message,
-            "❌ *Usage:*\n`/addviptask <task_id> <coins> <title>`\n\n"
-            "*Example:*\n`/addviptask join_channel 50 Join our official channel`",
+            "❌ *Usage:*\n`/addviptask <task_id> <coins> <url> <title>`\n\n"
+            "*Example:*\n`/addviptask watch_short1 20 https://youtube.com/shorts/FjRjxMAQNkA Watch this short video`",
             parse_mode="Markdown",
         )
         return
@@ -9807,16 +9807,21 @@ def cmd_add_vip_task(message):
     except ValueError:
         bot.reply_to(message, "❌ Reward coins must be a positive number.")
         return
-    title = sanitize_text(parts[3], max_length=200).strip()
+    url   = sanitize_text(parts[3], max_length=500).strip()
+    title = sanitize_text(parts[4], max_length=200).strip()
 
-    if not task_id or not title:
-        bot.reply_to(message, "❌ task_id aur title dono required hain.")
+    if not task_id or not title or not url:
+        bot.reply_to(message, "❌ task_id, url aur title teeno required hain.")
+        return
+    if not (url.startswith("http://") or url.startswith("https://")):
+        bot.reply_to(message, "❌ URL http:// ya https:// se shuru honi chahiye.")
         return
 
     try:
         task_doc = {
             "task_id":    task_id,
             "title":      title,
+            "url":        url,
             "reward":      reward,
             "active":      True,
             "updated_at": datetime.utcnow().isoformat(),
@@ -9848,6 +9853,7 @@ def cmd_add_vip_task(message):
             f"✅ *VIP Task {action_label.title()}!*\n\n"
             f"🆔 ID: `{task_id}`\n"
             f"📌 Title: {title}\n"
+            f"🔗 URL: {url}\n"
             f"🪙 Reward: {reward} coins\n\n"
             f"_Ab premium users ise claim kar sakte hain._",
             parse_mode="Markdown",
