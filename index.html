@@ -8,6 +8,8 @@
     <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
     <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         /* ═══════════════════════════════════════════════════════
            DESIGN SYSTEM — Glassmorphism + Unified Palette
@@ -811,6 +813,109 @@
         @media (min-width: 520px) {
             body { max-width: 480px; margin: 0 auto !important; }
         }
+
+        /* ═══════════════════════════════════════════════════════
+           MODERN REDESIGN LAYER — added on top of the flat system
+           above. Purely visual: no ids/classes/handlers touched,
+           so every existing script.js binding keeps working as-is.
+           ═══════════════════════════════════════════════════════ */
+        :root {
+            --violet:        #8b7cf6;
+            --violet-dim:    rgba(139,124,246,0.14);
+            --gold-soft:     #f5c96a;
+            --gold-deep:     #c8912e;
+        }
+        html, body {
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+            background:
+                radial-gradient(circle at 15% 0%, rgba(139,124,246,0.07), transparent 40%),
+                radial-gradient(circle at 100% 25%, rgba(245,185,66,0.05), transparent 40%),
+                var(--app-bg) !important;
+        }
+        h1, h2, h3, h4, h5, h6 { font-family: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif !important; letter-spacing: -0.2px; }
+
+        /* ── Header: small eyebrow + refined title ── */
+        .header { padding: 16px 18px 14px !important; }
+        .header h3 { font-size: 18px !important; font-weight: 700 !important; }
+        .header > div:last-child > div {
+            width: 34px; height: 34px; border-radius: 10px;
+            background: rgba(255,255,255,0.05); border: 1px solid var(--card-border);
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        /* ── Cards: bring back a touch of depth over the flat base ── */
+        .card {
+            box-shadow: 0 10px 24px rgba(0,0,0,0.28) !important;
+            border-radius: 16px !important;
+        }
+        .c-gold   { border-color: rgba(245,185,66,0.30)  !important; }
+        .c-purple { border-color: rgba(139,124,246,0.30) !important; }
+        .c-amber  { border-color: rgba(245,185,66,0.30)  !important; }
+        .c-blue   { border-color: rgba(56,189,248,0.28)  !important; }
+        .c-green  { border-color: rgba(61,214,140,0.28)  !important; }
+
+        /* ── Balance hero → "Vault" card ── */
+        .balance-card {
+            background:
+                radial-gradient(circle at 85% -20%, rgba(245,185,66,0.14), transparent 60%),
+                linear-gradient(160deg, #17151f 0%, #12111a 100%) !important;
+            border: 1px solid rgba(245,185,66,0.20) !important;
+            border-radius: 20px !important;
+            padding: 22px 20px 18px !important;
+        }
+        .balance-card p:first-of-type {
+            font-size: 10.5px !important; text-transform: uppercase; letter-spacing: 1px !important;
+            font-weight: 600 !important;
+        }
+        #balance, #profile-coins {
+            font-family: 'Space Grotesk', sans-serif !important;
+            font-size: 38px !important; letter-spacing: -0.5px !important;
+        }
+
+        /* ── Premium card → "Foil" treatment ── */
+        #premium-buy-card {
+            background: linear-gradient(120deg, #221a08 0%, #3a2c0d 45%, #1c1608 100%) !important;
+            border: 1px solid rgba(245,185,66,0.35) !important;
+            border-radius: 18px !important;
+            box-shadow: 0 8px 22px rgba(245,185,66,0.08) !important;
+        }
+        #prem-card-title { color: var(--gold-soft) !important; }
+        #prem-card-btn-label { color: #2a1c02 !important; }
+        #premium-buy-card > div:last-child {
+            background: linear-gradient(135deg, var(--gold-soft), var(--gold-deep)) !important;
+            box-shadow: 0 2px 10px rgba(245,185,66,0.30) !important;
+        }
+        #premium-status-badge, #premium-status-badge * { font-family: 'Plus Jakarta Sans', sans-serif !important; }
+
+        /* ── Floating pill bottom nav ── */
+        .bottom-nav {
+            left: 12px !important; right: 12px !important;
+            bottom: 12px !important;
+            border-radius: 22px !important;
+            border: 1px solid var(--card-border) !important;
+            background: rgba(21,26,35,0.88) !important;
+            backdrop-filter: blur(20px) !important;
+            -webkit-backdrop-filter: blur(20px) !important;
+            box-shadow: 0 14px 34px rgba(0,0,0,0.45) !important;
+            padding: 8px 6px !important;
+        }
+        .nav-item { border-radius: 16px !important; padding: 7px 12px !important; }
+        .nav-item.active {
+            background: var(--violet-dim) !important;
+            color: var(--text-primary) !important;
+        }
+
+        /* ── Buttons: slightly rounder, consistent with the new card radius ── */
+        button.btn, button.btn-sm, button.promo-btn, button.t-reg-btn {
+            border-radius: 12px !important;
+        }
+
+        /* ── Section header cards: small violet eyebrow accent ── */
+        .section-header-card { border-radius: 16px !important; }
+
+        /* ── Referral stat tiles + milestone bars: violet becomes the consistent secondary accent ── */
+        #ref-daily-bar, #ref-ms-bar { background: var(--violet) !important; }
+        #ref-daily-badge { background: var(--violet-dim) !important; color: var(--violet) !important; }
     </style>
 </head>
 <body>
@@ -1978,9 +2083,10 @@
                 <p class="policy-section-title">⚖️ Fair Play Rules</p>
                 <p class="policy-text">By using this bot, you agree that:</p>
                 <p class="policy-bullet">• Only registered players may participate.</p>
-                <p class="policy-bullet">• Cheating, hacking, scripts, exploits and teaming are <b style="color:#f87171;">strictly prohibited.</b></p>
+                <p class="policy-bullet">• Cheating, hacking, scripts, exploits (hack/cheat panels) and teaming are <b style="color:#f87171;">strictly prohibited.</b></p>
                 <p class="policy-bullet">• Fake registrations may be rejected.</p>
-                <p class="policy-bullet">• Violators may be <b style="color:#f87171;">disqualified or banned</b> from future tournaments.</p>
+                <p class="policy-bullet">• If any player is caught using a hack/cheat panel, their <b style="color:#f87171;">entire team will be disqualified</b> and will not be allowed to play the remaining rounds of that tournament.</p>
+                <p class="policy-bullet">• Results already recorded before disqualification stay as-is; the team is simply excluded from all rounds going forward.</p>
 
                 <!-- Leaderboard & Scoring -->
                 <p class="policy-section-title">🏆 Leaderboard & Scoring System</p>
