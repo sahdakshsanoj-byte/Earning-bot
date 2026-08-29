@@ -1796,6 +1796,9 @@ function loadProfileTab() {
     const rs = document.getElementById('profile-rank-sub');
     if (rs) rs.innerText = nextTier ? `${(nextTier.min - coins).toLocaleString()} coins to ${nextTier.label}` : '🌟 Max Rank Achieved!';
 
+    // Age / Gender profile completion
+    renderProfileDetails(d);
+
     // Mining level dots
     const mDots = document.querySelectorAll('#profile-mining-dots .mining-lvl-dot');
     const mLvl  = parseInt(d.mining_level) || 1;
@@ -1807,6 +1810,84 @@ function loadProfileTab() {
     // Tournament participation count
     const pt = document.getElementById('profile-tournaments');
     if (pt) pt.innerText = d.tournament_count != null ? d.tournament_count : '—';
+}
+
+let _selectedProfileGender = null;
+
+function renderProfileDetails(d) {
+    const card    = document.getElementById('profile-details-card');
+    const locked  = document.getElementById('profile-details-locked');
+    const form    = document.getElementById('profile-details-form');
+    const badge   = document.getElementById('profile-details-badge');
+    const nudge   = document.getElementById('profile-nudge-banner');
+    if (!card) return;
+
+    if (d.profile_completed) {
+        if (locked) locked.style.display = 'flex';
+        if (locked) locked.style.flexDirection = 'column';
+        if (form)   form.style.display = 'none';
+        if (badge)  badge.style.display = 'inline-block';
+        if (nudge)  nudge.style.display = 'none';
+
+        const av = document.getElementById('profile-age-value');
+        if (av) av.innerText = d.age != null ? d.age : '—';
+        const gv = document.getElementById('profile-gender-value');
+        if (gv) gv.innerText = d.gender ? d.gender.charAt(0).toUpperCase() + d.gender.slice(1) : '—';
+    } else {
+        if (locked) locked.style.display = 'none';
+        if (form)   form.style.display = 'block';
+        if (badge)  badge.style.display = 'none';
+
+        let dismissed = false;
+        try { dismissed = sessionStorage.getItem('profileNudgeDismissed') === '1'; } catch(_) {}
+        if (nudge) nudge.style.display = dismissed ? 'none' : 'flex';
+    }
+}
+
+function dismissProfileNudge() {
+    const nudge = document.getElementById('profile-nudge-banner');
+    if (nudge) nudge.style.display = 'none';
+    try { sessionStorage.setItem('profileNudgeDismissed', '1'); } catch(_) {}
+}
+
+function selectProfileGender(gender) {
+    _selectedProfileGender = gender;
+    document.querySelectorAll('.pf-gender-opt').forEach(el => {
+        el.classList.toggle('selected', el.dataset.gender === gender);
+    });
+}
+
+async function submitProfileDetails() {
+    if (!userId) return;
+    const ageInput = document.getElementById('profile-age-input');
+    const age = parseInt(ageInput ? ageInput.value : '', 10);
+
+    if (!age || age < 10 || age > 100) {
+        showToast('Enter a valid age (10-100)', 'error');
+        return;
+    }
+    if (!_selectedProfileGender) {
+        showToast('Select a gender', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetchWithRetry(`${CONFIG.API_BASE_URL}/complete_profile`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, age, gender: _selectedProfileGender }),
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(data.message || '🎉 Profile completed!', 'success');
+            dismissProfileNudge();
+            fetchLiveData();
+        } else {
+            showToast(data.message || 'Could not save profile.', 'error');
+        }
+    } catch (e) {
+        showToast('Network error — try again.', 'error');
+    }
 }
 
 async function loadBombBoxStatus() {
