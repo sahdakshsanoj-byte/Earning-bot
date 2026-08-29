@@ -1752,6 +1752,12 @@
         }
         .pf-stat-tile:active { transform: scale(0.93); background: rgba(255,255,255,0.07); }
 
+        .pf-gender-opt.selected {
+            border-color: rgba(245,185,66,0.5) !important;
+            background: rgba(245,185,66,0.12) !important;
+            color: #f5c96a !important;
+        }
+
         .mining-lvl-dot {
             width: 11px; height: 11px; border-radius: 50%;
             display: inline-block;
@@ -1825,6 +1831,70 @@
                         <span style="font-size:10px;color:#94a3b8;font-weight:600;letter-spacing:0.3px;">Member</span>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- ── Profile Completion Nudge (dismissible, hidden once completed) ── -->
+        <div id="profile-nudge-banner" class="pf-block" style="
+            display:none; margin-bottom:12px; padding:12px 14px;
+            background:rgba(245,185,66,0.08); border:1px solid rgba(245,185,66,0.25);
+            border-radius:14px; align-items:center; gap:10px;
+        ">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:20px; flex-shrink:0;">🎁</span>
+                <div style="flex:1; min-width:0;">
+                    <p style="font-size:12.5px; font-weight:700; color:#f5c96a; margin:0;">Complete your profile</p>
+                    <p style="font-size:10.5px; color:#8f8a99; margin:2px 0 0;">Takes 5 seconds — earn 100 coins instantly</p>
+                </div>
+                <span onclick="dismissProfileNudge()" style="font-size:16px; color:#6b6672; padding:4px 6px; cursor:pointer; flex-shrink:0;">✕</span>
+            </div>
+        </div>
+
+        <!-- ── Age / Gender Card ── -->
+        <div id="profile-details-card" class="pf-block card" style="padding:16px 16px 14px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">👤 About You</p>
+                <span id="profile-details-badge" style="display:none; font-size:9.5px; font-weight:700; background:rgba(61,214,140,0.14); color:#3dd68c; padding:3px 8px; border-radius:20px;">✓ Completed</span>
+            </div>
+
+            <!-- Locked / read-only view -->
+            <div id="profile-details-locked" style="display:none; gap:10px;">
+                <div style="display:flex; gap:10px;">
+                    <div style="flex:1; background:rgba(255,255,255,0.03); border:1px solid var(--card-border); border-radius:12px; padding:10px 12px;">
+                        <p style="font-size:9.5px; color:#78737f; margin:0 0 3px; text-transform:uppercase; letter-spacing:0.5px;">Age</p>
+                        <p id="profile-age-value" style="font-size:14px; font-weight:700; color:#e8e6ec; margin:0;">—</p>
+                    </div>
+                    <div style="flex:1; background:rgba(255,255,255,0.03); border:1px solid var(--card-border); border-radius:12px; padding:10px 12px;">
+                        <p style="font-size:9.5px; color:#78737f; margin:0 0 3px; text-transform:uppercase; letter-spacing:0.5px;">Gender</p>
+                        <p id="profile-gender-value" style="font-size:14px; font-weight:700; color:#e8e6ec; margin:0;">—</p>
+                    </div>
+                </div>
+                <p style="font-size:10px; color:#5c5763; margin:8px 0 0;">🔒 Locked — contact support to change this.</p>
+            </div>
+
+            <!-- Fill-in view -->
+            <div id="profile-details-form">
+                <p style="font-size:10.5px; color:#8f8a99; margin:0 0 12px;">One-time only — you won't be able to change this later.</p>
+
+                <p style="font-size:10.5px; color:#78737f; margin:0 0 6px; font-weight:600;">AGE</p>
+                <input id="profile-age-input" type="number" min="10" max="100" placeholder="e.g. 22" style="
+                    width:100%; background:rgba(255,255,255,0.04); border:1px solid var(--card-border);
+                    color:#e8e6ec; padding:10px 12px; border-radius:10px; font-size:13.5px; outline:none;
+                    margin-bottom:12px; box-sizing:border-box;
+                ">
+
+                <p style="font-size:10.5px; color:#78737f; margin:0 0 6px; font-weight:600;">GENDER</p>
+                <div style="display:flex; gap:8px; margin-bottom:14px;">
+                    <div class="pf-gender-opt" data-gender="male" onclick="selectProfileGender('male')" style="flex:1; text-align:center; padding:10px 6px; border-radius:10px; border:1px solid var(--card-border); background:rgba(255,255,255,0.03); font-size:12px; font-weight:600; color:#a1a1aa; cursor:pointer;">♂️ Male</div>
+                    <div class="pf-gender-opt" data-gender="female" onclick="selectProfileGender('female')" style="flex:1; text-align:center; padding:10px 6px; border-radius:10px; border:1px solid var(--card-border); background:rgba(255,255,255,0.03); font-size:12px; font-weight:600; color:#a1a1aa; cursor:pointer;">♀️ Female</div>
+                    <div class="pf-gender-opt" data-gender="other" onclick="selectProfileGender('other')" style="flex:1; text-align:center; padding:10px 6px; border-radius:10px; border:1px solid var(--card-border); background:rgba(255,255,255,0.03); font-size:12px; font-weight:600; color:#a1a1aa; cursor:pointer;">⚧ Other</div>
+                </div>
+
+                <button onclick="submitProfileDetails()" style="
+                    width:100%; padding:11px; border:none; border-radius:12px; cursor:pointer;
+                    background:linear-gradient(135deg,#f5c96a,#c8912e); color:#2a1c02;
+                    font-size:13px; font-weight:800;
+                ">Save & Claim 100 Coins</button>
             </div>
         </div>
 
