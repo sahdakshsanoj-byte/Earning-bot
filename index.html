@@ -916,6 +916,27 @@
         /* ── Referral stat tiles + milestone bars: violet becomes the consistent secondary accent ── */
         #ref-daily-bar, #ref-ms-bar { background: var(--violet) !important; }
         #ref-daily-badge { background: var(--violet-dim) !important; color: var(--violet) !important; }
+        /* ── Intel Board (Notice Board redesign) ── */
+        .intel-chevron { transition: transform 0.25s ease; }
+        .intel-section.open .intel-chevron { transform: rotate(180deg); }
+        .intel-body { display: none; }
+        .intel-section.open .intel-body { display: block; }
+        .rarity-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+        .rarity-common   { background: #9ca3af; }
+        .rarity-rare     { background: #60a5fa; }
+        .rarity-epic     { background: #a78bfa; }
+        .rarity-legendary{ background: #f5c96a; box-shadow: 0 0 6px rgba(245,201,106,0.6); }
+        .intel-row {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 4px; border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .intel-row:last-child { border-bottom: none; }
+        .intel-icon {
+            width: 32px; height: 32px; border-radius: 10px; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center; font-size: 15px;
+            background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
+        }
+
     </style>
 </head>
 <body>
@@ -2025,42 +2046,162 @@
 
     <div id="help" class="tab-content" style="display:none;">
 
-        <div class="card c-gold" style="padding:0 !important; overflow:hidden !important;">
-            <div style="background:rgba(241,196,15,0.12); border-bottom:1px solid rgba(241,196,15,0.20); padding:12px 18px; display:flex; align-items:center; gap:8px;">
-                <span style="font-size:18px;">📋</span>
-                <h4 style="color:var(--gold); margin:0; font-size:15px; font-weight:700;">Notice Board</h4>
-            </div>
-            <div style="padding:16px;">
-
-                <div class="notice-green">
-                    <p style="font-size:13px; font-weight:700; color:#4ade80; margin:0 0 8px 0;">🎯 Earning Rates</p>
-                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Watch Ad: <b style="color:var(--gold);">+5 🪙</b> (max 10/day)</p>
-                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• YouTube Task: <b style="color:var(--gold);">+5 🪙</b> (max 3/day)</p>
-                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Website Task: <b style="color:var(--gold);">+3 🪙</b> (max 3/day)</p>
-                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Telegram Channel: <b style="color:var(--gold);">+5 🪙</b> (one-time each)</p>
-                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Promotion Task: <b style="color:var(--gold);">+5 🪙</b> (one-time each)</p>
-                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• 🎡 Spin Wheel: <b style="color:var(--gold);">up to 100 🪙</b> (5 spins/day • 1 ad each)</p>
-                    <p style="font-size:13px; color:var(--text-primary); margin:0;">• ⛏️ Coin Mining: <b style="color:var(--gold);">+10 🪙/hr</b> (2 ads to start • 1hr cooldown)</p>
+        <!-- ═══════ FIELD INTEL (Notice Board redesign) ═══════ -->
+        <div class="card" style="padding:0 !important; overflow:hidden !important; background:linear-gradient(160deg,#17151f 0%,#12111a 100%) !important; border-color:rgba(245,185,66,0.18) !important;">
+            <div style="padding:16px 18px 14px; border-bottom:1px solid rgba(255,255,255,0.06);">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                    <span style="font-size:11px;">📡</span>
+                    <span style="font-size:10px; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; color:#8f8a99;">Operative Briefing</span>
                 </div>
+                <h4 style="font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; color:#f5f0e8; margin:0;">Field Intel</h4>
 
-                <div class="notice-green">
-                    <p style="font-size:13px; font-weight:700; color:#4ade80; margin:0 0 8px 0;">📤 Withdrawal Rules</p>
-                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Minimum Withdrawal: <b style="color:var(--gold);">25000 🪙</b></p>
-                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;" id="help-ref-rule">• Referral Requirement: <b style="color:var(--gold);">5 Users</b></p>
-                    <p style="font-size:13px; color:var(--text-primary); margin:0;">• Cooldown: <b style="color:var(--gold);">1 Request per 24 Hours</b></p>
-                </div>
-
-                <div class="notice-red">
-                    <p style="font-size:14px; font-weight:700; color:#f87171; text-align:center; margin:0 0 8px 0;">⚠️ Warning ⚠️</p>
-                    <p style="font-size:12px; color:var(--text-primary); text-align:center; margin:0 0 4px 0;">Using multiple accounts is <b style="color:#f87171;">strictly prohibited.</b></p>
-                    <p style="font-size:12px; color:var(--text-primary); text-align:center; margin:0 0 8px 0;">Detected accounts will be <b style="color:#f87171;">suspended.</b></p>
-                    <div style="background:rgba(239,68,68,0.12); border-radius:8px; padding:8px; text-align:center;">
-                        <p style="font-size:15px; font-weight:700; color:#f87171; margin:0;">Penalty: Account Block</p>
+                <!-- Daily potential hero strip -->
+                <div style="margin-top:12px; background:rgba(245,185,66,0.07); border:1px solid rgba(245,185,66,0.20); border-radius:12px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <p style="font-size:9.5px; color:#a89a72; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 2px;">Today's Max Potential</p>
+                        <p style="font-family:'Space Grotesk',sans-serif; font-size:19px; font-weight:700; color:#f5c96a; margin:0;">~219 <span style="font-size:11px;font-weight:600;color:#a89a72;">coins</span></p>
                     </div>
-                    <p style="font-size:11px; color:var(--text-muted); text-align:center; margin:8px 0 0 0;">Please earn fair 🙏</p>
+                    <div style="text-align:right;">
+                        <p style="font-size:9.5px; color:#a89a72; margin:0 0 2px;">👑 Premium</p>
+                        <p style="font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:700; color:#e8e6ec; margin:0;">~380</p>
+                    </div>
                 </div>
 
+                <!-- Rarity legend -->
+                <div style="display:flex; gap:12px; margin-top:10px; flex-wrap:wrap;">
+                    <span style="display:flex; align-items:center; gap:4px; font-size:9.5px; color:#78737f; font-weight:600;"><span class="rarity-dot rarity-common"></span>Common</span>
+                    <span style="display:flex; align-items:center; gap:4px; font-size:9.5px; color:#78737f; font-weight:600;"><span class="rarity-dot rarity-rare"></span>Rare</span>
+                    <span style="display:flex; align-items:center; gap:4px; font-size:9.5px; color:#78737f; font-weight:600;"><span class="rarity-dot rarity-epic"></span>Epic</span>
+                    <span style="display:flex; align-items:center; gap:4px; font-size:9.5px; color:#78737f; font-weight:600;"><span class="rarity-dot rarity-legendary"></span>Legendary</span>
+                </div>
             </div>
+
+            <!-- ── Daily Ops (open by default) ── -->
+            <div class="intel-section open">
+                <div onclick="this.parentElement.classList.toggle('open')" style="display:flex; justify-content:space-between; align-items:center; padding:13px 18px; cursor:pointer;">
+                    <span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">⚡ Daily Ops</span>
+                    <span class="intel-chevron" style="font-size:11px; color:#78737f;">▾</span>
+                </div>
+                <div class="intel-body" style="padding:0 18px 14px;">
+
+                    <div class="intel-row">
+                        <div class="intel-icon">📺</div>
+                        <div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Watch Ad</p><p style="font-size:10px; color:#78737f; margin:1px 0 0;">10 / day</p></div>
+                        <span class="rarity-dot rarity-common"></span>
+                        <span style="font-size:12px; font-weight:700; color:#e8e6ec; min-width:44px; text-align:right;">+5</span>
+                    </div>
+
+                    <div class="intel-row">
+                        <div class="intel-icon">▶️</div>
+                        <div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">YouTube Task</p><p style="font-size:10px; color:#78737f; margin:1px 0 0;">3 / day</p></div>
+                        <span class="rarity-dot rarity-rare"></span>
+                        <span style="font-size:12px; font-weight:700; color:#e8e6ec; min-width:44px; text-align:right;">+10</span>
+                    </div>
+
+                    <div class="intel-row">
+                        <div class="intel-icon">🌐</div>
+                        <div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Website Task</p><p style="font-size:10px; color:#78737f; margin:1px 0 0;">3 / day</p></div>
+                        <span class="rarity-dot rarity-rare"></span>
+                        <span style="font-size:12px; font-weight:700; color:#e8e6ec; min-width:44px; text-align:right;">+10</span>
+                    </div>
+
+                    <div class="intel-row">
+                        <div class="intel-icon">📢</div>
+                        <div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Telegram Channel</p><p style="font-size:10px; color:#78737f; margin:1px 0 0;">one-time each</p></div>
+                        <span class="rarity-dot rarity-rare"></span>
+                        <span style="font-size:12px; font-weight:700; color:#e8e6ec; min-width:44px; text-align:right;">varies</span>
+                    </div>
+
+                    <div class="intel-row">
+                        <div class="intel-icon">🎯</div>
+                        <div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Promotion Task</p><p style="font-size:10px; color:#78737f; margin:1px 0 0;">one-time each</p></div>
+                        <span class="rarity-dot rarity-rare"></span>
+                        <span style="font-size:12px; font-weight:700; color:#e8e6ec; min-width:44px; text-align:right;">varies</span>
+                    </div>
+
+                    <div class="intel-row">
+                        <div class="intel-icon">🔥</div>
+                        <div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Daily Streak</p><p style="font-size:10px; color:#78737f; margin:1px 0 0;">once / day, grows with streak</p></div>
+                        <span class="rarity-dot rarity-rare"></span>
+                        <span style="font-size:12px; font-weight:700; color:#e8e6ec; min-width:44px; text-align:right;">up to 20</span>
+                    </div>
+
+                    <div class="intel-row">
+                        <div class="intel-icon">⛏️</div>
+                        <div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Coin Mining</p><p style="font-size:10px; color:#78737f; margin:1px 0 0;">2 ads to start · 1hr session</p></div>
+                        <span class="rarity-dot rarity-epic"></span>
+                        <span style="font-size:12px; font-weight:700; color:#e8e6ec; min-width:44px; text-align:right;">30-75</span>
+                    </div>
+
+                    <div class="intel-row">
+                        <div class="intel-icon">💣</div>
+                        <div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Bomb Box</p><p style="font-size:10px; color:#78737f; margin:1px 0 0;">15-min cooldown · 1 of 4 boxes hides a bomb</p></div>
+                        <span class="rarity-dot rarity-epic"></span>
+                        <span style="font-size:12px; font-weight:700; color:#e8e6ec; min-width:44px; text-align:right;">5-20</span>
+                    </div>
+
+                    <div class="intel-row">
+                        <div class="intel-icon">🎡</div>
+                        <div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Spin Wheel</p><p style="font-size:10px; color:#78737f; margin:1px 0 0;">5 spins / day · 1 ad each</p></div>
+                        <span class="rarity-dot rarity-legendary"></span>
+                        <span style="font-size:12px; font-weight:700; color:#f5c96a; min-width:44px; text-align:right;">up to 100</span>
+                    </div>
+
+                    <div class="intel-row">
+                        <div class="intel-icon">✅</div>
+                        <div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">All-Tasks-Complete</p><p style="font-size:10px; color:#78737f; margin:1px 0 0;">bonus for finishing everything above</p></div>
+                        <span class="rarity-dot rarity-rare"></span>
+                        <span style="font-size:12px; font-weight:700; color:#e8e6ec; min-width:44px; text-align:right;">+10</span>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- ── Elite Perks ── -->
+            <div class="intel-section" style="border-top:1px solid rgba(255,255,255,0.06);">
+                <div onclick="this.parentElement.classList.toggle('open')" style="display:flex; justify-content:space-between; align-items:center; padding:13px 18px; cursor:pointer;">
+                    <span style="font-size:12.5px; font-weight:700; color:#f5c96a;">👑 Elite Perks (Premium)</span>
+                    <span class="intel-chevron" style="font-size:11px; color:#78737f;">▾</span>
+                </div>
+                <div class="intel-body" style="padding:0 18px 14px;">
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Ad Reward</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">5 →</span><span style="font-size:12.5px; font-weight:700; color:#f5c96a;">10 🪙</span></div>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Daily Spins</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">5 →</span><span style="font-size:12.5px; font-weight:700; color:#f5c96a;">15 / day</span></div>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Min. Withdrawal</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">25,000 →</span><span style="font-size:12.5px; font-weight:700; color:#f5c96a;">10,000 🪙</span></div>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">VIP-Only Tasks</p></div><span class="rarity-dot rarity-epic"></span><span style="font-size:12.5px; font-weight:700; color:#f5c96a; margin-left:6px;">Unlocked</span></div>
+                </div>
+            </div>
+
+            <!-- ── Cash-Out Rules ── -->
+            <div class="intel-section" style="border-top:1px solid rgba(255,255,255,0.06);">
+                <div onclick="this.parentElement.classList.toggle('open')" style="display:flex; justify-content:space-between; align-items:center; padding:13px 18px; cursor:pointer;">
+                    <span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">💰 Cash-Out Rules</span>
+                    <span class="intel-chevron" style="font-size:11px; color:#78737f;">▾</span>
+                </div>
+                <div class="intel-body" style="padding:0 18px 14px;">
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Minimum Withdrawal</p></div><span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">25,000 🪙</span></div>
+                    <div class="intel-row"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0; flex:1;" id="help-ref-rule">Referral Requirement: <b style="color:#f5c96a;">5 Users</b></p></div>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Request Cooldown</p></div><span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">24 hours</span></div>
+                </div>
+            </div>
+
+            <!-- ── Code of Conduct ── -->
+            <div class="intel-section" style="border-top:1px solid rgba(255,255,255,0.06);">
+                <div onclick="this.parentElement.classList.toggle('open')" style="display:flex; justify-content:space-between; align-items:center; padding:13px 18px; cursor:pointer;">
+                    <span style="font-size:12.5px; font-weight:700; color:#f87171;">⚠️ Code of Conduct</span>
+                    <span class="intel-chevron" style="font-size:11px; color:#78737f;">▾</span>
+                </div>
+                <div class="intel-body" style="padding:0 18px 16px;">
+                    <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.22); border-radius:12px; padding:12px 14px; text-align:center;">
+                        <p style="font-size:12px; color:#e8e6ec; margin:0 0 4px;">Using multiple accounts is <b style="color:#f87171;">strictly prohibited.</b></p>
+                        <p style="font-size:12px; color:#e8e6ec; margin:0 0 10px;">Detected accounts will be <b style="color:#f87171;">suspended.</b></p>
+                        <div style="background:rgba(239,68,68,0.15); border-radius:8px; padding:8px;">
+                            <p style="font-size:13.5px; font-weight:700; color:#f87171; margin:0;">Penalty: Account Block</p>
+                        </div>
+                        <p style="font-size:10.5px; color:#78737f; margin:8px 0 0;">Please earn fair 🙏</p>
+                    </div>
+                </div>
+            </div>
+
         </div>
 
         <div class="card c-blue">
