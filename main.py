@@ -199,6 +199,25 @@ try:
         # Users username for admin search
         users_col.create_index("username", sparse=True, **_idx_opts)
         logger.info("MongoDB indexes ensured.")
+
+        # One-time migration: backfill lifetime_earned for existing users.
+        # "Active referral" used to be based on live coin balance, which
+        # incorrectly turned a referral "inactive" the moment they withdrew.
+        # Existing accounts have no historical earning ledger, so current
+        # balance is used as the best available starting approximation —
+        # every new coin from here on is tracked precisely via
+        # lifetime_earned increments alongside each earning event. Filter
+        # ensures this only ever runs once per user (idempotent / safe to
+        # run on every restart).
+        try:
+            migrated = users_col.update_many(
+                {"lifetime_earned": {"$exists": False}},
+                [{"$set": {"lifetime_earned": {"$ifNull": ["$coins", 0]}}}],
+            )
+            if migrated.modified_count:
+                logger.info("Backfilled lifetime_earned for %s existing users.", migrated.modified_count)
+        except Exception as mig_err:
+            logger.warning("lifetime_earned backfill skipped: %s", mig_err)
     except Exception as idx_err:
         logger.warning("Index creation warning: %s", idx_err)
 
@@ -254,6 +273,7 @@ AD_MIN_PER_DAY             = 8
 
 PROMO_TASK_REWARD = 5
 ALL_TASKS_BONUS   = 10
+PROFILE_COMPLETE_REWARD = 100  # One-time reward for filling age + gender in profile
 
 MIN_WITHDRAW      = 25000
 MAX_WITHDRAW      = 100000
@@ -1426,7 +1446,7 @@ def award_referral_commission(earner_id: int, coins_earned: int, source: str, ev
         except pymongo.errors.DuplicateKeyError:
             return
 
-        users_col.update_one({"user_id": sponsor_id}, {"$inc": {"coins": commission}})
+        users_col.update_one({"user_id": sponsor_id}, {"$inc": {"coins": commission, "lifetime_earned": commission}})
         # BUG FIX #3: commission milne ke baad sponsor ka user cache clear karo
         # warna 15 seconds tak purana (stale) balance dikhta tha
         _invalidate_user_cache(sponsor_id)
@@ -1481,6 +1501,10 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
                 "user_id":                user_id,
                 "username":               username,
                 "coins":                  0,
+                "lifetime_earned":        0,
+                "age":                    None,
+                "gender":                 None,
+                "profile_completed":      False,
                 "rupees":                 0.0,   # INR wallet balance
                 "referred_by":            None,
                 "referral_count":         0,
@@ -1505,7 +1529,7 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
                     join_bonus = PREMIUM_REFERRAL_BONUS if is_premium(int(referrer_id)) else REFERRAL_JOIN_BONUS
                     users_col.update_one(
                         {"user_id": int(referrer_id)},
-                        {"$inc": {"coins": join_bonus, "referral_count": 1}},
+                        {"$inc": {"coins": join_bonus, "referral_count": 1, "lifetime_earned": join_bonus}},
                     )
                     new_user["referred_by"] = str(referrer_id)
                     try:
@@ -1637,6 +1661,9 @@ def get_user_data_api(user_id: int):
             "premium_info":           get_premium_info(user_id),
             "username":               user.get("username", ""),
             "first_name":             user.get("first_name", ""),
+            "profile_completed":      user.get("profile_completed", False),
+            "age":                    user.get("age"),
+            "gender":                 user.get("gender"),
         }
         # Cache response — invalidated whenever user data is written.
         # Blocked snapshots aren't cached: as soon as an admin unblocks the
@@ -1775,6 +1802,63 @@ def get_streak_tier(day: int) -> str:
         return "💎 Tier 3 (Days 21-30)"
 
 
+VALID_GENDERS = {"male", "female", "other"}
+
+
+@app.route("/complete_profile", methods=["POST"])
+def complete_profile_api():
+    """One-time profile completion (age + gender) — rewards PROFILE_COMPLETE_REWARD
+    coins. Locked after first successful submission; cannot be changed by the
+    user again (admin can override via /editprofile)."""
+    try:
+        data    = request.get_json(force=True) or {}
+        user_id = int(data.get("user_id", 0))
+        age     = data.get("age")
+        gender  = str(data.get("gender", "")).strip().lower()
+
+        if not user_id:
+            return jsonify({"status": "error", "message": "Invalid user."}), 400
+        try:
+            age = int(age)
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "message": "Enter a valid age."}), 400
+        if age < 10 or age > 100:
+            return jsonify({"status": "error", "message": "Enter a valid age (10-100)."}), 400
+        if gender not in VALID_GENDERS:
+            return jsonify({"status": "error", "message": "Select a valid gender."}), 400
+
+        # Atomic — only succeeds once. If profile_completed is already true,
+        # this matches zero documents and the user gets a clean "already done".
+        result = users_col.find_one_and_update(
+            {"user_id": user_id, "profile_completed": {"$ne": True}},
+            {
+                "$set": {
+                    "age":               age,
+                    "gender":            gender,
+                    "profile_completed": True,
+                },
+                "$inc": {
+                    "coins":           PROFILE_COMPLETE_REWARD,
+                    "lifetime_earned": PROFILE_COMPLETE_REWARD,
+                },
+            },
+        )
+        if not result:
+            return jsonify({"status": "error", "message": "Profile already completed."}), 400
+
+        _invalidate_user_cache(user_id)
+        _fire_commission(user_id, PROFILE_COMPLETE_REWARD, "task", f"profile_complete_{user_id}")
+
+        return jsonify({
+            "status":  "success",
+            "message": f"🎉 Profile completed! +{PROFILE_COMPLETE_REWARD} coins",
+            "reward":  PROFILE_COMPLETE_REWARD,
+        })
+    except Exception as exc:
+        logger.error("complete_profile_api error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
+
+
 @app.route("/claim_daily/<int:user_id>", methods=["POST"])
 def claim_daily_api(user_id: int):
     if is_rate_limited(f"claim_{user_id}", 60):
@@ -1866,7 +1950,7 @@ def claim_daily_api(user_id: int):
                 ],
             },
             {
-                "$inc": {"coins": reward},
+                "$inc": {"coins": reward, "lifetime_earned": reward},
                 "$set": {
                     "last_claim_ts": now.isoformat(),
                     "streak_day":    streak_day,
@@ -1954,7 +2038,7 @@ def claim_allcomplete_bonus_api(user_id: int):
 
         users_col.update_one(
             {"user_id": user_id},
-            {"$inc": {"coins": ALL_TASKS_BONUS}, "$set": {"allcomplete_bonus_date": today}},
+            {"$inc": {"coins": ALL_TASKS_BONUS, "lifetime_earned": ALL_TASKS_BONUS}, "$set": {"allcomplete_bonus_date": today}},
         )
         _invalidate_user_cache(user_id)
         logger.info("All-tasks bonus of %s coins credited to user %s", ALL_TASKS_BONUS, user_id)
@@ -2274,7 +2358,7 @@ def verify_task_api():
 
         upd = users_col.update_one(
             guard_filter,
-            {"$inc": {"coins": reward}, "$set": {completion_field: completion_record}},
+            {"$inc": {"coins": reward, "lifetime_earned": reward}, "$set": {completion_field: completion_record}},
         )
         if upd.modified_count == 0:
             _check_and_flag_already_done(user_id, task_id)
@@ -2394,7 +2478,7 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
         users_col.update_one(
             {"user_id": user_id},
             {
-                "$inc": {"coins": _ad_reward},
+                "$inc": {"coins": _ad_reward, "lifetime_earned": _ad_reward},
                 "$set": {
                     "ads_date":        today,
                     "ads_today":       done,
@@ -2510,7 +2594,7 @@ def claim_channel_api():
         users_col.update_one(
             {"user_id": user_id},
             {
-                "$inc": {"coins": reward},
+                "$inc": {"coins": reward, "lifetime_earned": reward},
                 "$set": {f"channel_claims.{channel_id}": claim_value},
             },
         )
@@ -2573,7 +2657,7 @@ def claim_promo_task_api():
                 "blocked":               {"$ne": True},
                 "promo_task_completions": {"$ne": task_id},
             },
-            {"$inc": {"coins": reward}, "$addToSet": {"promo_task_completions": task_id}},
+            {"$inc": {"coins": reward, "lifetime_earned": reward}, "$addToSet": {"promo_task_completions": task_id}},
             projection={"_id": 1},
         )
         if result is None:
@@ -2885,7 +2969,7 @@ def claim_vip_task_api():
                 "blocked":              {"$ne": True},
                 "vip_task_completions": {"$ne": task_id},
             },
-            {"$inc": {"coins": reward}, "$addToSet": {"vip_task_completions": task_id}},
+            {"$inc": {"coins": reward, "lifetime_earned": reward}, "$addToSet": {"vip_task_completions": task_id}},
             projection={"_id": 1},
         )
         if result is None:
@@ -3127,7 +3211,7 @@ def redeem_promo_api():
             return jsonify({"status": "error", "message": "Invalid promo code value."}), 400
 
         promos_col.update_one({"code": code}, {"$push": {"used_by": user_id}})
-        users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins}})
+        users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins, "lifetime_earned": coins}})
         logger.info("Promo '%s' redeemed by user %s for %s coins.", code, user_id, coins)
         return jsonify({
             "status":  "success",
@@ -3838,7 +3922,7 @@ def _perform_auto_draw(rid: str, notify_chat_id: int | None = None) -> dict:
     users_col.update_one(
         {"user_id": winner_id},
         {
-            "$inc": {"coins": prize},
+            "$inc": {"coins": prize, "lifetime_earned": prize},
             "$set": {
                 "pending_winner_popup": True,
                 "pending_winner_prize": prize,
@@ -4167,7 +4251,7 @@ def do_spin_api(user_id: int):
             "$set": {"spins_today": new_spins, "spins_date": today},
         }
         if reward > 0:
-            update_op["$inc"] = {"coins": reward}
+            update_op["$inc"] = {"coins": reward, "lifetime_earned": reward}
 
         users_col.update_one({"user_id": user_id}, update_op)
         logger.info("User %s spun: reward=%s spins=%s/%s", user_id, reward, new_spins, SPIN_PER_DAY)
@@ -4508,7 +4592,7 @@ def collect_mining_api(user_id: int):
         users_col.update_one(
             {"user_id": user_id},
             {
-                "$inc": {"coins": actual_reward},
+                "$inc": {"coins": actual_reward, "lifetime_earned": actual_reward},
                 "$set": {
                     "mining_start_time":   "",
                     "last_mining_collect": now.isoformat(),
@@ -4772,7 +4856,7 @@ def bomb_box_pick_api(user_id: int):
         coins_won = chosen["value"] if box_type == "reward" else 0
 
         if box_type == "reward":
-            users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins_won}})
+            users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins_won, "lifetime_earned": coins_won}})
             bomb_box_col.update_one({"game_id": game_id}, {"$set": {"coins_won": coins_won, "won": True}})
             message = random.choice(BOMB_BOX_FUN_WIN_MSGS)
             # Referral commission — non-blocking, 10% to sponsor
@@ -4820,8 +4904,8 @@ def referral_dashboard_api(user_id: int):
         # Total & active referral counts
         total_refs  = users_col.count_documents({"referred_by": str(user_id)})
         active_refs = users_col.count_documents({
-            "referred_by": str(user_id),
-            "coins":       {"$gte": ACTIVE_REF_MIN_COINS},
+            "referred_by":     str(user_id),
+            "lifetime_earned": {"$gte": ACTIVE_REF_MIN_COINS},
         })
 
         # Today's commission
@@ -4870,11 +4954,11 @@ def referral_dashboard_api(user_id: int):
         recent_refs = list(
             users_col.find(
                 {"referred_by": str(user_id)},
-                {"user_id": 1, "username": 1, "coins": 1, "joined": 1, "_id": 0},
+                {"user_id": 1, "username": 1, "lifetime_earned": 1, "joined": 1, "_id": 0},
             ).sort("joined", -1).limit(10)
         )
         for r in recent_refs:
-            r["active"] = r.get("coins", 0) >= ACTIVE_REF_MIN_COINS
+            r["active"] = r.get("lifetime_earned", 0) >= ACTIVE_REF_MIN_COINS
 
         return jsonify({
             "status": "success",
@@ -4960,8 +5044,8 @@ def claim_milestone_api(user_id: int):
             return jsonify({"status": "error", "message": "Milestone already claimed!"}), 400
 
         active_refs = users_col.count_documents({
-            "referred_by": str(user_id),
-            "coins":       {"$gte": ACTIVE_REF_MIN_COINS},
+            "referred_by":     str(user_id),
+            "lifetime_earned": {"$gte": ACTIVE_REF_MIN_COINS},
         })
         if active_refs < ms["count"]:
             needed = ms["count"] - active_refs
@@ -4974,7 +5058,7 @@ def claim_milestone_api(user_id: int):
         upd = users_col.update_one(
             {"user_id": user_id, "milestone_claims": {"$ne": milestone_id}},
             {
-                "$inc":    {"coins": ms["reward"]},
+                "$inc":    {"coins": ms["reward"], "lifetime_earned": ms["reward"]},
                 "$addToSet": {"milestone_claims": milestone_id},
             },
         )
@@ -6184,7 +6268,7 @@ def redeem_promo_command(message):
         )
         if claim_result.modified_count == 0:
             return bot.reply_to(message, "\u274c Promo code already used, expired, or at usage limit.")
-        users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins}})
+        users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins, "lifetime_earned": coins}})
         logger.info("Promo '%s' redeemed via bot by user %s for %s coins.", code, user_id, coins)
         bot.reply_to(
             message,
@@ -7299,6 +7383,58 @@ def add_coins(message):
     except Exception as notify_exc:
         logger.warning("Notify failed for addcoins %s: %s", target_id, notify_exc)
     bot.reply_to(message, f"\u2705 {amount} coins added to user {target_id}")
+
+
+@bot.message_handler(commands=["editprofile"])
+def cmd_edit_profile(message):
+    """Admin override: /editprofile <user_id> <age|gender> <value>
+    Users can only fill their profile once (age+gender locked after
+    submission) — this lets admin fix a typo or genuine mistake."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) != 4:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/editprofile <user_id> <age|gender> <value>`\n\n"
+            "*Examples:*\n`/editprofile 123456789 age 22`\n`/editprofile 123456789 gender female`",
+            parse_mode="Markdown",
+        )
+    try:
+        target_id = int(parts[1])
+    except ValueError:
+        return bot.reply_to(message, "❌ Invalid user ID.")
+
+    field = parts[2].strip().lower()
+    value = parts[3].strip().lower()
+
+    if field == "age":
+        try:
+            value_to_set = int(value)
+            if value_to_set < 10 or value_to_set > 100:
+                raise ValueError
+        except ValueError:
+            return bot.reply_to(message, "❌ Age must be a number between 10 and 100.")
+    elif field == "gender":
+        if value not in VALID_GENDERS:
+            return bot.reply_to(message, f"❌ Gender must be one of: {', '.join(VALID_GENDERS)}")
+        value_to_set = value
+    else:
+        return bot.reply_to(message, "❌ Field must be `age` or `gender`.", parse_mode="Markdown")
+
+    try:
+        result = users_col.update_one(
+            {"user_id": target_id},
+            {"$set": {field: value_to_set, "profile_completed": True}},
+        )
+        if result.matched_count == 0:
+            return bot.reply_to(message, f"❌ User `{target_id}` not found.", parse_mode="Markdown")
+        _invalidate_user_cache(target_id)
+        bot.reply_to(message, f"\u2705 Updated `{field}` = `{value_to_set}` for user `{target_id}`.", parse_mode="Markdown")
+        logger.info("Admin edited profile for %s: %s = %s", target_id, field, value_to_set)
+    except Exception as exc:
+        logger.error("cmd_edit_profile error for %s: %s", target_id, exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
 
 
 @bot.message_handler(commands=["broadcast"])
