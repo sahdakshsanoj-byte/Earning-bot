@@ -79,7 +79,6 @@ let _tournamentTncAccepted = false;
 const MAX_ADS_PER_DAY       = 10;
 const MAX_YT_PER_DAY        = 3;
 const MAX_WEB_PER_DAY       = 3;
-const MIN_WITHDRAW_COINS    = 25000;
 const ALL_TASKS_BONUS       = 10;
 const BOMB_BOX_COOLDOWN_SECS = 900;
 
@@ -540,10 +539,6 @@ async function fetchLiveData() {
             const premInfo   = data.premium_info || {};
             const isPremium  = !!premInfo.premium;
 
-            // Dynamic withdrawal threshold based on premium
-            const _minWd    = isPremium ? 10000 : MIN_WITHDRAW_COINS;
-            const _refNeeded = isPremium ? 2 : 5;
-
             const balEl = document.getElementById('balance');
             if (balEl) animateBalance(balEl, coins);
 
@@ -579,24 +574,6 @@ async function fetchLiveData() {
             }
             // ─────────────────────────────────────────────────────────────
 
-            const coinsPct = Math.min((coins / _minWd) * 100, 100);
-            const refPct   = Math.min((refCount / _refNeeded) * 100, 100);
-
-            const coinsBar  = document.getElementById('coins-progress-bar');
-            const refBar    = document.getElementById('ref-progress-bar');
-            const coinsText = document.getElementById('coins-progress-text');
-            const refText   = document.getElementById('ref-progress-text');
-
-            if (coinsBar) {
-                coinsBar.style.width      = coinsPct + '%';
-                coinsBar.style.background = coins >= _minWd
-                    ? 'linear-gradient(90deg,#2ecc71,#27ae60)'
-                    : 'linear-gradient(90deg,#f1c40f,#f39c12)';
-            }
-            if (refBar)    refBar.style.width    = refPct + '%';
-            if (coinsText) coinsText.innerText   = `${coins} / ${_minWd}${coins >= _minWd ? ' ✅' : ''}${isPremium ? ' ✓' : ''}`;
-            if (refText)   refText.innerText     = `${refCount} / ${_refNeeded}${refCount >= _refNeeded ? ' ✅' : ''}${isPremium ? ' ✓' : ''}`;
-
             applyReferralLock();
             // Update rupee withdrawal referral progress UI
             updateRupeeRefUI(refCount, isPremium ? 2 : 5);
@@ -627,9 +604,6 @@ async function fetchLiveData() {
             loadPremiumCardStatus();
             loadVipTasks();
             loadProfileTab();
-
-            // Update withdraw minimum check with premium dynamic value
-            window._dynamicMinWithdraw = isPremium ? 10000 : MIN_WITHDRAW_COINS;
 
             // Update premium card on home tab
             updatePremiumCard(premInfo);
@@ -1798,6 +1772,7 @@ function loadProfileTab() {
 
     // Age / Gender profile completion
     renderProfileDetails(d);
+    renderBadges(d);
 
     // Mining level dots
     const mDots = document.querySelectorAll('#profile-mining-dots .mining-lvl-dot');
@@ -1842,6 +1817,23 @@ function renderProfileDetails(d) {
         try { dismissed = sessionStorage.getItem('profileNudgeDismissed') === '1'; } catch(_) {}
         if (nudge) nudge.style.display = dismissed ? 'none' : 'flex';
     }
+}
+
+function renderBadges(d) {
+    const grid  = document.getElementById('badges-grid');
+    const count = document.getElementById('badges-count');
+    if (!grid) return;
+    const badges = Array.isArray(d.badges) ? d.badges : [];
+    if (count) {
+        const earnedCount = badges.filter(b => b.earned).length;
+        count.innerText = `${earnedCount} / ${badges.length}`;
+    }
+    grid.innerHTML = badges.map(b => `
+        <div class="badge-tile ${b.earned ? 'earned' : 'locked'}" title="${b.desc.replace(/"/g, '&quot;')}">
+            <span class="badge-icon">${b.icon}</span>
+            <span class="badge-name">${b.name}</span>
+        </div>
+    `).join('');
 }
 
 function dismissProfileNudge() {
@@ -2252,100 +2244,6 @@ async function redeemPromo() {
     } finally {
         _pendingRequests.delete('redeemPromo');
         if (btn) { btn.disabled = false; btn.innerText = "Redeem"; }
-    }
-}
-
-// ============================================================
-// WITHDRAW
-// ============================================================
-let _selectedWithdrawMethod = 'upi';
-
-function selectWithdrawMethod(method) {
-    _selectedWithdrawMethod = method;
-    const colors = { upi: '#2ecc71', google: '#f59e0b' };
-    const bg     = { upi: '#0d2318', google: '#1c1600' };
-    ['upi', 'google'].forEach(m => {
-        const btn   = document.getElementById(`method-btn-${m}`);
-        const panel = document.getElementById(`method-input-${m}`);
-        if (btn) {
-            const active = m === method;
-            btn.style.borderColor = active ? colors[m] : '#334155';
-            btn.style.color       = active ? colors[m] : '#94a3b8';
-            btn.style.background  = active ? bg[m]     : '#0f2027';
-        }
-        if (panel) panel.style.display = m === method ? '' : 'none';
-    });
-}
-
-async function requestWithdraw() {
-    if (!userId) return showToast("User ID not found!", "error");
-    if (_pendingRequests.has('withdraw')) return showToast("Request already in progress...", "error");
-
-    const amountEl   = document.getElementById('withdraw-amount');
-    const rawAmount  = amountEl ? amountEl.value.trim() : '';
-    const reqAmount  = parseInt(rawAmount);
-    const totalCoins = userData.coins || 0;
-    const refCount   = getRefCount(userData.referrals);
-    const method     = _selectedWithdrawMethod;
-
-    if (!rawAmount)                     return showToast("Please enter the coin amount!", "error");
-    if (isNaN(reqAmount))               return showToast("Please enter a valid number!", "error");
-    if (reqAmount <= 0)                 return showToast("Amount cannot be zero or negative!", "error");
-    const _minWdCheck = window._dynamicMinWithdraw || MIN_WITHDRAW_COINS;
-    if (reqAmount < _minWdCheck) return showToast(`Minimum ${_minWdCheck} coins required.${_minWdCheck < MIN_WITHDRAW_COINS ? ' (Premium)' : ''}`, "error");
-    if (reqAmount > totalCoins)         return showToast(`Insufficient balance. You have ${totalCoins} coins.`, "error");
-
-    // BUG FIX #2: Premium user ke liye sirf 2 referrals chahiye, free user ke liye 5.
-    // Pehle hardcoded 5 tha — premium users ke 3-4 referrals hone par bhi block ho jaate the.
-    if (CONFIG.REFERRAL_ACTIVE === true) {
-        const isPremForRef = !!(userData && userData.premium_info && userData.premium_info.premium);
-        const _refNeeded   = isPremForRef ? 2 : 5;
-        if (refCount < _refNeeded) {
-            return showToast(`You need ${_refNeeded - refCount} more referral(s) to unlock withdrawal.`, "error");
-        }
-    }
-
-    let paymentAddress = '';
-    if (method === 'upi') {
-        const upi = document.getElementById('upi-id')?.value.trim();
-        if (!upi || !upi.includes('@')) return showToast("Please enter a valid UPI ID! (Example: name@upi)", "error");
-        paymentAddress = upi;
-    } else if (method === 'google') {
-        paymentAddress = 'via_telegram';
-    }
-
-    _pendingRequests.add('withdraw');
-    const btn = document.querySelector('[onclick="requestWithdraw()"]');
-    if (btn) { btn.disabled = true; btn.innerText = "Processing..."; }
-
-    try {
-        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/withdraw`, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({
-                user_id:         userId,
-                method,
-                payment_address: paymentAddress,
-                upi_id:          method === 'upi' ? paymentAddress : undefined,
-                amount:          reqAmount,
-            }),
-        });
-        const data = await res.json();
-        if (data.status === "success") {
-            const methodLabel = method === 'upi' ? 'UPI' : 'Google Play';
-            showToast(`💸 ${methodLabel} withdrawal request submitted!`, "success");
-            if (amountEl) amountEl.value = '';
-            const upiEl = document.getElementById('upi-id');
-            if (upiEl) upiEl.value = '';
-            fetchLiveData();
-        } else {
-            showToast(data.message || "An error occurred. Please retry.", "error");
-        }
-    } catch (e) {
-        showToast("⚠️ Connection error! Please retry.", "error");
-    } finally {
-        _pendingRequests.delete('withdraw');
-        if (btn) { btn.disabled = false; btn.innerText = "Withdraw Now"; }
     }
 }
 
@@ -3537,12 +3435,8 @@ function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
 // REFERRAL LOCK — Refer tab + Withdraw card
 // ============================================================
 function applyReferralLock() {
-    const withdrawTab = document.getElementById('withdraw-card');
-    const referTab    = document.getElementById('refer');
-    const refBox      = document.getElementById('ref-requirement-box');
-    const refText     = document.getElementById('ref-progress-text');
-    const refBarWrap  = document.getElementById('ref-bar-wrap');
-    const helpRef     = document.getElementById('help-ref-rule');
+    const referTab = document.getElementById('refer');
+    const helpRef  = document.getElementById('help-ref-rule');
 
     const refCount   = getRefCount(userData.referrals);
     const refsMet    = refCount >= 5;
@@ -3573,61 +3467,14 @@ function applyReferralLock() {
         }
     }
 
-    // ── CASE 1: Referrals not yet completed ───────────────────────────────────
+    // ── Cash-Out Rules "Referral Requirement" line (Field Intel) ──────────
     if (lockActive) {
-        // BUG FIX #6: this used to call _removeWithdrawLock here — the exact
-        // opposite of what CASE 1 means (refs NOT met yet). No function ever
-        // applied the withdraw lock, so the withdraw card never visually
-        // showed as locked even when referrals were incomplete. (The actual
-        // withdrawal request was still safely blocked server-side either way —
-        // this fixes the visual/UX bypass, not a money bug.)
-        _applyWithdrawLock(withdrawTab, refCount);
-        if (refBox)  { refBox.style.borderColor = '#e74c3c'; refBox.style.opacity = '1'; }
-        if (refText) { refText.style.color = '#e74c3c'; }
-        if (helpRef) helpRef.innerHTML = '• Referral Requirement: <b style="color:#f1c40f;">5 Users</b>';
-
-    // ── CASE 2: REFERRAL_ACTIVE = false — bypass mode ──────────────────────
+        if (helpRef) helpRef.innerHTML = 'Referral Requirement: <b style="color:#f1c40f;">5 Users</b>';
     } else if (CONFIG.REFERRAL_ACTIVE === false) {
-        _removeWithdrawLock(withdrawTab);
-        if (refBox)  { refBox.style.borderColor = '#2ecc71'; refBox.style.opacity = '1'; }
-        if (refText) { refText.innerText = '✅ Not Required'; refText.style.color = '#2ecc71'; }
-        if (refBarWrap) {
-            refBarWrap.innerHTML =
-                '<div style="height:100%;background:linear-gradient(90deg,#2ecc71,#27ae60);' +
-                'border-radius:20px;width:100%;transition:width 0.5s;"></div>';
-        }
-        if (helpRef) helpRef.innerHTML = '• Referral Requirement: <b style="color:#2ecc71;">Not Required ✅</b>';
-
-    // ── CASE 3: Refs poore hain — lock hata do ─────────────────────────────
+        if (helpRef) helpRef.innerHTML = 'Referral Requirement: <b style="color:#2ecc71;">Not Required ✅</b>';
     } else {
-        _removeWithdrawLock(withdrawTab);
-        if (refBox)  { refBox.style.borderColor = '#2ecc71'; refBox.style.opacity = '1'; }
-        if (refText) { refText.style.color = '#2ecc71'; }
-        if (helpRef) helpRef.innerHTML = '• Referral Requirement: <b style="color:#2ecc71;">Completed ✅</b>';
+        if (helpRef) helpRef.innerHTML = 'Referral Requirement: <b style="color:#2ecc71;">Completed ✅</b>';
     }
-}
-
-function _removeWithdrawLock(withdrawTab) {
-    if (!withdrawTab) withdrawTab = document.getElementById('withdraw-card');
-    if (withdrawTab) {
-        const stale = withdrawTab.querySelector('.refer-lock-overlay');
-        if (stale) stale.remove();
-        const btn = withdrawTab.querySelector('[onclick="requestWithdraw()"]');
-        if (btn) btn.disabled = false;
-    }
-}
-
-/** BUG FIX #6: was never defined/called — see CASE 1 above. */
-function _applyWithdrawLock(withdrawTab, refCount) {
-    if (!withdrawTab) withdrawTab = document.getElementById('withdraw-card');
-    if (!withdrawTab) return;
-    const btn = withdrawTab.querySelector('[onclick="requestWithdraw()"]');
-    if (btn) btn.disabled = true;
-    if (withdrawTab.querySelector('.refer-lock-overlay')) return;
-    const ov = document.createElement('div');
-    ov.className = 'refer-lock-overlay app-lock-pill';
-    ov.innerHTML = `<span class="lock-label">Refer ${5 - (refCount || 0)} more to unlock withdrawal</span>`;
-    withdrawTab.prepend(ov);
 }
 
 // ============================================================
