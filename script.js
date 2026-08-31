@@ -133,6 +133,36 @@ async function preloadMonetagAd() {
 }
 
 // ============================================================
+// IN-APP INTERSTITIAL (non-rewarded, publisher revenue only)
+// Monetag zone 10822310 — self-manages its own timing (frequency,
+// capping, interval) after this single call. No coins involved,
+// so failures here must never surface to the user.
+// ============================================================
+let _inAppAdRetries = 0;
+function initInAppInterstitialAd() {
+    try {
+        if (typeof show_10822310 === 'function') {
+            show_10822310({
+                type: 'inApp',
+                inAppSettings: {
+                    frequency: 2,
+                    capping:   0.1,
+                    interval:  30,
+                    timeout:   5,
+                    everyPage: false,
+                },
+            }).catch(() => {});
+        } else if (_inAppAdRetries < 5) {
+            // SDK <script> may still be loading — retry a few times.
+            _inAppAdRetries++;
+            setTimeout(initInAppInterstitialAd, 1500);
+        }
+    } catch (e) {
+        // Ad SDK issues must never break the app.
+    }
+}
+
+// ============================================================
 // TOAST
 // ============================================================
 // ============================================================
@@ -5123,6 +5153,7 @@ window.addEventListener('DOMContentLoaded', () => {
     checkDevice();
     preloadMonetagAd();
     applyReferralLock();
+    initInAppInterstitialAd();
 
     setInterval(fetchLiveData,      300000);  // data refresh every 5 min
     setInterval(refreshLeaderboard, 600000);  // leaderboard refresh every 10 min
