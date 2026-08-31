@@ -111,7 +111,6 @@ try:
     db = client["earning_bot_db"]
 
     users_col                 = db["users"]
-    withdrawals_col           = db["withdrawals"]
     rate_col                  = db["rate_limits"]
     config_col                = db["config"]
     sponsor_clicks_col        = db["sponsor_clicks"]
@@ -148,8 +147,6 @@ try:
         users_col.create_index("fingerprint", sparse=True, **_idx_opts)
         users_col.create_index("blocked", sparse=True, **_idx_opts)
         users_col.create_index("joined", **_idx_opts)
-        withdrawals_col.create_index("user_id", **_idx_opts)
-        withdrawals_col.create_index("status", **_idx_opts)
         promos_col.create_index("code", unique=True, **_idx_opts)
         support_messages_col.create_index("user_id", **_idx_opts)
         support_messages_col.create_index("created_at", **_idx_opts)
@@ -187,8 +184,6 @@ try:
         referral_commissions_col.create_index([("sponsor_id", 1), ("date", 1)], **_idx_opts)
         referral_commissions_col.create_index([("sponsor_id", 1), ("earner_id", 1), ("date", 1)], **_idx_opts)
         referral_commissions_col.create_index("timestamp", **_idx_opts)
-        # Withdrawal sort indexes
-        withdrawals_col.create_index([("user_id", 1), ("timestamp", -1)], **_idx_opts)
         # Rupee withdrawal sort indexes
         rupee_withdrawals_col.create_index([("user_id", 1), ("created_at", -1)], **_idx_opts)
         rupee_withdrawals_col.create_index("status", **_idx_opts)
@@ -275,14 +270,9 @@ PROMO_TASK_REWARD = 5
 ALL_TASKS_BONUS   = 10
 PROFILE_COMPLETE_REWARD = 100  # One-time reward for filling age + gender in profile
 
-MIN_WITHDRAW      = 25000
-MAX_WITHDRAW      = 100000
-WITHDRAW_COOLDOWN = 86400
-
 # ── Premium Membership ────────────────────────────────────────────────────
 PREMIUM_TASK_BONUS_PCT    = 25    # Task reward pe +25% bonus
 PREMIUM_SPIN_PER_DAY      = 15   # Premium: 15 spins/day (free: SPIN_PER_DAY)
-PREMIUM_MIN_WITHDRAW      = 10000 # Premium: lower withdrawal minimum
 PREMIUM_REFERRAL_NEEDED   = 2    # Premium: sirf 2 referrals chahiye
 PREMIUM_AD_REWARD         = 10   # Premium: 10 coins/ad (normal: AD_COIN_REWARD=5)
 PREMIUM_REFERRAL_BONUS    = 200  # Premium sponsor: coins earned when a referral joins (2x the normal REFERRAL_JOIN_BONUS)
@@ -1132,6 +1122,36 @@ def sanitize_text(value: str, max_length: int = 1000) -> str:
 
 
 # ── Premium Membership Helpers ────────────────────────────────────────────
+BADGE_DEFINITIONS = [
+    {"id": "first_steps",   "icon": "\U0001f331", "name": "First Steps",   "desc": "Earn 100 lifetime coins",        "check": lambda u: u.get("lifetime_earned", 0) >= 100},
+    {"id": "grinder",       "icon": "\U0001f4aa", "name": "Grinder",       "desc": "Earn 1,000 lifetime coins",       "check": lambda u: u.get("lifetime_earned", 0) >= 1000},
+    {"id": "elite_earner",  "icon": "\U0001f4b0", "name": "Elite Earner",  "desc": "Earn 5,000 lifetime coins",       "check": lambda u: u.get("lifetime_earned", 0) >= 5000},
+    {"id": "week_warrior",  "icon": "\U0001f525", "name": "Week Warrior",  "desc": "Reach a 7-day streak",            "check": lambda u: u.get("streak_day", 0) >= 7},
+    {"id": "streak_master", "icon": "\U0001f48e", "name": "Streak Master", "desc": "Reach a 21-day streak",           "check": lambda u: u.get("streak_day", 0) >= 21},
+    {"id": "master_miner",  "icon": "\u26cf\ufe0f", "name": "Master Miner", "desc": "Reach Mining Level 3",           "check": lambda u: u.get("mining_level", 1) >= 3},
+    {"id": "squad_leader",  "icon": "\U0001f465", "name": "Squad Leader",  "desc": "Refer 5 users",                   "check": lambda u: u.get("referral_count", 0) >= 5},
+    {"id": "super_sponsor", "icon": "\U0001f31f", "name": "Super Sponsor", "desc": "Refer 20 users",                  "check": lambda u: u.get("referral_count", 0) >= 20},
+    {"id": "vip_member",    "icon": "\U0001f451", "name": "VIP Member",    "desc": "Become a Premium member",         "check": lambda u: bool(u.get("premium"))},
+    {"id": "all_set",       "icon": "\u2705",     "name": "All Set",       "desc": "Complete your profile",           "check": lambda u: bool(u.get("profile_completed"))},
+]
+
+
+def check_and_award_badges(user_id: int, user: dict) -> list:
+    """Computes which badges the user currently qualifies for and persists any
+    newly-earned ones (badges are permanent — once earned they never get
+    removed, even if the underlying stat later drops, e.g. streak resets)."""
+    try:
+        already  = set(user.get("badges_earned", []))
+        newly    = [b["id"] for b in BADGE_DEFINITIONS if b["id"] not in already and b["check"](user)]
+        if newly:
+            users_col.update_one({"user_id": user_id}, {"$addToSet": {"badges_earned": {"$each": newly}}})
+            already |= set(newly)
+        return sorted(already)
+    except Exception as exc:
+        logger.error("check_and_award_badges error for %s: %s", user_id, exc)
+        return user.get("badges_earned", [])
+
+
 def is_premium(user_id: int) -> bool:
     """Returns True if user has active (non-expired) premium membership."""
     try:
@@ -1502,6 +1522,8 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
                 "username":               username,
                 "coins":                  0,
                 "lifetime_earned":        0,
+                "mining_reminder_sent":   False,
+                "badges_earned":          [],
                 "age":                    None,
                 "gender":                 None,
                 "profile_completed":      False,
@@ -1637,6 +1659,11 @@ def get_user_data_api(user_id: int):
 
         promo_task_completions = user.get("promo_task_completions", [])
 
+        # Achievement badges — compute freshest premium status for the check
+        _badge_user = dict(user)
+        _badge_user["premium"] = is_premium(user_id)
+        earned_badge_ids = set(check_and_award_badges(user_id, _badge_user))
+
         resp = {
             "status":                 "blocked" if is_blocked else "success",
             "coins":                  user.get("coins", 0),
@@ -1664,6 +1691,10 @@ def get_user_data_api(user_id: int):
             "profile_completed":      user.get("profile_completed", False),
             "age":                    user.get("age"),
             "gender":                 user.get("gender"),
+            "badges":                 [
+                dict(id=b["id"], icon=b["icon"], name=b["name"], desc=b["desc"], earned=b["id"] in earned_badge_ids)
+                for b in BADGE_DEFINITIONS
+            ],
         }
         # Cache response — invalidated whenever user data is written.
         # Blocked snapshots aren't cached: as soon as an admin unblocks the
@@ -2049,175 +2080,6 @@ def claim_allcomplete_bonus_api(user_id: int):
         })
     except Exception as exc:
         logger.error("claim_allcomplete_bonus error for %s: %s", user_id, exc)
-        return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
-
-
-# ============================================================
-# WITHDRAW — REFERRAL_ACTIVE env var se control hota hai
-# ============================================================
-
-@app.route("/withdraw", methods=["POST"])
-def withdraw_api():
-    data = request.get_json(silent=True)
-    if not data:
-        return jsonify({"status": "error", "message": "No data received."}), 400
-
-    user_id_raw      = data.get("user_id")
-    # Quick in-memory rate-limit before any DB work (complements DB cooldown)
-    try:
-        _uid_for_rl = int(user_id_raw or 0)
-        if _uid_for_rl and is_rate_limited(f"withdraw_{_uid_for_rl}", 30):
-            return jsonify({"status": "error", "message": "Too many requests. Please wait."}), 429
-    except (TypeError, ValueError):
-        pass
-    requested_amount = data.get("amount")
-
-    method_raw      = sanitize_text(data.get("method", "upi")).lower().strip()
-    payment_address = sanitize_text(
-        data.get("payment_address", "") or data.get("upi_id", ""), max_length=256
-    )
-
-    METHOD_ALIASES = {
-        "upi":           "upi",
-        "google":        "google_redeem",
-        "google_redeem": "google_redeem",
-    }
-    method = METHOD_ALIASES.get(method_raw)
-    if not method:
-        return jsonify({"status": "error", "message": "Invalid withdrawal method."}), 400
-
-    if not user_id_raw or requested_amount is None:
-        return jsonify({"status": "error", "message": "Missing required fields."}), 400
-
-    try:
-        user_id          = int(user_id_raw)
-        requested_amount = int(requested_amount)
-    except (ValueError, TypeError):
-        return jsonify({"status": "error", "message": "Invalid user ID or amount."}), 400
-
-    if requested_amount <= 0:
-        return jsonify({"status": "error", "message": "Amount cannot be zero or negative."}), 400
-    _min_wd  = PREMIUM_MIN_WITHDRAW if is_premium(user_id) else MIN_WITHDRAW
-    if requested_amount < _min_wd:
-        return jsonify({"status": "error", "message": f"Minimum withdrawal is {_min_wd} coins."}), 400
-    if requested_amount > MAX_WITHDRAW:
-        return jsonify({"status": "error", "message": "Amount exceeds maximum limit."}), 400
-
-    if method == "upi":
-        upi_pattern = re.compile(r"^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$")
-        if not payment_address or not upi_pattern.match(payment_address):
-            return jsonify({
-                "status":  "error",
-                "message": "Invalid UPI ID format. (Example: name@upi)",
-            }), 400
-    elif method == "google_redeem":
-        payment_address = "via_telegram"
-
-    # MongoDB-backed withdrawal cooldown — server restart se reset nahi hoga
-    _last_wd = withdrawals_col.find_one(
-        {"user_id": user_id},
-        sort=[("timestamp", -1)],
-        projection={"timestamp": 1},
-    )
-    if _last_wd and _last_wd.get("timestamp"):
-        _wd_elapsed = (datetime.utcnow() - _last_wd["timestamp"]).total_seconds()
-        if _wd_elapsed < WITHDRAW_COOLDOWN:
-            _wd_remaining_h = int((WITHDRAW_COOLDOWN - _wd_elapsed) // 3600)
-            _wd_remaining_m = int(((WITHDRAW_COOLDOWN - _wd_elapsed) % 3600) // 60)
-            return jsonify({
-                "status":  "error",
-                "message": f"One withdrawal per day allowed. Try again in {_wd_remaining_h}h {_wd_remaining_m}m.",
-            }), 429
-
-    # ── Referral check (REFERRAL_ACTIVE env var se on/off) ──────────────────
-    if REFERRAL_ACTIVE:
-        _ref_user    = users_col.find_one({"user_id": user_id}, {"referral_count": 1, "_id": 0})
-        ref_count    = _ref_user.get("referral_count", 0) if _ref_user else 0
-        _ref_needed  = PREMIUM_REFERRAL_NEEDED if is_premium(user_id) else 5
-        if ref_count < _ref_needed:
-            return jsonify({
-                "status":  "error",
-                "message": f"You need {_ref_needed - ref_count} more referral(s) to unlock withdrawal.",
-            }), 400
-
-    # ── Withdrawal Duplicate Guard — ek pending request hote hue doosra nahi jayega ──
-    _existing_pending = withdrawals_col.find_one({"user_id": user_id, "status": "Pending \u23f3"})
-    if _existing_pending:
-        return jsonify({
-            "status":  "error",
-            "message": "Aapki ek withdrawal request already pending hai. Pehle approve/reject hone ka wait karo.",
-        }), 400
-
-    try:
-        result = users_col.find_one_and_update(
-            {"user_id": user_id, "coins": {"$gte": requested_amount}, "blocked": {"$ne": True}},
-            {"$inc": {"coins": -requested_amount}},
-            return_document=True,
-        )
-        if result is not None:
-            _invalidate_user_cache(user_id)
-        if result is None:
-            user = users_col.find_one({"user_id": user_id})
-            if not user:
-                return jsonify({"status": "error", "message": "User not found."}), 404
-            if user.get("blocked"):
-                return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
-            return jsonify({
-                "status":  "error",
-                "message": f"Insufficient balance. You have {user.get('coins', 0)} coins.",
-            }), 400
-
-        inr_value = requested_amount * 0.02
-
-        METHOD_LABELS = {
-            "upi":           "\U0001f3e6 UPI",
-            "usdt_trc20":    "\U0001f48e USDT TRC20",
-            "google_redeem": "\U0001f381 Google Play",
-        }
-        method_label = METHOD_LABELS.get(method, method)
-
-        now_utc    = datetime.utcnow()
-        IST_OFFSET = timedelta(hours=5, minutes=30)
-        now_ist    = now_utc + IST_OFFSET
-        withdrawal = {
-            "user_id":         user_id,
-            "method":          method,
-            "payment_address": payment_address,
-            "upi_id":          payment_address,
-            "amount":          requested_amount,
-            "inr_value":       inr_value,
-            "status":          "Pending \u23f3",
-            "timestamp":       now_utc,
-            "date":            now_ist.strftime("%d %b %Y, %I:%M %p IST"),
-        }
-        withdrawals_col.insert_one(withdrawal)
-
-        addr_display  = payment_address if payment_address != "via_telegram" else "Telegram DM"
-        tg_username   = result.get("username") or ""
-        username_line = ""
-        if method == "google_redeem":
-            username_line = f"Username: @{tg_username}\n" if tg_username else "Username: _(not set)_\n"
-
-        try:
-            bot.send_message(
-                ADMIN_ID,
-                f"\U0001f4b8 *New Withdrawal Request*\n\n"
-                f"User ID: `{user_id}`\n"
-                f"{username_line}"
-                f"Method: {method_label}\n"
-                f"Address: `{addr_display}`\n"
-                f"Requested: `{requested_amount}` coins (\u20b9{inr_value:.2f})\n"
-                f"Remaining Balance: `{result.get('coins', 0)}` coins\n"
-                f"Date: {withdrawal['date']}",
-                parse_mode="Markdown",
-            )
-        except Exception as notify_exc:
-            logger.warning("Admin notify failed for withdrawal: %s", notify_exc)
-
-        return jsonify({"status": "success", "message": "Withdrawal request submitted successfully!"})
-
-    except Exception as exc:
-        logger.error("withdraw_api critical error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
 
 
@@ -3287,78 +3149,6 @@ def admin_get_users():
         return jsonify({"status": "error", "message": "Server error"}), 500
 
 
-@app.route("/admin/get_withdrawals", methods=["GET"])
-def admin_get_withdrawals():
-    if not check_admin_token(request):
-        return jsonify({"status": "error"}), 401
-    try:
-        status_filter = request.args.get("status", "")
-        query         = {"status": status_filter} if status_filter else {}
-        withdrawals   = list(
-            withdrawals_col.find(query, {"_id": 0}).sort("timestamp", -1).limit(50)
-        )
-        return jsonify({"status": "success", "withdrawals": withdrawals})
-    except Exception as exc:
-        logger.error("admin_get_withdrawals error: %s", exc)
-        return jsonify({"status": "error", "message": "Server error"}), 500
-
-
-@app.route("/admin/approve_withdrawal", methods=["POST"])
-def admin_approve_withdrawal():
-    if not check_admin_token(request):
-        return jsonify({"status": "error"}), 401
-    data = request.json or {}
-    try:
-        uid = int(data.get("user_id", 0))
-    except (ValueError, TypeError):
-        return jsonify({"status": "error", "message": "Invalid user ID"}), 400
-    result = withdrawals_col.update_one(
-        {"user_id": uid, "status": "Pending \u23f3"},
-        {"$set": {"status": "Approved \u2705"}},
-    )
-    if result.modified_count:
-        try:
-            bot.send_message(
-                uid,
-                "\U0001f389 *Your withdrawal has been approved!* Payment is being processed. \u2705",
-                parse_mode="Markdown",
-            )
-        except Exception:
-            pass
-        return jsonify({"status": "success", "message": f"Withdrawal approved for user {uid}"})
-    return jsonify({"status": "error", "message": "No pending withdrawal found"}), 404
-
-
-@app.route("/admin/reject_withdrawal", methods=["POST"])
-def admin_reject_withdrawal():
-    if not check_admin_token(request):
-        return jsonify({"status": "error"}), 401
-    data = request.json or {}
-    try:
-        uid = int(data.get("user_id", 0))
-    except (ValueError, TypeError):
-        return jsonify({"status": "error", "message": "Invalid user ID"}), 400
-    # BUG FIX: Atomic find_and_update — pehle status update karo, phir amount nikalo
-    # Isse double-refund race condition nahi hogi (do requests ek saath nahi kar sakti)
-    withdraw = withdrawals_col.find_one_and_update(
-        {"user_id": uid, "status": "Pending \u23f3"},
-        {"$set": {"status": "Rejected \u274c"}},
-        return_document=False,
-    )
-    if withdraw:
-        amount = int(withdraw.get("amount", withdraw.get("coins", 0)))
-        users_col.update_one({"user_id": uid}, {"$inc": {"coins": amount}})
-        try:
-            bot.send_message(
-                uid,
-                f"\u274c Your withdrawal was rejected. {amount} coins have been refunded.",
-            )
-        except Exception:
-            pass
-        return jsonify({"status": "success", "message": f"Withdrawal rejected, coins refunded to user {uid}"})
-    return jsonify({"status": "error", "message": "No pending withdrawal found"}), 404
-
-
 @app.route("/admin/add_coins", methods=["POST"])
 def admin_add_coins():
     if not check_admin_token(request):
@@ -3711,10 +3501,7 @@ def admin_withdrawals_panel():
         else:
             query = {"status": "Pending \u23f3"}
 
-        rows = list(withdrawals_col.find(query, {"_id": 0}).sort("date", -1).limit(100))
-        for w in rows:
-            if "amount" in w and "coins" not in w:
-                w["coins"] = w["amount"]
+        rows = list(rupee_withdrawals_col.find(query, {"_id": 0}).sort("timestamp", -1).limit(100))
         return jsonify({"status": "success", "withdrawals": rows})
     except Exception as exc:
         logger.error("admin_withdrawals_panel error: %s", exc)
@@ -3735,15 +3522,15 @@ def admin_update_withdrawal():
         return jsonify({"status": "error", "message": "Action must be 'approve' or 'reject'"}), 400
 
     pending_status = "Pending \u23f3"
-    withdraw       = withdrawals_col.find_one({"user_id": uid, "status": pending_status})
+    withdraw       = rupee_withdrawals_col.find_one({"user_id": uid, "status": pending_status})
     if not withdraw:
         return jsonify({"status": "error", "message": "No pending withdrawal found"}), 404
 
     try:
         if action == "approve":
-            withdrawals_col.update_one(
+            rupee_withdrawals_col.update_one(
                 {"user_id": uid, "status": pending_status},
-                {"$set": {"status": "Approved \u2705"}},
+                {"$set": {"status": "Approved \u2705", "approved_at": datetime.utcnow().isoformat()}},
             )
             try:
                 bot.send_message(
@@ -3753,24 +3540,25 @@ def admin_update_withdrawal():
                 )
             except Exception:
                 pass
-            logger.info("Admin panel approved withdrawal for %s", uid)
+            logger.info("Admin panel approved rupee withdrawal for %s", uid)
             return jsonify({"status": "success", "message": f"Withdrawal approved for user {uid}"})
 
-        amount = int(withdraw.get("amount", withdraw.get("coins", 0)))
-        users_col.update_one({"user_id": uid}, {"$inc": {"coins": amount}})
-        withdrawals_col.update_one(
+        amount = float(withdraw.get("amount", 0))
+        users_col.update_one({"user_id": uid}, {"$inc": {"rupees": amount}})
+        _invalidate_user_cache(uid)
+        rupee_withdrawals_col.update_one(
             {"user_id": uid, "status": pending_status},
-            {"$set": {"status": "Rejected \u274c"}},
+            {"$set": {"status": "Rejected \u274c", "rejected_at": datetime.utcnow().isoformat()}},
         )
         try:
             bot.send_message(
                 uid,
-                f"\u274c Your withdrawal was rejected. {amount} coins have been refunded to your balance.",
+                f"\u274c Your withdrawal was rejected. \u20b9{amount:.2f} has been refunded to your wallet.",
             )
         except Exception:
             pass
-        logger.info("Admin panel rejected withdrawal for %s (refund %s)", uid, amount)
-        return jsonify({"status": "success", "message": f"Withdrawal rejected, {amount} coins refunded"})
+        logger.info("Admin panel rejected rupee withdrawal for %s (refund \u20b9%s)", uid, amount)
+        return jsonify({"status": "success", "message": f"Withdrawal rejected, \u20b9{amount:.2f} refunded"})
     except Exception as exc:
         logger.error("admin_update_withdrawal error: %s", exc)
         return jsonify({"status": "error", "message": "Server error"}), 500
@@ -3782,8 +3570,8 @@ def admin_stats():
         return jsonify({"status": "error"}), 401
     try:
         total_users = users_col.count_documents({})
-        pending     = withdrawals_col.count_documents({"status": "Pending \u23f3"})
-        approved    = withdrawals_col.count_documents({"status": "Approved \u2705"})
+        pending     = rupee_withdrawals_col.count_documents({"status": "Pending \u23f3"})
+        approved    = rupee_withdrawals_col.count_documents({"status": "Approved \u2705"})
         agg         = list(users_col.aggregate([
             {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$coins", 0]}}}}
         ]))
@@ -4463,9 +4251,10 @@ def start_mining_api(user_id: int):
             users_col.update_one(
                 {"user_id": user_id},
                 {"$set": {
-                    "mining_start_time": now.isoformat(),
-                    "mining_ads_count":  0,
-                    "mining_ads_date":   "",
+                    "mining_start_time":    now.isoformat(),
+                    "mining_ads_count":     0,
+                    "mining_ads_date":      "",
+                    "mining_reminder_sent": False,
                 }},
             )
             collect_at = now + timedelta(hours=MINING_DURATION_HOURS)
@@ -6797,28 +6586,24 @@ def get_stats(message):
         banned_users  = users_col.count_documents({"blocked": True})
         active_today  = users_col.count_documents({"last_active": str(date.today())})
 
-        # ── Coins currently held by all users ──
+        # ── Coins currently held by all users (coins are tournament-entry-fee
+        # currency only now — never leave the system via withdrawal) ──
         coins_agg = list(users_col.aggregate([
             {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$coins", 0]}}}}
         ]))
         coins_in_wallets = int(coins_agg[0]["total"]) if coins_agg else 0
 
-        # ── Coins paid out via approved withdrawals ──
-        wd_agg = list(withdrawals_col.aggregate([
+        # ── Rupees paid out via approved rupee withdrawals ──
+        rupee_agg = list(rupee_withdrawals_col.aggregate([
             {"$match": {"status": "Approved \u2705"}},
-            {"$group": {"_id": None, "total": {"$sum": {
-                "$ifNull": ["$coins", {"$ifNull": ["$amount", 0]}]
-            }}}}
+            {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$amount", 0]}}}}
         ]))
-        coins_paid_out = int(wd_agg[0]["total"]) if wd_agg else 0
+        rupees_paid_out = float(rupee_agg[0]["total"]) if rupee_agg else 0.0
 
-        # ── Total coins ever generated = held + paid out ──
-        total_coins_generated = coins_in_wallets + coins_paid_out
-
-        # ── Withdrawal counts ──
-        pending_wd  = withdrawals_col.count_documents({"status": "Pending \u23f3"})
-        approved_wd = withdrawals_col.count_documents({"status": "Approved \u2705"})
-        rejected_wd = withdrawals_col.count_documents({"status": "Rejected \u274c"})
+        # ── Rupee withdrawal counts ──
+        pending_wd  = rupee_withdrawals_col.count_documents({"status": "Pending \u23f3"})
+        approved_wd = rupee_withdrawals_col.count_documents({"status": "Approved \u2705"})
+        rejected_wd = rupee_withdrawals_col.count_documents({"status": "Rejected \u274c"})
 
         # ── Top earner ──
         top = users_col.find_one(
@@ -6849,15 +6634,14 @@ def get_stats(message):
             f"  Active Today: `{active_today:,}`\n"
             f"  Banned: `{banned_users}`\n"
             "\n"
-            "\U0001fa99 *Coins*\n"
-            f"  Total Generated: `{total_coins_generated:,}` \U0001fa99\n"
+            "\U0001fa99 *Coins (tournament entry-fee currency)*\n"
             f"  In Wallets: `{coins_in_wallets:,}` \U0001fa99\n"
-            f"  Paid Out: `{coins_paid_out:,}` \U0001fa99\n"
             "\n"
-            "\U0001f4b8 *Withdrawals*\n"
+            "\U0001f4b8 *Rupee Withdrawals*\n"
             f"  Pending: `{pending_wd}`\n"
             f"  Approved: `{approved_wd}`\n"
             f"  Rejected: `{rejected_wd}`\n"
+            f"  Total Paid Out: `\u20b9{rupees_paid_out:,.2f}`\n"
             "\n"
             "\U0001f3c6 *Top Earner*\n"
             f"  {top_name}: `{top_coins:,}` \U0001fa99"
@@ -7299,65 +7083,6 @@ def cache_clear_cmd(message):
     except Exception as exc:
         logger.error("cache_clear command error: %s", exc)
         bot.reply_to(message, "❌ Cache clear failed. Check server logs.")
-
-
-@bot.message_handler(commands=["approve"])
-def approve_withdrawal(message):
-    if int(message.from_user.id) != ADMIN_ID:
-        return
-    parts = message.text.split()
-    if len(parts) < 2:
-        return bot.reply_to(message, "Usage: /approve <user_id>")
-    try:
-        target_id = int(parts[1])
-    except ValueError:
-        return bot.reply_to(message, "Invalid user ID.")
-    result = withdrawals_col.update_one(
-        {"user_id": target_id, "status": "Pending \u23f3"},
-        {"$set": {"status": "Approved \u2705"}},
-    )
-    if result.modified_count:
-        try:
-            bot.send_message(
-                target_id,
-                "\U0001f389 *Your withdrawal has been approved!* Payment is being processed. \u2705",
-                parse_mode="Markdown",
-            )
-        except Exception as notify_exc:
-            logger.warning("Notify failed for approved user %s: %s", target_id, notify_exc)
-        bot.reply_to(message, f"\u2705 User {target_id} withdrawal approved!")
-    else:
-        bot.reply_to(message, "No pending withdrawal found.")
-
-
-@bot.message_handler(commands=["reject"])
-def reject_withdrawal(message):
-    if int(message.from_user.id) != ADMIN_ID:
-        return
-    parts = message.text.split()
-    if len(parts) < 2:
-        return bot.reply_to(message, "Usage: /reject <user_id>")
-    try:
-        target_id = int(parts[1])
-    except ValueError:
-        return bot.reply_to(message, "Invalid user ID.")
-    withdraw = withdrawals_col.find_one_and_update(
-        {"user_id": target_id, "status": "Pending \u23f3"},
-        {"$set": {"status": "Rejected \u274c"}},
-    )
-    if withdraw:
-        users_col.update_one({"user_id": target_id}, {"$inc": {"coins": withdraw["amount"]}})
-        try:
-            bot.send_message(
-                target_id,
-                f"\u274c Your withdrawal was rejected. {withdraw['amount']} coins have been refunded.",
-                parse_mode="Markdown",
-            )
-        except Exception as notify_exc:
-            logger.warning("Notify failed for rejected user %s: %s", target_id, notify_exc)
-        bot.reply_to(message, f"\u274c User {target_id} rejected. Coins refunded.")
-    else:
-        bot.reply_to(message, "No pending withdrawal found.")
 
 
 @bot.message_handler(commands=["addcoins"])
@@ -10110,6 +9835,95 @@ def handle_photo(message):
 
 
 # ============================================================
+# REMINDER SCHEDULER — mining ready + unused daily spins
+# ============================================================
+
+def _send_reminder_safe(user_id: int, text: str) -> bool:
+    try:
+        bot.send_message(user_id, text, parse_mode="Markdown")
+        return True
+    except Exception as exc:
+        logger.debug("Reminder send skipped for %s: %s", user_id, exc)
+        return False
+
+
+def _check_mining_reminders() -> None:
+    """One-time DM when a user's mining session finishes but hasn't been collected yet."""
+    try:
+        now = datetime.utcnow()
+        candidates = users_col.find(
+            {
+                "mining_start_time":   {"$nin": ["", None]},
+                "mining_reminder_sent": {"$ne": True},
+                "blocked":              {"$ne": True},
+            },
+            {"user_id": 1, "mining_start_time": 1},
+        )
+        for u in candidates:
+            try:
+                start = datetime.fromisoformat(u["mining_start_time"])
+            except Exception:
+                continue
+            elapsed = (now - start).total_seconds()
+            if elapsed >= MINING_DURATION_HOURS * 3600:
+                sent = _send_reminder_safe(
+                    u["user_id"],
+                    "\u26cf\ufe0f *Mining complete!*\n\nYour coins are ready to collect \u2014 open the app and tap Mining to claim them before starting a new session.",
+                )
+                if sent:
+                    users_col.update_one({"user_id": u["user_id"]}, {"$set": {"mining_reminder_sent": True}})
+    except Exception as exc:
+        logger.error("_check_mining_reminders error: %s", exc)
+
+
+def _check_daily_spin_reminder() -> None:
+    """Once a day, nudge users who opened the app today but haven't used all free spins."""
+    try:
+        today = str(date.today())
+        cfg = config_col.find_one({"_id": "reminder_state"}) or {}
+        if cfg.get("last_spin_reminder_date") == today:
+            return
+
+        candidates = users_col.find(
+            {"last_active": today, "blocked": {"$ne": True}},
+            {"user_id": 1, "spins_today": 1, "spins_date": 1, "premium": 1},
+        )
+        sent = 0
+        for u in candidates:
+            spins_done  = u.get("spins_today", 0) if u.get("spins_date") == today else 0
+            spins_limit = PREMIUM_SPIN_PER_DAY if u.get("premium") else SPIN_PER_DAY
+            remaining   = spins_limit - spins_done
+            if remaining > 0:
+                if _send_reminder_safe(
+                    u["user_id"],
+                    f"\U0001f3a1 You still have *{remaining}* free spin(s) left today \u2014 don't miss out on free coins!",
+                ):
+                    sent += 1
+
+        config_col.update_one(
+            {"_id": "reminder_state"},
+            {"$set": {"last_spin_reminder_date": today}},
+            upsert=True,
+        )
+        logger.info("Daily spin reminder sent to %s users", sent)
+    except Exception as exc:
+        logger.error("_check_daily_spin_reminder error: %s", exc)
+
+
+def reminder_scheduler_loop() -> None:
+    """Runs on the single active polling instance only (started inside run_bot,
+    after the polling lock is acquired) — avoids duplicate DMs across workers."""
+    time.sleep(60)  # let the bot finish starting up first
+    while True:
+        try:
+            _check_mining_reminders()
+            _check_daily_spin_reminder()
+        except Exception as exc:
+            logger.error("reminder_scheduler_loop error: %s", exc)
+        time.sleep(900)  # every 15 minutes
+
+
+# ============================================================
 # BOT POLLING THREAD
 # ============================================================
 
@@ -10123,6 +9937,7 @@ def run_bot() -> None:
             continue
         stop_event = threading.Event()
         Thread(target=refresh_bot_polling_lock, args=(instance_id, stop_event), daemon=True).start()
+        Thread(target=reminder_scheduler_loop, daemon=True, name="reminder-scheduler").start()
         try:
             try:
                 bot.remove_webhook()
