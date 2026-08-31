@@ -1779,6 +1779,20 @@
             color: #f5c96a !important;
         }
 
+        .badge-tile {
+            display: flex; flex-direction: column; align-items: center; gap: 4px;
+            padding: 10px 4px 8px; border-radius: 12px;
+            background: rgba(255,255,255,0.03); border: 1px solid var(--card-border);
+            text-align: center;
+        }
+        .badge-tile.earned {
+            background: rgba(245,185,66,0.08); border-color: rgba(245,185,66,0.28);
+        }
+        .badge-tile .badge-icon { font-size: 22px; }
+        .badge-tile.locked .badge-icon { filter: grayscale(1); opacity: 0.35; }
+        .badge-tile .badge-name { font-size: 8.5px; font-weight: 700; color: #a1a1aa; line-height: 1.2; }
+        .badge-tile.earned .badge-name { color: #f5c96a; }
+
         .mining-lvl-dot {
             width: 11px; height: 11px; border-radius: 50%;
             display: inline-block;
@@ -1917,6 +1931,15 @@
                     font-size:13px; font-weight:800;
                 ">Save & Claim 100 Coins</button>
             </div>
+        </div>
+
+        <!-- ── Achievement Badges ── -->
+        <div id="badges-card" class="pf-block card" style="padding:16px 16px 14px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">🏅 Achievements</p>
+                <span id="badges-count" style="font-size:9.5px; font-weight:700; background:rgba(139,124,246,0.14); color:#a78bfa; padding:3px 8px; border-radius:20px;">0 / 0</span>
+            </div>
+            <div id="badges-grid" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;"></div>
         </div>
 
         <!-- ── Coins Balance Hero ── -->
@@ -2166,21 +2189,24 @@
                 <div class="intel-body" style="padding:0 18px 14px;">
                     <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Ad Reward</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">5 →</span><span style="font-size:12.5px; font-weight:700; color:#f5c96a;">10 🪙</span></div>
                     <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Daily Spins</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">5 →</span><span style="font-size:12.5px; font-weight:700; color:#f5c96a;">15 / day</span></div>
-                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Min. Withdrawal</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">25,000 →</span><span style="font-size:12.5px; font-weight:700; color:#f5c96a;">10,000 🪙</span></div>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Referrals to Withdraw</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">5 →</span><span style="font-size:12.5px; font-weight:700; color:#f5c96a;">2 Users</span></div>
                     <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">VIP-Only Tasks</p></div><span class="rarity-dot rarity-epic"></span><span style="font-size:12.5px; font-weight:700; color:#f5c96a; margin-left:6px;">Unlocked</span></div>
                 </div>
             </div>
 
-            <!-- ── Cash-Out Rules ── -->
+            <!-- ── Cash-Out Rules (Rupee Wallet) ── -->
             <div class="intel-section" style="border-top:1px solid rgba(255,255,255,0.06);">
                 <div onclick="this.parentElement.classList.toggle('open')" style="display:flex; justify-content:space-between; align-items:center; padding:13px 18px; cursor:pointer;">
                     <span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">💰 Cash-Out Rules</span>
                     <span class="intel-chevron" style="font-size:11px; color:#78737f;">▾</span>
                 </div>
                 <div class="intel-body" style="padding:0 18px 14px;">
-                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Minimum Withdrawal</p></div><span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">25,000 🪙</span></div>
+                    <p style="font-size:10px; color:#78737f; margin:0 0 10px; line-height:1.5;">🪙 Coins are used for tournament entry fees only and can't be withdrawn. Real cash sits in your separate <b style="color:#3dd68c;">Rupee Wallet</b> — credited from tournament prizes and payouts.</p>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Minimum Withdrawal</p></div><span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">₹30</span></div>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Maximum Withdrawal</p></div><span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">₹10,000</span></div>
                     <div class="intel-row"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0; flex:1;" id="help-ref-rule">Referral Requirement: <b style="color:#f5c96a;">5 Users</b></p></div>
-                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Request Cooldown</p></div><span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">24 hours</span></div>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Methods</p></div><span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">UPI · Google Play</span></div>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Pending Requests</p></div><span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">1 at a time</span></div>
                 </div>
             </div>
 
