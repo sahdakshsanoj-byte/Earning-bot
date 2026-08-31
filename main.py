@@ -9099,7 +9099,9 @@ def cmd_round_info(message):
 
 @bot.message_handler(commands=["canceltournament"])
 def cmd_cancel_tournament(message):
-    """Admin: /canceltournament <tournament_id> — Tournament ko cancel/deactivate karo."""
+    """Admin: /canceltournament <tournament_id> — Tournament cancel karo.
+    Saare registered users ko unka entry fee automatically refund hota hai
+    aur DM se notify kiya jaata hai."""
     if int(message.from_user.id) != ADMIN_ID:
         return
     parts = message.text.split()
@@ -9111,24 +9113,61 @@ def cmd_cancel_tournament(message):
         )
     tid = parts[1].strip()
     try:
-        res = tournaments_col.update_one(
-            {"tournament_id": tid, "active": True},
-            {"$set": {"active": False, "status": "completed"}},
-        )
-        if res.matched_count == 0:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
             return bot.reply_to(
                 message,
                 f"❌ Tournament `{tid}` nahi mila ya already inactive hai.\n`/listtournaments` se check karo.",
                 parse_mode="Markdown",
             )
+
+        tournaments_col.update_one(
+            {"tournament_id": tid, "active": True},
+            {"$set": {"active": False, "status": "completed"}},
+        )
+
+        # ── Refund entry fees + notify every registered user ──
+        regs = list(tournament_registrations_col.find(
+            {"tournament_id": tid, "status": {"$ne": "cancelled"}},
+            {"user_id": 1, "entry_fee_paid": 1, "team_id": 1, "_id": 0},
+        ))
+        refunded_users = 0
+        refunded_total = 0
+        for r in regs:
+            uid = r.get("user_id")
+            if not uid:
+                continue
+            fee = int(r.get("entry_fee_paid", 0) or 0)
+            if fee > 0:
+                users_col.update_one({"user_id": uid}, {"$inc": {"coins": fee, "lifetime_earned": fee}})
+                _invalidate_user_cache(uid)
+                refunded_total += fee
+            refunded_users += 1
+            try:
+                bot.send_message(
+                    uid,
+                    f"\u26a0\ufe0f *Tournament Cancelled*\n\n"
+                    f"The tournament `{tid}` ({t.get('title', '')}) has been cancelled by the organizers."
+                    + (f"\n\n\U0001f4b0 Your entry fee of *{fee} coins* has been refunded to your wallet." if fee > 0 else ""),
+                    parse_mode="Markdown",
+                )
+            except Exception as notify_exc:
+                logger.warning("Cancel-tournament notify failed for %s: %s", uid, notify_exc)
+
+        tournament_registrations_col.update_many(
+            {"tournament_id": tid},
+            {"$set": {"status": "cancelled"}},
+        )
+
         bot.reply_to(
             message,
-            f"🚫 *Tournament Cancelled!*\n\n"
+            f"\U0001f6ab *Tournament Cancelled!*\n\n"
             f"🆔 `{tid}` deactivate ho gaya.\n"
+            f"\U0001f4b0 {refunded_users} user(s) ko refund kiya gaya \u2014 total *{refunded_total} coins*.\n\n"
             f"Naya tournament banane ke liye `/createtournament` use karo.",
             parse_mode="Markdown",
         )
-        logger.info("Admin cancelled tournament: %s", tid)
+        logger.info("Admin cancelled tournament %s: refunded %s users, %s coins total", tid, refunded_users, refunded_total)
     except Exception as exc:
         logger.error("cmd_cancel_tournament error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
