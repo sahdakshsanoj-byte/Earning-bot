@@ -400,6 +400,7 @@ def get_feature_config() -> dict:
             # is wajah se frontend mein dono hamesha LOCKED dikhte the
             "web_tasks_active": bool(doc.get("web_tasks_active", True)),
             "premium_active":   bool(doc.get("premium_active",   True)),
+            "in_app_ad_active": bool(doc.get("in_app_ad_active", True)),
             # ── Tournament Lock Mode ──────────────────────────────────────────
             "tournament_lock_active":   bool(doc.get("tournament_lock_active",   False)),
             "tournament_lock_features": list(doc.get("tournament_lock_features", [])),
@@ -408,6 +409,7 @@ def get_feature_config() -> dict:
         merged = {
             "spin_active": True, "mining_active": True, "bomb_box_active": True,
             "web_tasks_active": True, "premium_active": True,  # BUG FIX #1
+            "in_app_ad_active": True,
             "tournament_lock_active": False, "tournament_lock_features": [],
         }
     _feature_cfg_cache      = merged
@@ -6829,6 +6831,34 @@ def toggle_bomb_box(message):
     except Exception as exc:
         logger.error("togglebomb error: %s", exc)
         bot.reply_to(message, "⚠️ Error toggling Bomb Box. Check logs.")
+
+
+@bot.message_handler(commands=["toggleinappad"])
+def toggle_in_app_ad(message):
+    """Admin: /toggleinappad — app khulte hi dikhne wali non-rewarded
+    interstitial ad ko on/off karo."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        cfg = config_col.find_one({"_id": "feature_config"}) or {}
+        current = bool(cfg.get("in_app_ad_active", True))
+        new_val = not current
+        config_col.update_one(
+            {"_id": "feature_config"},
+            {"$set": {"in_app_ad_active": new_val}},
+            upsert=True,
+        )
+        _bust_feature_cache()
+        status = "🟢 *ON*" if new_val else "🔴 *OFF*"
+        bot.reply_to(
+            message,
+            f"📺 App-open Interstitial Ad is now {status}\n\n"
+            f"Toggle again with /toggleinappad",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logger.error("toggleinappad error: %s", exc)
+        bot.reply_to(message, "⚠️ Error toggling in-app ad. Check logs.")
 
 
 
