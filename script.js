@@ -139,8 +139,11 @@ async function preloadMonetagAd() {
 // so failures here must never surface to the user.
 // ============================================================
 let _inAppAdRetries = 0;
-function initInAppInterstitialAd() {
+async function initInAppInterstitialAd() {
     try {
+        const cfg = await getFeatureConfig();
+        if (cfg && cfg.in_app_ad_active === false) return; // admin turned it off via /toggleinappad
+
         if (typeof show_10822310 === 'function') {
             show_10822310({
                 type: 'inApp',
