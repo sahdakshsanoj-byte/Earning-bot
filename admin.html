@@ -173,7 +173,7 @@ input,select,textarea{font-family:var(--body);}
 .main{flex:1;min-width:0;padding:20px 24px 60px;}
 
 .sitboard{
-  display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:22px;
+  display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:22px;
 }
 .gauge{
   background:var(--panel);border:1px solid var(--line);border-radius:9px;
@@ -255,7 +255,7 @@ input,select,textarea{font-family:var(--body);}
   .nav-item{flex-shrink:0;margin-bottom:0;}
   .rail-foot{margin-top:0;padding-top:0;border-top:none;margin-left:auto;flex-shrink:0;padding-left:10px;}
   .main{padding:16px 14px 50px;}
-  .sitboard{grid-template-columns:repeat(2,1fr);}
+  .sitboard{grid-template-columns:repeat(3,1fr);}
   .grid2,.grid3{grid-template-columns:1fr;}
 }
 </style>
@@ -301,6 +301,7 @@ input,select,textarea{font-family:var(--body);}
 
       <div class="sitboard" id="sitboard">
         <div class="gauge"><div class="g-label">Total Ops (Users)</div><div class="g-val mono" id="g-users">—</div></div>
+        <div class="gauge"><div class="g-label">🟢 Live Now</div><div class="g-val teal mono" id="g-live">—</div></div>
         <div class="gauge"><div class="g-label">Coins In Play</div><div class="g-val amber mono" id="g-coins">—</div></div>
         <div class="gauge"><div class="g-label">Pending Payouts</div><div class="g-val mono" id="g-pending">—</div></div>
         <div class="gauge">
@@ -716,6 +717,7 @@ async function refreshSitboard(){
   const stats = await api('/admin/stats');
   if (stats){
     document.getElementById('g-users').textContent = stats.total_users ?? '—';
+    document.getElementById('g-live').textContent = stats.live_now ?? '—';
     document.getElementById('g-coins').textContent = (stats.total_coins ?? 0).toLocaleString();
     document.getElementById('g-pending').textContent = stats.pending ?? '—';
     const pendEl = document.getElementById('g-pending');
