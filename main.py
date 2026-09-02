@@ -1616,6 +1616,28 @@ def get_user_data_api(user_id: int):
         if not user:
             return jsonify({"status": "error", "message": "User not found."}), 404
 
+        # Presence heartbeat — powers "Active Today" stats and the live-users
+        # count. This field was queried in a couple of places but never
+        # actually written anywhere, so both were silently always zero.
+        today = str(date.today())
+        if user.get("last_active") != today:
+            users_col.update_one(
+                {"user_id": user_id},
+                {"$set": {"last_active": today, "last_seen_at": datetime.utcnow().isoformat()}},
+            )
+        else:
+            # Still refresh the precise timestamp for the live-now count,
+            # but only every ~90s per user to avoid a write on every request.
+            last_seen = user.get("last_seen_at")
+            stale = True
+            if last_seen:
+                try:
+                    stale = (datetime.utcnow() - datetime.fromisoformat(last_seen)).total_seconds() > 90
+                except Exception:
+                    stale = True
+            if stale:
+                users_col.update_one({"user_id": user_id}, {"$set": {"last_seen_at": datetime.utcnow().isoformat()}})
+
         is_blocked = bool(user.get("blocked"))
         # BUG FIX: blocked users used to get literally nothing back but
         # {"status":"blocked"} — so even their own Profile tab (coins,
@@ -3572,6 +3594,8 @@ def admin_stats():
         return jsonify({"status": "error"}), 401
     try:
         total_users = users_col.count_documents({})
+        live_cutoff = (datetime.utcnow() - timedelta(minutes=10)).isoformat()
+        live_now    = users_col.count_documents({"last_seen_at": {"$gte": live_cutoff}})
         pending     = rupee_withdrawals_col.count_documents({"status": "Pending \u23f3"})
         approved    = rupee_withdrawals_col.count_documents({"status": "Approved \u2705"})
         agg         = list(users_col.aggregate([
@@ -3581,6 +3605,7 @@ def admin_stats():
         return jsonify({
             "status":       "success",
             "total_users":  total_users,
+            "live_now":     live_now,
             "pending":      pending,
             "approved":     approved,
             "total_coins":  total_coins,
@@ -6588,6 +6613,10 @@ def get_stats(message):
         banned_users  = users_col.count_documents({"blocked": True})
         active_today  = users_col.count_documents({"last_active": str(date.today())})
 
+        # ── Live now — seen within the last 10 minutes ──
+        live_cutoff = (datetime.utcnow() - timedelta(minutes=10)).isoformat()
+        live_now    = users_col.count_documents({"last_seen_at": {"$gte": live_cutoff}})
+
         # ── Coins currently held by all users (coins are tournament-entry-fee
         # currency only now — never leave the system via withdrawal) ──
         coins_agg = list(users_col.aggregate([
@@ -6632,6 +6661,7 @@ def get_stats(message):
             "\n"
             "\U0001f465 *Users*\n"
             f"  Total: `{total_users:,}`\n"
+            f"  \U0001f7e2 Live Now: `{live_now:,}`\n"
             f"  Today Joined: `{today_joined:,}`\n"
             f"  Active Today: `{active_today:,}`\n"
             f"  Banned: `{banned_users}`\n"
@@ -6662,6 +6692,27 @@ def get_stats(message):
     except Exception as exc:
         logger.error("get_stats send error: %s", exc)
         bot.reply_to(message, re.sub(r"[*_`\[\\]", "", text))
+
+
+@bot.message_handler(commands=["liveusers"])
+def cmd_live_users(message):
+    """Admin: /liveusers — kitne users abhi is waqt app khole baithe hain
+    (last 10 minutes mein seen)."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        live_cutoff = (datetime.utcnow() - timedelta(minutes=10)).isoformat()
+        live_now    = users_col.count_documents({"last_seen_at": {"$gte": live_cutoff}})
+        active_today = users_col.count_documents({"last_active": str(date.today())})
+        bot.reply_to(
+            message,
+            f"\U0001f7e2 *Live Right Now:* `{live_now:,}` users\n"
+            f"\U0001f4c5 *Active Today:* `{active_today:,}` users",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logger.error("cmd_live_users error: %s", exc)
+        bot.reply_to(message, "\u26a0\ufe0f Error fetching live user count.")
 
 
 @bot.message_handler(commands=["monetag"])
@@ -9979,17 +10030,20 @@ def _check_daily_spin_reminder() -> None:
         logger.error("_check_daily_spin_reminder error: %s", exc)
 
 
-def reminder_scheduler_loop() -> None:
+def reminder_scheduler_loop(stop_event: threading.Event) -> None:
     """Runs on the single active polling instance only (started inside run_bot,
-    after the polling lock is acquired) — avoids duplicate DMs across workers."""
-    time.sleep(60)  # let the bot finish starting up first
-    while True:
+    after the polling lock is acquired) — avoids duplicate DMs across workers.
+    Accepts the same stop_event as refresh_bot_polling_lock so it actually
+    stops when polling restarts, instead of leaking a new thread on every
+    reconnect (each doing its own DB scan + duplicate reminder sends)."""
+    if stop_event.wait(60):  # let the bot finish starting up first
+        return
+    while not stop_event.wait(900):  # every 15 minutes
         try:
             _check_mining_reminders()
             _check_daily_spin_reminder()
         except Exception as exc:
             logger.error("reminder_scheduler_loop error: %s", exc)
-        time.sleep(900)  # every 15 minutes
 
 
 # ============================================================
@@ -9999,6 +10053,7 @@ def reminder_scheduler_loop() -> None:
 def run_bot() -> None:
     instance_id = f"{os.getenv('RENDER_INSTANCE_ID') or os.getenv('HOSTNAME') or os.getpid()}-{int(time.time())}"
     logger.info("Starting Telegram bot polling worker: %s", instance_id)
+    commands_registered = False
     while True:
         if not acquire_bot_polling_lock(instance_id):
             logger.warning("Another bot polling instance is already active. Retrying in 30s...")
@@ -10006,61 +10061,65 @@ def run_bot() -> None:
             continue
         stop_event = threading.Event()
         Thread(target=refresh_bot_polling_lock, args=(instance_id, stop_event), daemon=True).start()
-        Thread(target=reminder_scheduler_loop, daemon=True, name="reminder-scheduler").start()
+        Thread(target=reminder_scheduler_loop, args=(stop_event,), daemon=True, name="reminder-scheduler").start()
         try:
             try:
                 bot.remove_webhook()
             except Exception as webhook_exc:
                 logger.warning("Could not remove webhook before polling: %s", webhook_exc)
-            # ── Register bot commands in Telegram menu ──
-            try:
-                # User-facing commands (visible to everyone)
-                user_commands = [
-                    types.BotCommand("start",   "🚀 Start the bot"),
-                    types.BotCommand("balance", "💰 Check your balance"),
-                    types.BotCommand("premium", "👑 Premium status & benefits"),
-                    types.BotCommand("redeem",  "🎟 Redeem a promo code"),
-                ]
-                bot.set_my_commands(
-                    user_commands,
-                    scope=types.BotCommandScopeDefault()
-                )
+            # ── Register bot commands in Telegram menu (once — no need to
+            # re-register on every reconnect if a transient network blip
+            # restarts polling; saves 2 Telegram API calls per restart) ──
+            if not commands_registered:
+                try:
+                    # User-facing commands (visible to everyone)
+                    user_commands = [
+                        types.BotCommand("start",   "🚀 Start the bot"),
+                        types.BotCommand("balance", "💰 Check your balance"),
+                        types.BotCommand("premium", "👑 Premium status & benefits"),
+                        types.BotCommand("redeem",  "🎟 Redeem a promo code"),
+                    ]
+                    bot.set_my_commands(
+                        user_commands,
+                        scope=types.BotCommandScopeDefault()
+                    )
 
-                # Admin-only commands (visible only to admin in their chat)
-                admin_commands = user_commands + [
-                    types.BotCommand("stats",            "📊 Bot stats"),
-                    types.BotCommand("monetag",          "💵 Monetag earnings"),
-                    types.BotCommand("setpremium",       "👑 Activate premium for user"),
-                    types.BotCommand("removepremium",    "❌ Remove premium from user"),
-                    types.BotCommand("listtournaments",        "📋 List all tournaments"),
-                    types.BotCommand("createtournament",       "➕ Create tournament"),
-                    types.BotCommand("startround",             "▶️ Start next round"),
-                    types.BotCommand("endround",               "⏹ End current round"),
-                    types.BotCommand("nextround",              "⏩ End + Start next round"),
-                    types.BotCommand("addresult",              "📝 Add team round result"),
-                    types.BotCommand("tournamentleaderboard",  "📊 View leaderboard"),
-                    types.BotCommand("roundresults",           "📋 View round results"),
-                    types.BotCommand("finishtournament",       "🏁 Finish & declare winners"),
-                    types.BotCommand("setprizes",              "🏆 Set tournament prizes"),
-                    types.BotCommand("broadcast",        "📢 Broadcast message to all users"),
-                    types.BotCommand("addtask",          "✅ Add a task"),
-                    types.BotCommand("deltask",          "🗑 Delete a task"),
-                    types.BotCommand("resetdevice",      "🔄 Reset user device lock"),
-                    types.BotCommand("ban",              "🚫 Ban a user"),
-                    types.BotCommand("unban",            "✅ Unban a user"),
-                    types.BotCommand("setbalance",       "💰 Set user balance"),
-                    types.BotCommand("addpromo",         "🎟 Add promo code"),
-                    types.BotCommand("delpromo",         "🗑 Delete promo code"),
-                    types.BotCommand("server_stats",     "⚡ Cache & server stats"),
-                    types.BotCommand("cache_clear",      "🗑 Flush all in-memory caches"),
-                ]
-                bot.set_my_commands(
-                    admin_commands,
-                    scope=types.BotCommandScopeChat(chat_id=ADMIN_ID)
-                )
-                logger.info("Bot commands registered successfully.")
-            except Exception as cmd_exc:
-                logger.warning("Could not set bot commands: %s", cmd_exc)
+                    # Admin-only commands (visible only to admin in their chat)
+                    admin_commands = user_commands + [
+                        types.BotCommand("stats",            "📊 Bot stats"),
+                        types.BotCommand("monetag",          "💵 Monetag earnings"),
+                        types.BotCommand("setpremium",       "👑 Activate premium for user"),
+                        types.BotCommand("removepremium",    "❌ Remove premium from user"),
+                        types.BotCommand("listtournaments",        "📋 List all tournaments"),
+                        types.BotCommand("createtournament",       "➕ Create tournament"),
+                        types.BotCommand("startround",             "▶️ Start next round"),
+                        types.BotCommand("endround",               "⏹ End current round"),
+                        types.BotCommand("nextround",              "⏩ End + Start next round"),
+                        types.BotCommand("addresult",              "📝 Add team round result"),
+                        types.BotCommand("tournamentleaderboard",  "📊 View leaderboard"),
+                        types.BotCommand("roundresults",           "📋 View round results"),
+                        types.BotCommand("finishtournament",       "🏁 Finish & declare winners"),
+                        types.BotCommand("setprizes",              "🏆 Set tournament prizes"),
+                        types.BotCommand("broadcast",        "📢 Broadcast message to all users"),
+                        types.BotCommand("addtask",          "✅ Add a task"),
+                        types.BotCommand("deltask",          "🗑 Delete a task"),
+                        types.BotCommand("resetdevice",      "🔄 Reset user device lock"),
+                        types.BotCommand("ban",              "🚫 Ban a user"),
+                        types.BotCommand("unban",            "✅ Unban a user"),
+                        types.BotCommand("setbalance",       "💰 Set user balance"),
+                        types.BotCommand("addpromo",         "🎟 Add promo code"),
+                        types.BotCommand("delpromo",         "🗑 Delete promo code"),
+                        types.BotCommand("server_stats",     "⚡ Cache & server stats"),
+                        types.BotCommand("cache_clear",      "🗑 Flush all in-memory caches"),
+                    ]
+                    bot.set_my_commands(
+                        admin_commands,
+                        scope=types.BotCommandScopeChat(chat_id=ADMIN_ID)
+                    )
+                    logger.info("Bot commands registered successfully.")
+                    commands_registered = True
+                except Exception as cmd_exc:
+                    logger.warning("Could not set bot commands: %s", cmd_exc)
             bot.polling(none_stop=True, interval=1, timeout=20)
         except Exception as exc:
             error_text = str(exc)
