@@ -116,6 +116,7 @@ try:
     sponsor_clicks_col        = db["sponsor_clicks"]
     promos_col                = db["promos"]
     support_messages_col      = db["support_messages"]
+    inbox_col                 = db["inbox_messages"]
     ad_reward_tokens_col      = db["ad_reward_tokens"]
     code_filter_rules_col     = db["code_filter_rules"]
     group_code_violations_col = db["group_code_violations"]
@@ -150,6 +151,9 @@ try:
         promos_col.create_index("code", unique=True, **_idx_opts)
         support_messages_col.create_index("user_id", **_idx_opts)
         support_messages_col.create_index("created_at", **_idx_opts)
+        inbox_col.create_index("user_id", **_idx_opts)
+        inbox_col.create_index("type", **_idx_opts)
+        inbox_col.create_index("created_at", **_idx_opts)
         code_filter_rules_col.create_index("pattern", unique=True, **_idx_opts)
         group_code_violations_col.create_index(
             [("chat_id", 1), ("user_id", 1)], unique=True, **_idx_opts
@@ -1526,6 +1530,7 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
                 "lifetime_earned":        0,
                 "mining_reminder_sent":   False,
                 "badges_earned":          [],
+                "inbox_last_read_at":     "",
                 "age":                    None,
                 "gender":                 None,
                 "profile_completed":      False,
@@ -1599,6 +1604,53 @@ STATS_CACHE_TTL          = 60
 @app.route("/")
 def home():
     return jsonify({"status": "ok", "message": "Bot is Running Live!"})
+
+
+@app.route("/get_inbox/<int:user_id>")
+def get_inbox_api(user_id: int):
+    """Personal messages for this user + broadcast/event messages for everyone,
+    newest first."""
+    try:
+        docs = list(inbox_col.find(
+            {"$or": [{"type": "personal", "user_id": user_id}, {"type": {"$in": ["broadcast", "event"]}}]},
+            {"_id": 0},
+        ).sort("created_at", -1).limit(50))
+        return jsonify({"status": "success", "messages": docs})
+    except Exception as exc:
+        logger.error("get_inbox_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/inbox_unread_count/<int:user_id>")
+def inbox_unread_count_api(user_id: int):
+    try:
+        user = users_col.find_one({"user_id": user_id}, {"inbox_last_read_at": 1})
+        last_read = (user or {}).get("inbox_last_read_at") or ""
+        query = {"$or": [{"type": "personal", "user_id": user_id}, {"type": {"$in": ["broadcast", "event"]}}]}
+        if last_read:
+            query["created_at"] = {"$gt": last_read}
+        count = inbox_col.count_documents(query)
+        return jsonify({"status": "success", "unread": count})
+    except Exception as exc:
+        logger.error("inbox_unread_count_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "success", "unread": 0})
+
+
+@app.route("/mark_inbox_read", methods=["POST"])
+def mark_inbox_read_api():
+    try:
+        data    = request.get_json(force=True) or {}
+        user_id = int(data.get("user_id", 0))
+        if not user_id:
+            return jsonify({"status": "error", "message": "Invalid user."}), 400
+        users_col.update_one(
+            {"user_id": user_id},
+            {"$set": {"inbox_last_read_at": datetime.utcnow().isoformat()}},
+        )
+        return jsonify({"status": "success"})
+    except Exception as exc:
+        logger.error("mark_inbox_read_api error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
 
 
 @app.route("/get_user/<int:user_id>")
@@ -7265,6 +7317,14 @@ def broadcast(message):
             time.sleep(0.05)
         except Exception:
             failed += 1
+    try:
+        inbox_col.insert_one({
+            "type":       "broadcast",
+            "message":    msg_text,
+            "created_at": datetime.utcnow().isoformat(),
+        })
+    except Exception as exc:
+        logger.warning("inbox broadcast save failed: %s", exc)
     bot.reply_to(message, f"\U0001f4e2 Sent: {sent} | Failed: {failed}")
 
 
@@ -7292,6 +7352,14 @@ def broadcast_photo(message):
             time.sleep(0.05)
         except Exception:
             failed += 1
+    try:
+        inbox_col.insert_one({
+            "type":       "broadcast",
+            "message":    (msg_text or "📷 Photo announcement — open Telegram to view the image."),
+            "created_at": datetime.utcnow().isoformat(),
+        })
+    except Exception as exc:
+        logger.warning("inbox photo-broadcast save failed: %s", exc)
     bot.reply_to(message, f"\U0001f4e2\U0001f4f7 Photo broadcast sent: {sent} | Failed: {failed}")
 
 
@@ -7315,6 +7383,15 @@ def send_personal_message_cmd(message):
             f"\U0001f4e9 *Message from Admin:*\n\n{text}",
             parse_mode="Markdown",
         )
+        try:
+            inbox_col.insert_one({
+                "type":       "personal",
+                "user_id":    target_id,
+                "message":    text,
+                "created_at": datetime.utcnow().isoformat(),
+            })
+        except Exception as exc:
+            logger.warning("inbox personal-msg save failed: %s", exc)
         bot.reply_to(message, f"\u2705 Message sent to User {target_id}!")
         logger.info("Admin sent personal message to user %s.", target_id)
     except Exception as exc:
