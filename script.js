@@ -3673,6 +3673,96 @@ let _tournamentCache    = {};          // { tid: { tournament, winners, ts } }
 let _tournamentRegCache = {};          // { tid: regData }
 const TOURNAMENT_CACHE_TTL = 60 * 1000;
 
+function openInbox() {
+    const modal = document.getElementById('inbox-modal');
+    if (!modal) return;
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    loadInboxMessages();
+}
+
+function closeInbox() {
+    const modal = document.getElementById('inbox-modal');
+    if (!modal) return;
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+function _inboxIconFor(type) {
+    if (type === 'broadcast') return '📢';
+    if (type === 'event')     return '🏆';
+    return '📩';
+}
+
+function _inboxTimeAgo(iso) {
+    try {
+        const diffMs = Date.now() - new Date(iso).getTime();
+        const mins = Math.floor(diffMs / 60000);
+        if (mins < 1)   return 'just now';
+        if (mins < 60)  return `${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24)   return `${hrs}h ago`;
+        const days = Math.floor(hrs / 24);
+        return `${days}d ago`;
+    } catch (e) { return ''; }
+}
+
+async function loadInboxMessages() {
+    const list = document.getElementById('inbox-list');
+    if (!list || !userId) return;
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_inbox/${userId}`);
+        const data = await res.json();
+        const msgs = (data && data.messages) || [];
+
+        if (!msgs.length) {
+            list.innerHTML = '<div style="text-align:center; padding:40px 16px; color:#78737f; font-size:12.5px;">📭 No messages yet.</div>';
+        } else {
+            list.innerHTML = msgs.map(m => `
+                <div style="display:flex; gap:10px; padding:12px 4px; border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <span style="font-size:18px; flex-shrink:0;">${_inboxIconFor(m.type)}</span>
+                    <div style="flex:1; min-width:0;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                            <span style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:${m.type==='broadcast'?'#a78bfa':m.type==='event'?'#f5c96a':'#3dd68c'};">${m.type === 'broadcast' ? 'Announcement' : m.type === 'event' ? 'Event' : 'From Admin'}</span>
+                            <span style="font-size:9.5px; color:#5c5763; flex-shrink:0;">${_inboxTimeAgo(m.created_at)}</span>
+                        </div>
+                        <p style="font-size:12.5px; color:#e8e6ec; margin:3px 0 0; line-height:1.45; white-space:pre-wrap; word-break:break-word;">${(m.message||'').replace(/</g,'&lt;')}</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Mark read + hide badge
+        const dot = document.getElementById('inbox-dot');
+        if (dot) dot.style.display = 'none';
+        fetch(`${CONFIG.API_BASE_URL}/mark_inbox_read`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId }),
+        }).catch(() => {});
+    } catch (e) {
+        list.innerHTML = '<div style="text-align:center; padding:40px 16px; color:#78737f; font-size:12.5px;">⚠️ Could not load inbox.</div>';
+    }
+}
+
+async function checkInboxUnread() {
+    if (!userId) return;
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/inbox_unread_count/${userId}`);
+        const data = await res.json();
+        const dot  = document.getElementById('inbox-dot');
+        if (dot) dot.style.display = (data && data.unread > 0) ? 'block' : 'none';
+    } catch (e) { /* silent — badge just won't show this cycle */ }
+}
+
+document.addEventListener('click', function(e) {
+    const modal = document.getElementById('inbox-modal');
+    const box   = modal ? modal.firstElementChild : null;
+    if (modal && modal.style.display === 'block' && box && !box.contains(e.target) && e.target.id !== 'inbox-mail-btn') {
+        closeInbox();
+    }
+});
+
 function openTournamentHub(e) {
     if (e) e.stopPropagation();
     const modal = document.getElementById('tournament-modal');
@@ -5154,12 +5244,14 @@ window.addEventListener('DOMContentLoaded', () => {
     renderSponsorSlots({}, [], {});
     fetchLiveData();
     checkDevice();
+    checkInboxUnread();
     preloadMonetagAd();
     applyReferralLock();
     initInAppInterstitialAd();
 
     setInterval(fetchLiveData,      300000);  // data refresh every 5 min
     setInterval(refreshLeaderboard, 600000);  // leaderboard refresh every 10 min
+    setInterval(checkInboxUnread,   120000);  // inbox badge check every 2 min
 
     // Tournament: silently load status + show dot indicator
     setTimeout(_initTournamentIndicator, 2000);
