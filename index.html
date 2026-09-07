@@ -945,11 +945,40 @@
     <div class="header" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px;">
         <h3 id="tab-title">Rewards</h3>
         <div style="display:flex; gap:15px; align-items:center;">
+            <div onclick="openInbox()" id="inbox-mail-btn" style="cursor:pointer; font-size:20px; position:relative;" title="Inbox">
+                ✉️
+                <span id="inbox-dot" style="display:none; position:absolute; top:-2px; right:-2px; width:7px; height:7px; background:#ef4444; border-radius:50%; border:1.5px solid #0a0e1a;"></span>
+            </div>
             <div onclick="openTournamentHub(event)" id="tournament-trophy-btn" style="cursor:pointer; font-size:20px; position:relative;" title="Tournament Hub">
                 🏆
                 <span id="t-trophy-dot" style="display:none; position:absolute; top:-2px; right:-2px; width:7px; height:7px; background:#ef4444; border-radius:50%; border:1.5px solid #0a0e1a;"></span>
             </div>
             <div onclick="openPublicLeaderboard()" id="lb-crown-btn" style="cursor:pointer; font-size:20px;" title="Tournament Leaderboard">👑</div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         INBOX MODAL
+         ═══════════════════════════════════════════ -->
+    <div id="inbox-modal" style="display:none; position:fixed; inset:0; z-index:99998; background:rgba(5,7,10,0.88); backdrop-filter:blur(6px);">
+        <div style="max-width:480px; margin:0 auto; height:100%; display:flex; flex-direction:column;">
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:16px 18px; border-bottom:1px solid rgba(255,255,255,0.08); flex-shrink:0;">
+                <h3 style="font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; color:#f5f0e8; margin:0;">✉️ Inbox</h3>
+                <span onclick="closeInbox()" style="font-size:22px; color:#78737f; cursor:pointer; padding:4px 8px;">✕</span>
+            </div>
+
+            <div id="inbox-list" style="flex:1; overflow-y:auto; padding:14px 16px;">
+                <div style="text-align:center; padding:40px 16px; color:#78737f; font-size:12.5px;">Loading…</div>
+            </div>
+
+            <!-- Support card — always pinned at bottom -->
+            <div style="flex-shrink:0; padding:14px 16px; border-top:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.02);">
+                <div style="background:rgba(139,124,246,0.08); border:1px solid rgba(139,124,246,0.22); border-radius:14px; padding:12px 14px;">
+                    <p style="font-size:12.5px; font-weight:700; color:#e8e6ec; margin:0 0 2px;">💬 Need Help?</p>
+                    <p style="font-size:10.5px; color:#8f8a99; margin:0 0 10px; line-height:1.4;">Any questions or issues? Contact support directly.</p>
+                    <a href="https://t.me/cdotern_help" target="_blank" style="display:block; text-align:center; text-decoration:none; padding:9px; border-radius:10px; background:linear-gradient(135deg,#a78bfa,#8b5cf6); color:#fff; font-size:12.5px; font-weight:700;">📩 Message @cdotern_help</a>
+                </div>
+            </div>
         </div>
     </div>
 
