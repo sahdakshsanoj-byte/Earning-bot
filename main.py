@@ -7247,8 +7247,17 @@ def cmd_edit_profile(message):
 def broadcast(message):
     if int(message.from_user.id) != ADMIN_ID:
         return
-    msg_text = message.text.replace("/broadcast ", "", 1)
-    if not msg_text or msg_text == "/broadcast":
+    # BUG FIX: the old code did message.text.replace("/broadcast ", "", 1) —
+    # this only matched an exact "/broadcast" + single space. A multi-line
+    # message (command on its own line) or Telegram appending "@botname" to
+    # the command (common when a client autocompletes it) meant the replace
+    # silently did nothing, and "/broadcast" (or "/broadcast@name") leaked
+    # into the actual message sent to every user. split(maxsplit=1) strips
+    # the command correctly regardless of what follows it or which
+    # whitespace character separates them.
+    parts    = message.text.split(maxsplit=1)
+    msg_text = parts[1].strip() if len(parts) > 1 else ""
+    if not msg_text:
         return bot.reply_to(
             message,
             "Usage: `/broadcast <message>`\n\n"
@@ -7260,7 +7269,19 @@ def broadcast(message):
     sent = failed = 0
     for u in all_users:
         try:
-            bot.send_message(u["user_id"], msg_text, parse_mode="Markdown")
+            try:
+                bot.send_message(u["user_id"], msg_text, parse_mode="Markdown")
+            except telebot.apihelper.ApiTelegramException as md_exc:
+                # BUG FIX: a single unbalanced _ / * / ` / [ anywhere in the
+                # admin's message makes Telegram reject Markdown parsing —
+                # and since every user gets the exact same broken text, this
+                # failed identically for ALL of them ("Sent: 0 | Failed: N")
+                # with no indication of why. Retry as plain text so a stray
+                # character doesn't silently kill the entire broadcast.
+                if "can't parse entities" in str(md_exc).lower():
+                    bot.send_message(u["user_id"], msg_text)
+                else:
+                    raise
             sent += 1
             time.sleep(0.05)
         except Exception:
@@ -7276,18 +7297,28 @@ def broadcast_photo(message):
         return
     caption  = (message.caption or "").strip()
     msg_text = caption[len("/broadcast"):].strip()  # caption ke baad ka text — empty ho sakta hai
+    if msg_text.startswith("@"):
+        # Telegram sometimes appends @botname to a command — strip it too
+        msg_text = msg_text.split(None, 1)[1].strip() if " " in msg_text else ""
     file_id  = message.photo[-1].file_id  # highest resolution
 
     all_users = list(users_col.find({}, {"user_id": 1}))
     sent = failed = 0
     for u in all_users:
         try:
-            bot.send_photo(
-                u["user_id"],
-                file_id,
-                caption=msg_text or None,
-                parse_mode="Markdown" if msg_text else None,
-            )
+            try:
+                bot.send_photo(
+                    u["user_id"],
+                    file_id,
+                    caption=msg_text or None,
+                    parse_mode="Markdown" if msg_text else None,
+                )
+            except telebot.apihelper.ApiTelegramException as md_exc:
+                # Same Markdown-crash protection as the text /broadcast command.
+                if msg_text and "can't parse entities" in str(md_exc).lower():
+                    bot.send_photo(u["user_id"], file_id, caption=msg_text)
+                else:
+                    raise
             sent += 1
             time.sleep(0.05)
         except Exception:
