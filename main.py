@@ -1696,6 +1696,26 @@ def get_user_data_api(user_id: int):
 
         promo_task_completions = user.get("promo_task_completions", [])
 
+        # ── Spin / Mining / Bomb Box "done today" status — used by the
+        # All-Tasks-Bonus checklist on the frontend ──
+        spins_date_v  = user.get("spins_date", "")
+        spins_today_v = user.get("spins_today", 0) if spins_date_v == today else 0
+
+        last_collect_v = user.get("last_mining_collect", "")
+        mined_today_v  = False
+        if last_collect_v:
+            try:
+                mined_today_v = datetime.fromisoformat(last_collect_v).date().isoformat() == today
+            except ValueError:
+                pass
+
+        today_start_epoch_v = datetime.combine(date.today(), datetime.min.time()).timestamp()
+        bombbox_today_v = bool(bomb_box_col.find_one({
+            "user_id":   user_id,
+            "played":    True,
+            "timestamp": {"$gte": today_start_epoch_v},
+        }))
+
         # Achievement badges — compute freshest premium status for the check
         _badge_user = dict(user)
         _badge_user["premium"] = is_premium(user_id)
@@ -1713,6 +1733,10 @@ def get_user_data_api(user_id: int):
             "referred_by":            user.get("referred_by", ""),
             "rupees":                 round(float(user.get("rupees", 0.0)), 2),
             "mining_level":           int(user.get("mining_level", 1)),
+            "spins_today":            spins_today_v,
+            "spin_limit_today":       (PREMIUM_SPIN_PER_DAY if is_premium(user_id) else SPIN_PER_DAY),
+            "mined_today":            mined_today_v,
+            "bombbox_played_today":   bombbox_today_v,
             "ads_today":              ads_today,
             "total_ads_today":        total_ads_today,
             "tournament_count":       tournament_count,
