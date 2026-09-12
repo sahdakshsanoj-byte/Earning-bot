@@ -954,6 +954,22 @@
     </div>
 
     <!-- ═══════════════════════════════════════════
+         TOURNAMENT ENTRIES MODAL
+         ═══════════════════════════════════════════ -->
+    <div id="entries-modal" style="display:none; position:fixed; inset:0; z-index:99997; background:rgba(5,7,10,0.90); backdrop-filter:blur(6px);">
+        <div style="max-width:480px; margin:0 auto; height:100%; display:flex; flex-direction:column;">
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:16px 18px; border-bottom:1px solid rgba(255,255,255,0.08); flex-shrink:0;">
+                <div>
+                    <h3 style="font-size:16px; font-weight:800; color:#e2e8f0; margin:0;">📋 Registered Entries</h3>
+                    <p id="entries-count-label" style="font-size:11px; color:#64748b; margin:3px 0 0;">Loading…</p>
+                </div>
+                <span onclick="closeTournamentEntries()" style="font-size:22px; color:#78737f; cursor:pointer; padding:4px 8px;">✕</span>
+            </div>
+            <div id="entries-list" style="flex:1; overflow-y:auto; padding:10px 16px;"></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
          TOURNAMENT HUB MODAL
          ═══════════════════════════════════════════ -->
     <div id="tournament-modal">
@@ -1794,6 +1810,28 @@
         .badge-tile .badge-name { font-size: 8.5px; font-weight: 700; color: #a1a1aa; line-height: 1.2; }
         .badge-tile.earned .badge-name { color: #f5c96a; }
 
+        .ls-tile {
+            flex: 1; position: relative; border-radius: 14px; overflow: hidden;
+            border: 1px solid var(--card-border); background: rgba(255,255,255,0.03);
+            padding: 12px 8px 10px; text-align: center;
+        }
+        .ls-tile.claimed { background: rgba(61,214,140,0.08); border-color: rgba(61,214,140,0.3); }
+        .ls-tile.unlocked { background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.35); }
+        .ls-tile .ls-days { font-size: 9px; color: #78737f; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+        .ls-tile .ls-amount { font-size: 17px; font-weight: 800; color: #e8e6ec; margin: 4px 0; font-family: 'Space Grotesk', sans-serif; }
+        .ls-tile .ls-btn {
+            width: 100%; margin-top: 4px; padding: 6px 4px; border: none; border-radius: 8px;
+            font-size: 10px; font-weight: 700; cursor: pointer;
+        }
+        .ls-tile .ls-btn.claim { background: linear-gradient(135deg,#f5c96a,#c8912e); color: #2a1c02; }
+        .ls-tile .ls-btn.done  { background: rgba(61,214,140,0.16); color: #3dd68c; cursor: default; }
+        .ls-tile.locked .ls-locked-overlay {
+            position: absolute; inset: 0; backdrop-filter: blur(5px); background: rgba(10,10,12,0.45);
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+        }
+        .ls-tile.locked .ls-locked-overlay .ls-lock-icon { font-size: 18px; }
+        .ls-tile.locked .ls-locked-overlay .ls-progress { font-size: 9.5px; font-weight: 700; color: #d1d1d6; }
+
         .mining-lvl-dot {
             width: 11px; height: 11px; border-radius: 50%;
             display: inline-block;
@@ -1941,6 +1979,16 @@
                 <span id="badges-count" style="font-size:9.5px; font-weight:700; background:rgba(139,124,246,0.14); color:#a78bfa; padding:3px 8px; border-radius:20px;">0 / 0</span>
             </div>
             <div id="badges-grid" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;"></div>
+        </div>
+
+        <!-- ── Login Streak Rewards (Rupee milestones) ── -->
+        <div id="login-streak-card" class="pf-block card" style="padding:16px 16px 14px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">🔥 Login Streak Rewards</p>
+                <span id="login-streak-count" style="font-size:9.5px; font-weight:700; background:rgba(245,158,11,0.14); color:#f59e0b; padding:3px 8px; border-radius:20px;">Day 0</span>
+            </div>
+            <p style="font-size:10px; color:#5c5763; margin:0 0 12px;">Claim your daily "All Tasks Complete" bonus every day to keep the streak alive. Miss a day and it resets to 0.</p>
+            <div id="login-streak-grid" style="display:flex; gap:10px;"></div>
         </div>
 
         <!-- ── Coins Balance Hero ── -->
@@ -2902,4 +2950,4 @@
          are handled directly in script.js — no inline patch needed. -->
 
 </body>
-</html>
+</html> 
