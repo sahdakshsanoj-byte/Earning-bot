@@ -2577,9 +2577,12 @@ function updateAllBonusUI(data) {
     const adsToday = (adsDate === today) ? (data.ads_today || 0) : 0;
     const adsFull  = adsToday >= MAX_ADS_PER_DAY;
 
-    const completed = data.completed_tasks || [];
-    const ytDone    = ['yt1','yt2','yt3'].filter(t => completed.includes(t)).length;
-    const webDone   = ['web1','web2','web3'].filter(t => completed.includes(t)).length;
+    const spinLimit = data.spin_limit_today || 5;
+    const spinsDone = data.spins_today || 0;
+    const spinFull  = spinsDone >= spinLimit;
+
+    const miningDone  = !!data.mined_today;
+    const bombboxDone = !!data.bombbox_played_today;
 
     const alreadyClaimed = (data.allcomplete_bonus_date || '') === today;
 
@@ -2587,21 +2590,21 @@ function updateAllBonusUI(data) {
         const el = document.getElementById(id);
         if (el) el.textContent = done ? '✅' : '⬜';
     };
-    setCheck('check-daily', dailyDone);
-    setCheck('check-ads',   adsFull);
-    setCheck('check-yt',    ytDone  >= MAX_YT_PER_DAY);
-    setCheck('check-web',   webDone >= MAX_WEB_PER_DAY);
+    setCheck('check-daily',   dailyDone);
+    setCheck('check-ads',     adsFull);
+    setCheck('check-spin',    spinFull);
+    setCheck('check-mining',  miningDone);
+    setCheck('check-bombbox', bombboxDone);
 
     const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
-    setText('allbonus-ads-count', `(${Math.min(adsToday, MAX_ADS_PER_DAY)}/${MAX_ADS_PER_DAY})`);
-    setText('allbonus-yt-count',  `(${ytDone}/${MAX_YT_PER_DAY})`);
-    setText('allbonus-web-count', `(${webDone}/${MAX_WEB_PER_DAY})`);
+    setText('allbonus-ads-count',  `(${Math.min(adsToday, MAX_ADS_PER_DAY)}/${MAX_ADS_PER_DAY})`);
+    setText('allbonus-spin-count', `(${Math.min(spinsDone, spinLimit)}/${spinLimit})`);
 
-    const doneCount = [dailyDone, adsFull, ytDone >= MAX_YT_PER_DAY, webDone >= MAX_WEB_PER_DAY].filter(Boolean).length;
+    const doneCount = [dailyDone, adsFull, spinFull, miningDone, bombboxDone].filter(Boolean).length;
     const badge = document.getElementById('allbonus-status-badge');
-    if (badge) badge.textContent = `${doneCount}/4`;
+    if (badge) badge.textContent = `${doneCount}/5`;
 
-    const allDone = dailyDone && adsFull && ytDone >= MAX_YT_PER_DAY && webDone >= MAX_WEB_PER_DAY;
+    const allDone = dailyDone && adsFull && spinFull && miningDone && bombboxDone;
     const btn = document.getElementById('allbonus-btn');
     if (!btn) return;
 
@@ -2610,7 +2613,7 @@ function updateAllBonusUI(data) {
     } else if (allDone) {
         btn.disabled = false; btn.innerText = '🏅 Claim Bonus 10 Coins'; btn.style.background = 'linear-gradient(135deg,#22c55e,#16a34a)';
     } else {
-        btn.disabled = true; btn.innerText = `🏅 Complete All Tasks (${doneCount}/4)`; btn.style.background = '#1e3a1e';
+        btn.disabled = true; btn.innerText = `🏅 Complete All Tasks (${doneCount}/5)`; btn.style.background = '#1e3a1e';
     }
 }
 
