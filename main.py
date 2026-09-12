@@ -270,6 +270,16 @@ PROMO_TASK_REWARD = 5
 ALL_TASKS_BONUS   = 10
 PROFILE_COMPLETE_REWARD = 100  # One-time reward for filling age + gender in profile
 
+# Login-streak rupee milestones — gated by claiming the All-Tasks-Bonus each
+# day (not just opening the app). Each tier is a permanent one-time unlock;
+# breaking the streak resets progress back to 0 for whichever tiers are
+# still unclaimed.
+LOGIN_STREAK_MILESTONES = [
+    {"days": 10, "reward_inr": 10},
+    {"days": 30, "reward_inr": 30},
+    {"days": 50, "reward_inr": 50},
+]
+
 # ── Premium Membership ────────────────────────────────────────────────────
 PREMIUM_TASK_BONUS_PCT    = 25    # Task reward pe +25% bonus
 PREMIUM_SPIN_PER_DAY      = 15   # Premium: 15 spins/day (free: SPIN_PER_DAY)
@@ -1526,6 +1536,9 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
                 "lifetime_earned":        0,
                 "mining_reminder_sent":   False,
                 "badges_earned":          [],
+                "login_streak_day":            0,
+                "login_streak_last_date":      "",
+                "login_milestones_claimed":    [],
                 "age":                    None,
                 "gender":                 None,
                 "profile_completed":      False,
@@ -2091,20 +2104,114 @@ def claim_allcomplete_bonus_api(user_id: int):
                 "message": f"Complete {MAX_WEB_TASKS_PER_DAY - web_done} more website task(s) first!",
             }), 400
 
+        # ── Login streak (gated by all-tasks-bonus claim) ──
+        # Counts a "login day" only when the user has claimed the full daily
+        # set of tasks — not just opened the app. Breaks (resets to 1) if a
+        # calendar day was skipped since the last counted day.
+        yesterday      = (date.today() - timedelta(days=1)).isoformat()
+        last_login_day = user.get("login_streak_last_date", "")
+        new_login_streak = (user.get("login_streak_day", 0) + 1) if last_login_day == yesterday else 1
+
         users_col.update_one(
             {"user_id": user_id},
-            {"$inc": {"coins": ALL_TASKS_BONUS, "lifetime_earned": ALL_TASKS_BONUS}, "$set": {"allcomplete_bonus_date": today}},
+            {
+                "$inc": {"coins": ALL_TASKS_BONUS, "lifetime_earned": ALL_TASKS_BONUS},
+                "$set": {
+                    "allcomplete_bonus_date":  today,
+                    "login_streak_day":        new_login_streak,
+                    "login_streak_last_date":  today,
+                },
+            },
         )
         _invalidate_user_cache(user_id)
-        logger.info("All-tasks bonus of %s coins credited to user %s", ALL_TASKS_BONUS, user_id)
+        logger.info("All-tasks bonus of %s coins credited to user %s (login streak: %s)", ALL_TASKS_BONUS, user_id, new_login_streak)
         return jsonify({
             "status":  "success",
             "message": f"\U0001f389 All tasks complete! Bonus {ALL_TASKS_BONUS} coins credited!",
-            "data":    {"bonus": ALL_TASKS_BONUS},
+            "data":    {"bonus": ALL_TASKS_BONUS, "login_streak_day": new_login_streak},
         })
     except Exception as exc:
         logger.error("claim_allcomplete_bonus error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
+
+
+@app.route("/login_streak/<int:user_id>", methods=["GET"])
+def login_streak_status_api(user_id: int):
+    """Current login streak + per-milestone lock/unlock/claimed status."""
+    try:
+        user = users_col.find_one({"user_id": user_id}, {"login_streak_day": 1, "login_milestones_claimed": 1, "_id": 0})
+        if not user:
+            return jsonify({"status": "error", "message": "User not found."}), 404
+
+        streak_day = user.get("login_streak_day", 0)
+        claimed    = set(user.get("login_milestones_claimed", []))
+
+        milestones = []
+        for m in LOGIN_STREAK_MILESTONES:
+            is_claimed  = m["days"] in claimed
+            is_unlocked = streak_day >= m["days"]
+            milestones.append({
+                "days":       m["days"],
+                "reward_inr": m["reward_inr"],
+                "claimed":    is_claimed,
+                "unlocked":   is_unlocked and not is_claimed,
+                "progress":   min(streak_day, m["days"]),
+            })
+
+        return jsonify({"status": "success", "streak_day": streak_day, "milestones": milestones})
+    except Exception as exc:
+        logger.error("login_streak_status_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/claim_login_milestone", methods=["POST"])
+def claim_login_milestone_api():
+    """One-time claim — credits reward_inr to the Rupee Wallet. Permanently
+    locked afterwards even if the streak later resets and grows back
+    through the same day-count."""
+    try:
+        data    = request.get_json(force=True) or {}
+        user_id = int(data.get("user_id", 0))
+        days    = int(data.get("days", 0))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid request."}), 400
+
+    tier = next((m for m in LOGIN_STREAK_MILESTONES if m["days"] == days), None)
+    if not tier:
+        return jsonify({"status": "error", "message": "Invalid milestone."}), 400
+
+    try:
+        # Atomic — only succeeds if the streak actually reached this tier AND
+        # it hasn't been claimed before. Prevents double-claims from a
+        # double-tap/race the same way the referral milestone claim does.
+        result = users_col.find_one_and_update(
+            {
+                "user_id":                 user_id,
+                "login_streak_day":        {"$gte": days},
+                "login_milestones_claimed": {"$ne": days},
+            },
+            {
+                "$inc": {"rupees": tier["reward_inr"]},
+                "$addToSet": {"login_milestones_claimed": days},
+            },
+            return_document=True,
+        )
+        if not result:
+            user = users_col.find_one({"user_id": user_id}, {"login_streak_day": 1, "login_milestones_claimed": 1, "_id": 0})
+            if user and days in user.get("login_milestones_claimed", []):
+                return jsonify({"status": "error", "message": "Already claimed!"}), 400
+            return jsonify({"status": "error", "message": f"You need a {days}-day streak first."}), 400
+
+        _invalidate_user_cache(user_id)
+        logger.info("User %s claimed login-streak milestone: %s days -> \u20b9%s", user_id, days, tier["reward_inr"])
+        return jsonify({
+            "status":     "success",
+            "message":    f"\U0001f389 Claimed! \u20b9{tier['reward_inr']} added to your Rupee Wallet.",
+            "reward_inr": tier["reward_inr"],
+        })
+    except Exception as exc:
+        logger.error("claim_login_milestone_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
 
 
 @app.route("/verify_task", methods=["POST"])
@@ -5136,9 +5243,10 @@ def tournament_register_api():
         counter = int((updated_t or {}).get("team_id_counter", 1))
         team_id = format_team_id(counter)
         reg_doc["team_id"] = team_id
+        reg_doc["slot_no"] = counter  # Ascending slot number — 1st registrant = Slot 1, and so on
 
         tournament_registrations_col.insert_one(reg_doc)
-        logger.info("Tournament reg: user=%s type=%s tournament=%s fee=%s team_id=%s", user_id, "squad" if is_squad else "solo", tid, entry_fee, team_id)
+        logger.info("Tournament reg: user=%s type=%s tournament=%s fee=%s team_id=%s slot=%s", user_id, "squad" if is_squad else "solo", tid, entry_fee, team_id, counter)
 
         fee_msg  = f" {entry_fee} coins deducted as entry fee." if entry_fee > 0 else ""
         type_msg = "🎉 Duo registered!" if is_duo else "🎉 Squad registered!" if is_squad else "🎉 Registration successful!"
@@ -5147,6 +5255,7 @@ def tournament_register_api():
             "status":   "success",
             "message":  f"{type_msg}{fee_msg} Good luck in the tournament!{policy_msg}",
             "team_id":  team_id,
+            "slot_no":  counter,
         })
     except pymongo.errors.DuplicateKeyError:
         # BUG FIX: entry fee was already deducted (atomic $inc above) before this
@@ -5317,6 +5426,47 @@ def my_tournament_registration_api(user_id: int):
         return jsonify({"status": "success", "registered": True, "data": reg})
     except Exception as exc:
         logger.error("my_tournament_registration_api error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/tournament/<string:tid>/entries", methods=["GET"])
+def tournament_entries_api(tid: str):
+    """PUBLIC — anyone can view the full list of registered slots for a
+    tournament (visible from registration_open all the way through
+    completed). Ascending by slot number, exactly the order players
+    should occupy in the in-game custom room."""
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid}, {"_id": 0, "max_players": 1, "title": 1})
+        if not t:
+            return jsonify({"status": "error", "message": "Tournament not found."}), 404
+
+        regs = list(tournament_registrations_col.find(
+            {"tournament_id": tid},
+            {"_id": 0, "slot_no": 1, "team_id": 1, "team_name": 1, "ff_nickname": 1,
+             "registration_type": 1, "status": 1, "members": 1},
+        ).sort("slot_no", 1))
+
+        entries = []
+        for r in regs:
+            display_name = r.get("team_name") or r.get("ff_nickname") or r.get("team_id", "—")
+            entries.append({
+                "slot_no":     r.get("slot_no", 0),
+                "team_id":     r.get("team_id", ""),
+                "name":        display_name,
+                "type":        r.get("registration_type", "solo"),
+                "disqualified": r.get("status") == "disqualified",
+                "member_names": [m.get("ff_nickname", "") for m in r.get("members", [])] if r.get("members") else [],
+            })
+
+        return jsonify({
+            "status":      "success",
+            "title":       t.get("title", ""),
+            "max_players": t.get("max_players", 0),
+            "filled":      len(entries),
+            "entries":     entries,
+        })
+    except Exception as exc:
+        logger.error("tournament_entries_api error for %s: %s", tid, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
