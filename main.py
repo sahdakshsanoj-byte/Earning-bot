@@ -2088,21 +2088,36 @@ def claim_allcomplete_bonus_api(user_id: int):
                 "message": f"Watch {MAX_ADS_PER_DAY - ads_today} more ad(s) to complete all tasks!",
             }), 400
 
-        task_completions = user.get("task_completions", {})
-        live_codes       = get_live_task_codes()
-        yt_done  = count_task_type_completions_today(task_completions, "yt",  today, live_codes)
-        web_done = count_task_type_completions_today(task_completions, "web", today, live_codes)
+        # ── Spin Wheel — all of today's free spins used ──
+        spins_date  = user.get("spins_date", "")
+        spins_today = user.get("spins_today", 0) if spins_date == today else 0
+        spin_limit  = PREMIUM_SPIN_PER_DAY if is_premium(user_id) else SPIN_PER_DAY
+        if spins_today < spin_limit:
+            return jsonify({
+                "status":  "error",
+                "message": f"Use {spin_limit - spins_today} more spin(s) on the Spin Wheel first!",
+            }), 400
 
-        if yt_done < MAX_YT_TASKS_PER_DAY:
-            return jsonify({
-                "status":  "error",
-                "message": f"Complete {MAX_YT_TASKS_PER_DAY - yt_done} more YouTube task(s) first!",
-            }), 400
-        if web_done < MAX_WEB_TASKS_PER_DAY:
-            return jsonify({
-                "status":  "error",
-                "message": f"Complete {MAX_WEB_TASKS_PER_DAY - web_done} more website task(s) first!",
-            }), 400
+        # ── Mining — today's session collected ──
+        last_collect = user.get("last_mining_collect", "")
+        mined_today  = False
+        if last_collect:
+            try:
+                mined_today = datetime.fromisoformat(last_collect).date().isoformat() == today
+            except ValueError:
+                pass
+        if not mined_today:
+            return jsonify({"status": "error", "message": "Collect today's Mining reward first!"}), 400
+
+        # ── Bomb Box — played at least once today ──
+        today_start_epoch = datetime.combine(date.today(), datetime.min.time()).timestamp()
+        bombbox_today = bomb_box_col.find_one({
+            "user_id":   user_id,
+            "played":    True,
+            "timestamp": {"$gte": today_start_epoch},
+        })
+        if not bombbox_today:
+            return jsonify({"status": "error", "message": "Play the Bomb Box challenge first!"}), 400
 
         # ── Login streak (gated by all-tasks-bonus claim) ──
         # Counts a "login day" only when the user has claimed the full daily
