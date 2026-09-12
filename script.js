@@ -1818,6 +1818,8 @@ function loadProfileTab() {
     // Tournament participation count
     const pt = document.getElementById('profile-tournaments');
     if (pt) pt.innerText = d.tournament_count != null ? d.tournament_count : '—';
+
+    fetchLoginStreakStatus();
 }
 
 let _selectedProfileGender = null;
@@ -1867,6 +1869,72 @@ function renderBadges(d) {
             <span class="badge-name">${b.name}</span>
         </div>
     `).join('');
+}
+
+async function fetchLoginStreakStatus() {
+    if (!userId) return;
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/login_streak/${userId}`);
+        const data = await res.json();
+        if (data.status === 'success') renderLoginStreak(data);
+    } catch (e) { /* card just stays on its last known state */ }
+}
+
+function renderLoginStreak(data) {
+    const grid  = document.getElementById('login-streak-grid');
+    const count = document.getElementById('login-streak-count');
+    if (!grid) return;
+    if (count) count.innerText = `Day ${data.streak_day || 0}`;
+
+    grid.innerHTML = (data.milestones || []).map(m => {
+        if (m.claimed) {
+            return `
+            <div class="ls-tile claimed">
+                <div class="ls-days">${m.days} Days</div>
+                <div class="ls-amount">₹${m.reward_inr}</div>
+                <button class="ls-btn done" disabled>✅ Claimed</button>
+            </div>`;
+        }
+        if (m.unlocked) {
+            return `
+            <div class="ls-tile unlocked">
+                <div class="ls-days">${m.days} Days</div>
+                <div class="ls-amount">₹${m.reward_inr}</div>
+                <button class="ls-btn claim" onclick="claimLoginMilestone(${m.days})">🎉 Claim</button>
+            </div>`;
+        }
+        return `
+        <div class="ls-tile locked">
+            <div class="ls-days">${m.days} Days</div>
+            <div class="ls-amount">₹${m.reward_inr}</div>
+            <button class="ls-btn claim" disabled style="opacity:0.4;">Locked</button>
+            <div class="ls-locked-overlay">
+                <span class="ls-lock-icon">🔒</span>
+                <span class="ls-progress">${m.progress}/${m.days}</span>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function claimLoginMilestone(days) {
+    if (!userId) return;
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_login_milestone`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ user_id: userId, days }),
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(data.message || '🎉 Claimed!', 'success');
+            fetchLoginStreakStatus();
+            fetchLiveData();
+        } else {
+            showToast(data.message || 'Could not claim.', 'error');
+        }
+    } catch (e) {
+        showToast('Network error — try again.', 'error');
+    }
 }
 
 function dismissProfileNudge() {
@@ -3673,6 +3741,66 @@ let _tournamentCache    = {};          // { tid: { tournament, winners, ts } }
 let _tournamentRegCache = {};          // { tid: regData }
 const TOURNAMENT_CACHE_TTL = 60 * 1000;
 
+function openTournamentEntries(tid) {
+    const modal = document.getElementById('entries-modal');
+    if (!modal || !tid) return;
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    loadTournamentEntries(tid);
+}
+
+function closeTournamentEntries() {
+    const modal = document.getElementById('entries-modal');
+    if (!modal) return;
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+async function loadTournamentEntries(tid) {
+    const list  = document.getElementById('entries-list');
+    const label = document.getElementById('entries-count-label');
+    if (!list) return;
+    list.innerHTML = '<div style="text-align:center; padding:40px 16px; color:#64748b; font-size:12.5px;">Loading…</div>';
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/tournament/${tid}/entries`);
+        const data = await res.json();
+        if (data.status !== 'success') {
+            list.innerHTML = '<div style="text-align:center; padding:40px 16px; color:#64748b; font-size:12.5px;">Could not load entries.</div>';
+            return;
+        }
+        const entries = data.entries || [];
+        if (label) {
+            const capText = data.max_players ? ` / ${data.max_players}` : '';
+            label.innerText = `${data.filled}${capText} slots filled`;
+        }
+        if (!entries.length) {
+            list.innerHTML = '<div style="text-align:center; padding:40px 16px; color:#64748b; font-size:12.5px;">📭 No one has registered yet. Be the first!</div>';
+            return;
+        }
+        list.innerHTML = entries.map(en => {
+            const memberLine = en.member_names && en.member_names.length
+                ? `<p style="font-size:10.5px; color:#64748b; margin:2px 0 0;">${en.member_names.map(_esc).join(' · ')}</p>`
+                : '';
+            const dqBadge = en.disqualified
+                ? `<span style="font-size:9px; font-weight:800; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#f87171; padding:2px 7px; border-radius:20px; margin-left:6px;">DISQUALIFIED</span>`
+                : '';
+            return `
+            <div style="display:flex; align-items:center; gap:12px; padding:11px 4px; border-bottom:1px solid rgba(255,255,255,0.05); ${en.disqualified ? 'opacity:0.55;' : ''}">
+                <div style="width:34px; height:34px; border-radius:10px; background:rgba(241,196,15,0.12); border:1px solid rgba(241,196,15,0.3); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:800; color:#f1c40f; flex-shrink:0;">
+                    ${en.slot_no}
+                </div>
+                <div style="flex:1; min-width:0;">
+                    <p style="font-size:12.5px; font-weight:700; color:#e2e8f0; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${_esc(en.name)}${dqBadge}</p>
+                    <p style="font-size:10px; color:#64748b; margin:1px 0 0;">${_esc(en.team_id)} · ${en.type === 'solo' ? 'Solo' : en.type === 'duo' ? 'Duo' : 'Squad'}</p>
+                    ${memberLine}
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        list.innerHTML = '<div style="text-align:center; padding:40px 16px; color:#64748b; font-size:12.5px;">⚠️ Network error.</div>';
+    }
+}
+
 function openTournamentHub(e) {
     if (e) e.stopPropagation();
     const modal = document.getElementById('tournament-modal');
@@ -3959,6 +4087,15 @@ function _renderTournament(t, winners, roundsData) {
         });
     }
 
+    // ── View Entries button — visible from registration_open onward ──
+    if (t.status !== 'coming_soon') {
+        html += `
+        <div onclick="openTournamentEntries('${_selectedTid}')" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:11px;background:rgba(167,139,250,0.10);border:1px solid rgba(167,139,250,0.3);border-radius:12px;cursor:pointer;margin-bottom:12px;">
+            <span style="font-size:16px;">📋</span>
+            <span style="font-size:12.5px;font-weight:700;color:#a78bfa;">View Registered Entries &amp; Slots</span>
+        </div>`;
+    }
+
     // ── State-specific action area
     html += `<div style="height:14px;"></div>`;
 
@@ -4015,12 +4152,25 @@ function _renderTournament(t, winners, roundsData) {
                 const teamIdRow = rd.team_id
                     ? `<p style="font-size:12px;margin:6px 0 4px;"><span style="color:#a78bfa;font-weight:700;">🛡️ Team ID:</span> <b style="color:#e2e8f0;letter-spacing:1px;">${_esc(rd.team_id)}</b></p>`
                     : '';
+                const slotRow = rd.slot_no
+                    ? `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(241,196,15,0.12);border:1px solid rgba(241,196,15,0.3);border-radius:20px;padding:4px 12px;margin:4px 0 8px;">
+                        <span style="font-size:13px;">🎯</span>
+                        <span style="font-size:12.5px;font-weight:800;color:#f1c40f;">Slot #${rd.slot_no}</span>
+                       </div>`
+                    : '';
                 regDetails = `
+                    ${slotRow}
                     ${teamIdRow}
                     <p style="font-size:13px;font-weight:800;color:#f1c40f;margin:4px 0 6px;">🏟️ Team: ${_esc(rd.team_name||'')}</p>
                     <div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:8px 10px;margin-bottom:4px;">${memberRows}</div>`;
             } else {
-                regDetails = `<p style="font-size:12px;color:#64748b;margin:4px 0 0;">FF UID: <b style="color:#e2e8f0;">${_esc(rd.ff_uid||'')}</b> &nbsp;·&nbsp; Nick: <b style="color:#e2e8f0;">${_esc(rd.ff_nickname||'')}</b></p>`;
+                const soloSlot = rd.slot_no
+                    ? `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(241,196,15,0.12);border:1px solid rgba(241,196,15,0.3);border-radius:20px;padding:4px 12px;margin:4px 0 8px;">
+                        <span style="font-size:13px;">🎯</span>
+                        <span style="font-size:12.5px;font-weight:800;color:#f1c40f;">Slot #${rd.slot_no}</span>
+                       </div><br>`
+                    : '';
+                regDetails = `${soloSlot}<p style="font-size:12px;color:#64748b;margin:4px 0 0;">FF UID: <b style="color:#e2e8f0;">${_esc(rd.ff_uid||'')}</b> &nbsp;·&nbsp; Nick: <b style="color:#e2e8f0;">${_esc(rd.ff_nickname||'')}</b></p>`;
             }
             html += `
             <div class="t-registered-badge">
