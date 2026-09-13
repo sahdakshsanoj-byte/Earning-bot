@@ -2431,8 +2431,8 @@ def create_ad_claim_token(user_id: int) -> tuple[dict, int]:
         if last_ad_claim:
             try:
                 last_ad_claim_dt = datetime.fromisoformat(last_ad_claim)
-                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=30):
-                    return {"status": "error", "message": "Please wait 30 seconds before watching the next ad."}, 429
+                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=10):
+                    return {"status": "error", "message": "Please wait 10 seconds before watching the next ad."}, 429
             except ValueError:
                 pass
 
@@ -2486,8 +2486,8 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
         if last_ad_claim:
             try:
                 last_ad_claim_dt = datetime.fromisoformat(last_ad_claim)
-                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=30):
-                    return {"status": "error", "message": "Please wait 30 seconds before claiming the next ad reward."}, 429
+                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=10):
+                    return {"status": "error", "message": "Please wait 10 seconds before claiming the next ad reward."}, 429
             except ValueError:
                 pass
 
