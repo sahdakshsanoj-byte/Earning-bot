@@ -2272,7 +2272,7 @@ def premium_create_order_api():
     Razorpay Order and returns just enough for Checkout to open — the key
     secret never leaves the server."""
     if not razorpay_client:
-        return jsonify({"status": "error", "message": "Payments are not configured yet. Contact admin."}), 503
+        return jsonify({"status": "error", "message": "Payments are not configured yet. Contact admin."}), 400
 
     try:
         data    = request.get_json(force=True) or {}
@@ -2312,7 +2312,7 @@ def premium_verify_payment_api():
     tampered with) and activates premium immediately — no manual /setpremium
     needed."""
     if not razorpay_client:
-        return jsonify({"status": "error", "message": "Payments are not configured yet. Contact admin."}), 503
+        return jsonify({"status": "error", "message": "Payments are not configured yet. Contact admin."}), 400
 
     try:
         data          = request.get_json(force=True) or {}
@@ -10540,4 +10540,4 @@ _start_background_threads()
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     logger.info("Starting Flask on port %s...", port)
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port) 
