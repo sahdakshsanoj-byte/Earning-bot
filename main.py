@@ -2302,7 +2302,10 @@ def premium_create_order_api():
         })
     except Exception as exc:
         logger.error("premium_create_order_api error for %s: %s", user_id, exc)
-        return jsonify({"status": "error", "message": "Could not start payment. Please try again."}), 500
+        return jsonify({
+            "status":  "error",
+            "message": f"Could not start payment: {str(exc)[:150]}",
+        }), 400
 
 
 @app.route("/premium/verify_payment", methods=["POST"])
@@ -2339,7 +2342,10 @@ def premium_verify_payment_api():
         return jsonify({"status": "error", "message": "Payment verification failed. If money was deducted, contact support."}), 400
     except Exception as exc:
         logger.error("premium_verify_payment_api verify error for %s: %s", user_id, exc)
-        return jsonify({"status": "error", "message": "Server error during verification."}), 500
+        return jsonify({
+            "status":  "error",
+            "message": f"Verification error: {str(exc)[:150]}",
+        }), 400
 
     # Signature valid — activate premium.
     days      = plan_info["days"]
@@ -10540,4 +10546,4 @@ _start_background_threads()
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     logger.info("Starting Flask on port %s...", port)
-    app.run(host="0.0.0.0", port=port) 
+    app.run(host="0.0.0.0", port=port)
