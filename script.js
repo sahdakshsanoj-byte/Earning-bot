@@ -249,12 +249,12 @@ function openExternalLink(url) {
 // ============================================================
 // FETCH WITH RETRY — 3 retries, 10s timeout
 // ============================================================
-async function fetchWithRetry(url, options = {}, retries = 3, delayMs = 2000) {
+async function fetchWithRetry(url, options = {}, retries = 3, delayMs = 2000, timeoutMs = 10000) {
     for (let attempt = 1; attempt <= retries; attempt++) {
         let timeout;
         try {
             const controller = new AbortController();
-            timeout = setTimeout(() => controller.abort(), 10000);
+            timeout = setTimeout(() => controller.abort(), timeoutMs);
             const res        = await fetch(url, { ...options, signal: controller.signal });
             if (!res.ok && res.status >= 400 && res.status < 500) return res;
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -5409,7 +5409,7 @@ async function startRazorpayPayment() {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({ user_id: userId, plan: _selectedPlan }),
-        });
+        }, 3, 2000, 25000);  // longer timeout — this call reaches Razorpay's servers too, not just our own DB
         const order = await orderRes.json();
 
         if (order.status !== 'success') {
@@ -5445,7 +5445,7 @@ async function startRazorpayPayment() {
                             razorpay_payment_id: response.razorpay_payment_id,
                             razorpay_signature:  response.razorpay_signature,
                         }),
-                    });
+                    }, 3, 2000, 25000);
                     const verify = await verifyRes.json();
                     if (verify.status === 'success') {
                         showToast(verify.message || '🎉 Premium activated!', 'success');
