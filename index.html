@@ -21,7 +21,7 @@
             --glass-blur:     blur(14px);
             --card-radius:    16px;
             --card-shadow:    0 4px 24px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04);
-            --gold:           #C9A876;
+            --gold:           #8B5CF6;
             --text-primary:   #c9d1d9;
             --text-muted:     #6e7e96;
             --text-dim:       #3d4a5c;
@@ -49,7 +49,7 @@
         }
 
         /* ── Accent tint overrides (applied via class on individual cards) ── */
-        .c-gold   { border-color: rgba(201,168,118,0.28) !important;  background: rgba(201,168,118,0.04)  !important; }
+        .c-gold   { border-color: rgba(139,92,246,0.28) !important;  background: rgba(34,211,238,0.05)  !important; }
         .c-purple { border-color: rgba(168,85,247,0.28) !important;  background: rgba(168,85,247,0.04)  !important; }
         .c-amber  { border-color: rgba(245,158,11,0.28) !important;  background: rgba(245,158,11,0.04)  !important; }
         .c-red    { border-color: rgba(239,68,68,0.28)  !important;  background: rgba(239,68,68,0.04)   !important; }
@@ -58,8 +58,8 @@
 
         /* ── Balance hero card ── */
         .balance-card {
-            background: linear-gradient(145deg, rgba(201,168,118,0.07), rgba(255,255,255,0.03)) !important;
-            border-color: rgba(201,168,118,0.25) !important;
+            background: linear-gradient(145deg, rgba(139,92,246,0.07), rgba(255,255,255,0.03)) !important;
+            border-color: rgba(139,92,246,0.25) !important;
         }
 
         /* ── Section header card (Tasks Daily, Leaderboard, etc.) ── */
@@ -104,10 +104,10 @@
         /* ── Ad Counter Badge ── */
         .ad-counter-badge {
             display: inline-block;
-            background: rgba(201,168,118,0.10);
-            border: 1px solid rgba(201,168,118,0.30);
+            background: rgba(139,92,246,0.10);
+            border: 1px solid rgba(139,92,246,0.30);
             border-radius: 20px; padding: 3px 14px;
-            font-size: 12px; font-weight: 700; color: #C9A876; margin-bottom: 8px;
+            font-size: 12px; font-weight: 700; color: #8B5CF6; margin-bottom: 8px;
         }
 
         /* ── Channel Claim Button ── */
@@ -155,8 +155,8 @@
         /* ── Spin Wheel ── */
         .spin-segment-row { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; margin: 10px 0 6px; }
         .spin-segment {
-            background: rgba(201,168,118,0.08); border: 1px solid rgba(201,168,118,0.25);
-            border-radius: 8px; padding: 4px 10px; font-size: 12px; color: #C9A876; font-weight: 700;
+            background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.25);
+            border-radius: 8px; padding: 4px 10px; font-size: 12px; color: #8B5CF6; font-weight: 700;
         }
         .spin-segment.miss { color: #64748b; border-color: rgba(51,65,85,0.5); background: rgba(51,65,85,0.2); }
         @keyframes spinResultPop {
@@ -169,14 +169,14 @@
             position: absolute; top: -4px; left: 50%; transform: translateX(-50%);
             width: 0; height: 0;
             border-left: 10px solid transparent; border-right: 10px solid transparent;
-            border-top: 22px solid #C9A876; z-index: 5;
-            filter: drop-shadow(0 0 6px #C9A876);
+            border-top: 22px solid #8B5CF6; z-index: 5;
+            filter: drop-shadow(0 0 6px #8B5CF6);
         }
         #spin-wheel-canvas { border-radius: 50%; display: block; }
 
         /* ── Mining ── */
         .mining-progress-bar-wrap { background: rgba(30,41,59,0.6); border-radius: 20px; height: 6px; overflow: hidden; margin-top: 6px; }
-        .mining-progress-bar      { height: 100%; background: linear-gradient(90deg, #A3835A, #f97316); border-radius: 20px; width: 0%; transition: width 0.5s; }
+        .mining-progress-bar      { height: 100%; background: linear-gradient(90deg, #3B82F6, #f97316); border-radius: 20px; width: 0%; transition: width 0.5s; }
         @keyframes miningGlow {
             0%,100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.0); }
             50%      { box-shadow: 0 0 14px 4px rgba(245,158,11,0.22); }
@@ -226,18 +226,18 @@
         #tournament-hub-box {
             animation: t-slide-in 0.4s cubic-bezier(.17,.67,.35,1.2) both;
             background: linear-gradient(160deg, #0d1117 0%, #0f1923 50%, #0a0e1a 100%);
-            border: 1px solid rgba(201,168,118,0.20);
+            border: 1px solid rgba(139,92,246,0.20);
             border-radius: 24px;
             margin: 16px;
             padding: 0;
             overflow: hidden;
-            box-shadow: 0 0 60px rgba(201,168,118,0.12), 0 24px 64px rgba(0,0,0,0.8);
+            box-shadow: 0 0 60px rgba(139,92,246,0.12), 0 24px 64px rgba(0,0,0,0.8);
         }
 
         /* Header band */
         .t-header-band {
-            background: linear-gradient(135deg, rgba(201,168,118,0.12), rgba(139,92,246,0.12));
-            border-bottom: 1px solid rgba(201,168,118,0.15);
+            background: linear-gradient(135deg, rgba(139,92,246,0.12), rgba(139,92,246,0.12));
+            border-bottom: 1px solid rgba(139,92,246,0.15);
             padding: 18px 20px 14px;
             position: relative;
         }
@@ -270,7 +270,7 @@
         .t-status-badge.reg-open       { background:rgba(74,222,128,0.12);  color:#4ade80; border:1px solid rgba(74,222,128,0.25); animation: reg-glow 1.8s ease infinite; }
         .t-status-badge.reg-closed     { background:rgba(251,146,60,0.12);  color:#fb923c; border:1px solid rgba(251,146,60,0.25); }
         .t-status-badge.match-live     { background:rgba(239,68,68,0.12);   color:#f87171; border:1px solid rgba(239,68,68,0.30); animation: live-pulse 1.4s ease infinite; }
-        .t-status-badge.completed      { background:rgba(201,168,118,0.12);  color:#C9A876; border:1px solid rgba(201,168,118,0.25); }
+        .t-status-badge.completed      { background:rgba(139,92,246,0.12);  color:#8B5CF6; border:1px solid rgba(139,92,246,0.25); }
 
         /* Info stat tiles */
         .t-stats-grid {
@@ -302,7 +302,7 @@
             border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
             position: relative; overflow: hidden;
         }
-        .t-winner-card.rank-1 { background: linear-gradient(135deg,rgba(201,168,118,0.12),rgba(201,168,118,0.04)); border: 1px solid rgba(201,168,118,0.30); }
+        .t-winner-card.rank-1 { background: linear-gradient(135deg,rgba(139,92,246,0.12),rgba(34,211,238,0.05)); border: 1px solid rgba(139,92,246,0.30); }
         .t-winner-card.rank-2 { background: linear-gradient(135deg,rgba(148,163,184,0.10),rgba(148,163,184,0.03)); border: 1px solid rgba(148,163,184,0.25); }
         .t-winner-card.rank-3 { background: linear-gradient(135deg,rgba(205,127,50,0.10),rgba(205,127,50,0.03)); border: 1px solid rgba(205,127,50,0.25); }
 
@@ -315,12 +315,12 @@
             color: #e2e8f0; font-size: 13px; outline: none;
             margin-bottom: 10px;
         }
-        .t-input:focus { border-color: rgba(201,168,118,0.40); }
+        .t-input:focus { border-color: rgba(139,92,246,0.40); }
         .t-input::placeholder { color: #475569; }
 
         .t-reg-btn {
             width: 100%; padding: 13px;
-            background: linear-gradient(135deg, #C9A876, #A3835A);
+            background: linear-gradient(135deg, #8B5CF6, #3B82F6);
             color: #000; font-weight: 800; font-size: 14px;
             border: none; border-radius: 12px; cursor: pointer;
             letter-spacing: 0.3px;
@@ -347,8 +347,8 @@
 
         /* Trophy icon pulse when tournament is live */
         @keyframes trophy-live-pulse {
-            0%,100% { filter: drop-shadow(0 0 0px #C9A876); }
-            50%      { filter: drop-shadow(0 0 8px #C9A876); }
+            0%,100% { filter: drop-shadow(0 0 0px #8B5CF6); }
+            50%      { filter: drop-shadow(0 0 8px #8B5CF6); }
         }
         #tournament-trophy-btn.has-active { animation: trophy-live-pulse 2s ease-in-out infinite; }
 
@@ -399,7 +399,7 @@
         .policy-accordion-btn:active { opacity: 0.8; }
         .policy-chevron {
             font-size: 16px;
-            color: #34C48D;
+            color: #22D3EE;
             transition: transform 0.3s ease;
             flex-shrink: 0;
         }
@@ -418,7 +418,7 @@
         .policy-section-title {
             font-size: 12px;
             font-weight: 800;
-            color: #34C48D;
+            color: #22D3EE;
             text-transform: uppercase;
             letter-spacing: 0.8px;
             margin: 14px 0 6px 0;
@@ -439,7 +439,7 @@
         }
         .policy-divider {
             height: 1px;
-            background: rgba(52,196,141,0.12);
+            background: rgba(56,189,248,0.12);
             margin: 12px 0 0 0;
         }
         .policy-disclaimer-box {
@@ -479,13 +479,13 @@
          * while preserving every existing id, event handler and API-driven state.
          */
         :root {
-            --app-bg: #0B0D12;
-            --card-bg: #14161C;
-            --card-border: #232630;
-            --gold: #C9A876;
-            --green: #0F9D6B;
+            --app-bg: #0A0B10;
+            --card-bg: #14151C;
+            --card-border: #262835;
+            --gold: #8B5CF6;
+            --green: #22D3EE;
             --locked: #6B7280;
-            --text-primary: #EDE7DD;
+            --text-primary: #FFFFFF;
             --text-body: #9AA1AC;
             --text-muted: #6B7280;
             --text-dim: #6B7280;
@@ -572,7 +572,7 @@
         }
         .nav-item.active {
             color: var(--gold) !important;
-            background: rgba(201,168,118,.10) !important;
+            background: rgba(139,92,246,.10) !important;
         }
 
         /* Numbers and state colors */
@@ -753,7 +753,7 @@
         .t-body { padding: 12px 16px 20px !important; }
         .t-status-badge, .ad-counter-badge, #spin-count-badge,
         #mining-rate-badge, .pf-rank-pill {
-            background: rgba(201,168,118,.10) !important;
+            background: rgba(139,92,246,.10) !important;
             color: var(--gold) !important;
             border: 1px solid var(--card-border) !important;
         }
@@ -821,16 +821,16 @@
            so every existing script.js binding keeps working as-is.
            ═══════════════════════════════════════════════════════ */
         :root {
-            --violet:        #0F9D6B;
-            --violet-dim:    rgba(15,157,107,0.14);
-            --gold-soft:     #E3CFA0;
-            --gold-deep:     #A3835A;
+            --violet:        #22D3EE;
+            --violet-dim:    rgba(34,211,238,0.14);
+            --gold-soft:     #A78BFA;
+            --gold-deep:     #3B82F6;
         }
         html, body {
             font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
             background:
-                radial-gradient(circle at 15% 0%, rgba(15,157,107,0.07), transparent 40%),
-                radial-gradient(circle at 100% 25%, rgba(201,168,118,0.04), transparent 40%),
+                radial-gradient(circle at 15% 0%, rgba(139,92,246,0.08), transparent 40%),
+                radial-gradient(circle at 100% 25%, rgba(34,211,238,0.05), transparent 40%),
                 var(--app-bg) !important;
         }
         h1, h2, h3, h4, h5, h6 { font-family: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif !important; letter-spacing: -0.2px; }
@@ -849,18 +849,18 @@
             box-shadow: 0 10px 24px rgba(0,0,0,0.28) !important;
             border-radius: 16px !important;
         }
-        .c-gold   { border-color: rgba(201,168,118,0.30)  !important; }
-        .c-purple { border-color: rgba(15,157,107,0.30) !important; }
-        .c-amber  { border-color: rgba(201,168,118,0.30)  !important; }
+        .c-gold   { border-color: rgba(139,92,246,0.30)  !important; }
+        .c-purple { border-color: rgba(34,211,238,0.30) !important; }
+        .c-amber  { border-color: rgba(139,92,246,0.30)  !important; }
         .c-blue   { border-color: rgba(56,189,248,0.28)  !important; }
         .c-green  { border-color: rgba(61,214,140,0.28)  !important; }
 
         /* ── Balance hero → "Vault" card ── */
         .balance-card {
             background:
-                radial-gradient(circle at 85% -20%, rgba(201,168,118,0.14), transparent 60%),
+                radial-gradient(circle at 85% -20%, rgba(139,92,246,0.14), transparent 60%),
                 linear-gradient(160deg, #17151f 0%, #12111a 100%) !important;
-            border: 1px solid rgba(201,168,118,0.20) !important;
+            border: 1px solid rgba(139,92,246,0.20) !important;
             border-radius: 20px !important;
             padding: 22px 20px 18px !important;
         }
@@ -876,15 +876,15 @@
         /* ── Premium card → "Foil" treatment ── */
         #premium-buy-card {
             background: linear-gradient(120deg, #221a08 0%, #3a2c0d 45%, #1c1608 100%) !important;
-            border: 1px solid rgba(201,168,118,0.35) !important;
+            border: 1px solid rgba(139,92,246,0.35) !important;
             border-radius: 18px !important;
-            box-shadow: 0 8px 22px rgba(201,168,118,0.08) !important;
+            box-shadow: 0 8px 22px rgba(139,92,246,0.08) !important;
         }
         #prem-card-title { color: var(--gold-soft) !important; }
         #prem-card-btn-label { color: #2a1c02 !important; }
         #premium-buy-card > div:last-child {
             background: linear-gradient(135deg, var(--gold-soft), var(--gold-deep)) !important;
-            box-shadow: 0 2px 10px rgba(201,168,118,0.30) !important;
+            box-shadow: 0 2px 10px rgba(139,92,246,0.30) !important;
         }
         #premium-status-badge, #premium-status-badge * { font-family: 'Plus Jakarta Sans', sans-serif !important; }
 
@@ -925,8 +925,8 @@
         .rarity-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
         .rarity-common   { background: #9ca3af; }
         .rarity-rare     { background: #60a5fa; }
-        .rarity-epic     { background: #34C48D; }
-        .rarity-legendary{ background: #E3CFA0; box-shadow: 0 0 6px rgba(245,201,106,0.6); }
+        .rarity-epic     { background: #22D3EE; }
+        .rarity-legendary{ background: #A78BFA; box-shadow: 0 0 6px rgba(245,201,106,0.6); }
         .intel-row {
             display: flex; align-items: center; gap: 10px;
             padding: 10px 4px; border-bottom: 1px solid rgba(255,255,255,0.05);
@@ -980,7 +980,7 @@
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
                     <span style="font-size:26px;">🏆</span>
                     <div>
-                        <h3 style="color:#C9A876; margin:0; font-size:17px; font-weight:800; letter-spacing:0.3px;">Tournament Hub</h3>
+                        <h3 style="color:#8B5CF6; margin:0; font-size:17px; font-weight:800; letter-spacing:0.3px;">Tournament Hub</h3>
                         <p style="font-size:11px; color:#64748b; margin:0;">Free Fire Esports Arena</p>
                     </div>
                 </div>
@@ -1006,11 +1006,11 @@
         <div id="pub-lb-box" style="background:linear-gradient(180deg,#0f1523 0%,#0a0e1a 100%); border:1px solid rgba(139,92,246,0.18); border-radius:20px 20px 0 0; min-height:88vh; margin-top:6vh; padding-bottom:40px; position:relative; max-width:480px; margin-left:auto; margin-right:auto; box-shadow:0 0 60px rgba(139,92,246,0.10);">
 
             <!-- Header Band -->
-            <div style="background:linear-gradient(135deg,rgba(139,92,246,0.15),rgba(201,168,118,0.08)); border-bottom:1px solid rgba(139,92,246,0.18); padding:18px 20px 14px; position:relative; border-radius:20px 20px 0 0;">
+            <div style="background:linear-gradient(135deg,rgba(139,92,246,0.15),rgba(139,92,246,0.08)); border-bottom:1px solid rgba(139,92,246,0.18); padding:18px 20px 14px; position:relative; border-radius:20px 20px 0 0;">
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:2px;">
                     <span style="font-size:26px;">👑</span>
                     <div>
-                        <h3 style="color:#34C48D; margin:0; font-size:17px; font-weight:800; letter-spacing:0.3px;">Tournament Leaderboard</h3>
+                        <h3 style="color:#22D3EE; margin:0; font-size:17px; font-weight:800; letter-spacing:0.3px;">Tournament Leaderboard</h3>
                         <p style="font-size:11px; color:#64748b; margin:0;">Enter Tournament ID &amp; Team ID to view</p>
                     </div>
                 </div>
@@ -1035,7 +1035,7 @@
                         style="margin-bottom:12px;" />
                     <button onclick="viewPublicLeaderboard()" id="pub-lb-view-btn"
                         class="t-reg-btn"
-                        style="background:linear-gradient(135deg,#34C48D,#7c3aed);">
+                        style="background:linear-gradient(135deg,#22D3EE,#7c3aed);">
                         👑 View Leaderboard
                     </button>
                 </div>
@@ -1076,7 +1076,7 @@
         <!-- Premium Buy Card -->
         <div id="premium-buy-card" onclick="handlePremiumCardClick()" style="
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-            border: 1px solid rgba(201,168,118,0.35);
+            border: 1px solid rgba(139,92,246,0.35);
             border-radius: 16px;
             padding: 14px 18px;
             margin: 0 0 12px 0;
@@ -1085,7 +1085,7 @@
             align-items: center;
             justify-content: space-between;
             gap: 12px;
-            box-shadow: 0 4px 20px rgba(201,168,118,0.08);
+            box-shadow: 0 4px 20px rgba(139,92,246,0.08);
             position: relative;
             overflow: hidden;
         ">
@@ -1138,7 +1138,7 @@
 
             <!-- Progress Bar -->
             <div style="background:rgba(255,255,255,0.08); border-radius:20px; height:6px; overflow:hidden; margin-bottom:6px;">
-                <div id="streak-progress-bar" style="height:100%; width:10%; background:#C9A876; border-radius:20px; transition:width 0.5s;"></div>
+                <div id="streak-progress-bar" style="height:100%; width:10%; background:#8B5CF6; border-radius:20px; transition:width 0.5s;"></div>
             </div>
             <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--text-dim); margin-bottom:8px;">
                 <span>🔥 Day 1</span>
@@ -1149,7 +1149,7 @@
 
             <!-- Tier Info -->
             <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
-                <span style="font-size:10px; background:rgba(201,168,118,0.12); border:1px solid rgba(201,168,118,0.25); border-radius:20px; padding:2px 8px; color:#C9A876;">🔥 Day 1-10 → 10 🪙</span>
+                <span style="font-size:10px; background:rgba(139,92,246,0.12); border:1px solid rgba(139,92,246,0.25); border-radius:20px; padding:2px 8px; color:#8B5CF6;">🔥 Day 1-10 → 10 🪙</span>
                 <span style="font-size:10px; background:rgba(56,189,248,0.10); border:1px solid rgba(56,189,248,0.25); border-radius:20px; padding:2px 8px; color:#38bdf8;">⚡ Day 11-20 → 15 🪙</span>
                 <span style="font-size:10px; background:rgba(168,85,247,0.10); border:1px solid rgba(168,85,247,0.25); border-radius:20px; padding:2px 8px; color:#a855f7;">💎 Day 21-30 → 20 🪙</span>
             </div>
@@ -1234,7 +1234,7 @@
             <div class="ad-counter-badge">📺 Ads Today: <span id="ad-counter">0</span>/<span id="ad-max">10</span></div>
             <p style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">Earn <b style="color:var(--gold);">+5 coins</b> per ad • Max 10 ads/day</p>
             <div id="adsgram-container">
-                <button class="btn" id="ad-btn" style="background:linear-gradient(135deg,#C9A876,#A3835A); color:#000; font-weight:700;" onclick="showAd()">
+                <button class="btn" id="ad-btn" style="background:linear-gradient(135deg,#8B5CF6,#3B82F6); color:#000; font-weight:700;" onclick="showAd()">
                     📺 Watch Ad & Earn 5 Coins
                 </button>
             </div>
@@ -1378,7 +1378,7 @@
             </div>
 
             <button id="spin-btn" class="btn" onclick="doSpin()"
-                style="background:linear-gradient(135deg,#C9A876,#A3835A);
+                style="background:linear-gradient(135deg,#8B5CF6,#3B82F6);
                        color:#000; font-weight:700; margin-top:4px;">
                 🎡 Watch Ad &amp; Spin (5 left)
             </button>
@@ -1390,16 +1390,16 @@
         <div class="card c-amber" id="mining-card" style="position:relative; overflow:hidden;">
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <h4 style="color:#C9A876; margin:0;">⛏️ Coin Mining</h4>
+                <h4 style="color:#8B5CF6; margin:0;">⛏️ Coin Mining</h4>
                 <span id="mining-rate-badge" style="font-size:11px; background:rgba(245,158,11,0.12);
                              border:1px solid rgba(245,158,11,0.30); border-radius:20px;
-                             padding:2px 10px; color:#C9A876; white-space:nowrap;">
+                             padding:2px 10px; color:#8B5CF6; white-space:nowrap;">
                     +30 🪙/hr
                 </span>
             </div>
 
             <p style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">
-                Watch <b style="color:#C9A876;">2 ads</b> → mine for <b style="color:#C9A876;">1 hour</b> → collect <b id="mining-desc-reward" style="color:#C9A876;">30 coins!</b>
+                Watch <b style="color:#8B5CF6;">2 ads</b> → mine for <b style="color:#8B5CF6;">1 hour</b> → collect <b id="mining-desc-reward" style="color:#8B5CF6;">30 coins!</b>
             </p>
 
             <div id="mining-ads-progress"
@@ -1414,15 +1414,15 @@
             </div>
 
             <div class="game-info-strip" style="margin-bottom:10px;">
-                <div><p class="lbl">⏱️ Duration</p><p class="val" style="color:#C9A876;">1 Hour</p></div>
+                <div><p class="lbl">⏱️ Duration</p><p class="val" style="color:#8B5CF6;">1 Hour</p></div>
                 <div class="divider"></div>
-                <div><p class="lbl">🪙 Reward</p><p id="mining-info-reward" class="val" style="color:#C9A876;">30 Coins</p></div>
+                <div><p class="lbl">🪙 Reward</p><p id="mining-info-reward" class="val" style="color:#8B5CF6;">30 Coins</p></div>
                 <div class="divider"></div>
-                <div><p class="lbl">📺 Ads</p><p class="val" style="color:#C9A876;">2 Ads</p></div>
+                <div><p class="lbl">📺 Ads</p><p class="val" style="color:#8B5CF6;">2 Ads</p></div>
             </div>
 
             <button id="mining-watch-ad-btn" class="btn" onclick="watchMiningAd()"
-                style="background:linear-gradient(135deg,#A3835A,#7A6242);
+                style="background:linear-gradient(135deg,#3B82F6,#1E3A8A);
                        color:#000; font-weight:700; margin-bottom:6px; display:none;">
                 📺 Watch Ad 0/2
             </button>
@@ -1437,8 +1437,8 @@
             <!-- Mining Speed Upgrade -->
             <div id="mining-upgrade-section" style="margin-top:10px; border-top:1px solid rgba(255,255,255,0.07); padding-top:10px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                    <span style="font-size:12px; color:#C9A876; font-weight:700;">⚡ Mining Speed</span>
-                    <span id="mining-level-badge" style="font-size:11px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); border-radius:20px; padding:2px 10px; color:#C9A876;">Level 1 • 30🪙</span>
+                    <span style="font-size:12px; color:#8B5CF6; font-weight:700;">⚡ Mining Speed</span>
+                    <span id="mining-level-badge" style="font-size:11px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); border-radius:20px; padding:2px 10px; color:#8B5CF6;">Level 1 • 30🪙</span>
                 </div>
                 <button id="mining-upgrade-btn" class="btn" onclick="upgradeMining()"
                     style="background:linear-gradient(135deg,#1e3a5f,#2563eb); color:#fff; font-size:12px; font-weight:700; padding:8px;">
@@ -1536,11 +1536,11 @@
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span id="check-ads" style="font-size:16px;">⬜</span>
-                    <span style="font-size:12px; color:#94a3b8;">Watch All 10 Ads <span id="allbonus-ads-count" style="color:#C9A876;">(0/10)</span></span>
+                    <span style="font-size:12px; color:#94a3b8;">Watch All 10 Ads <span id="allbonus-ads-count" style="color:#8B5CF6;">(0/10)</span></span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span id="check-spin" style="font-size:16px;">⬜</span>
-                    <span style="font-size:12px; color:#94a3b8;">Use All Spins <span id="allbonus-spin-count" style="color:#C9A876;">(0/5)</span></span>
+                    <span style="font-size:12px; color:#94a3b8;">Use All Spins <span id="allbonus-spin-count" style="color:#8B5CF6;">(0/5)</span></span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span id="check-mining" style="font-size:16px;">⬜</span>
@@ -1567,7 +1567,7 @@
         <div class="card task-item" data-task="web1">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 1: Visit Site</p>
-                <span style="font-size:12px; color:#C9A876; font-weight:700;">+20 🪙</span>
+                <span style="font-size:12px; color:#8B5CF6; font-weight:700;">+20 🪙</span>
             </div>
             <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web1', 'web')">🌐 Visit Site 1</button>
             <div class="task-input-row">
@@ -1579,7 +1579,7 @@
         <div class="card task-item" data-task="web2">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 2: Visit Site</p>
-                <span style="font-size:12px; color:#C9A876; font-weight:700;">+20 🪙</span>
+                <span style="font-size:12px; color:#8B5CF6; font-weight:700;">+20 🪙</span>
             </div>
             <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web2', 'web')">🌐 Visit Site 2</button>
             <div class="task-input-row">
@@ -1591,7 +1591,7 @@
         <div class="card task-item" data-task="web3">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <p style="font-size:13px; font-weight:600; margin:0;">Task 3: Visit Site</p>
-                <span style="font-size:12px; color:#C9A876; font-weight:700;">+20 🪙</span>
+                <span style="font-size:12px; color:#8B5CF6; font-weight:700;">+20 🪙</span>
             </div>
             <button class="btn-sm" style="background:#3498db; width:100%; margin-bottom:8px;" onclick="openTask('web3', 'web')">🌐 Visit Site 3</button>
             <div class="task-input-row">
@@ -1651,17 +1651,17 @@
     <div id="refer" class="tab-content" style="display:none; position:relative; overflow:hidden;">
 
         <!-- ── Hero Header ── -->
-        <div class="card balance-card" style="text-align:center; background:linear-gradient(135deg,rgba(201,168,118,0.10) 0%,rgba(139,92,246,0.10) 100%); border:1px solid rgba(201,168,118,0.18);">
+        <div class="card balance-card" style="text-align:center; background:linear-gradient(135deg,rgba(139,92,246,0.10) 0%,rgba(139,92,246,0.10) 100%); border:1px solid rgba(139,92,246,0.18);">
             <div style="font-size:32px; margin-bottom:6px;">🚀</div>
             <h3 style="color:var(--gold); margin:0 0 4px 0; font-size:17px; font-weight:800; letter-spacing:0.3px;">Refer & Earn Commission</h3>
-            <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.6;">Invite friends • Earn <b style="color:var(--gold);">30 coins</b> on join + <b style="color:#34C48D;">10% passive commission</b> from their earnings forever!</p>
+            <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.6;">Invite friends • Earn <b style="color:var(--gold);">30 coins</b> on join + <b style="color:#22D3EE;">10% passive commission</b> from their earnings forever!</p>
         </div>
 
         <!-- ── Stats Grid (4 tiles) ── -->
         <div class="card" style="padding:14px 16px;">
             <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0 0 12px 0;">📊 Dashboard Overview</p>
             <div id="ref-stats-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <div style="background:rgba(201,168,118,0.07); border:1px solid rgba(201,168,118,0.15); border-radius:12px; padding:12px; text-align:center;">
+                <div style="background:rgba(139,92,246,0.07); border:1px solid rgba(139,92,246,0.15); border-radius:12px; padding:12px; text-align:center;">
                     <p style="font-size:10px; color:var(--text-dim); margin:0 0 4px 0; text-transform:uppercase; letter-spacing:0.5px;">Total Referrals</p>
                     <p id="ref-stat-total" style="font-size:22px; font-weight:800; color:var(--gold); margin:0;">—</p>
                     <p style="font-size:10px; color:var(--text-muted); margin:2px 0 0 0;">👥 Invited</p>
@@ -1671,9 +1671,9 @@
                     <p id="ref-stat-active" style="font-size:22px; font-weight:800; color:#4ade80; margin:0;">—</p>
                     <p style="font-size:10px; color:var(--text-muted); margin:2px 0 0 0;">✅ Earning</p>
                 </div>
-                <div style="background:rgba(52,196,141,0.07); border:1px solid rgba(52,196,141,0.15); border-radius:12px; padding:12px; text-align:center;">
+                <div style="background:rgba(56,189,248,0.07); border:1px solid rgba(56,189,248,0.15); border-radius:12px; padding:12px; text-align:center;">
                     <p style="font-size:10px; color:var(--text-dim); margin:0 0 4px 0; text-transform:uppercase; letter-spacing:0.5px;">Today's Commission</p>
-                    <p id="ref-stat-today" style="font-size:22px; font-weight:800; color:#34C48D; margin:0;">—</p>
+                    <p id="ref-stat-today" style="font-size:22px; font-weight:800; color:#22D3EE; margin:0;">—</p>
                     <p style="font-size:10px; color:var(--text-muted); margin:2px 0 0 0;">💰 Today</p>
                 </div>
                 <div style="background:rgba(56,189,248,0.07); border:1px solid rgba(56,189,248,0.15); border-radius:12px; padding:12px; text-align:center;">
@@ -1688,7 +1688,7 @@
         <div class="card" style="padding:14px 16px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
                 <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">🚀 Progress Tracker</p>
-                <span id="ref-daily-badge" style="font-size:10px; background:rgba(52,196,141,0.15); color:#34C48D; padding:3px 8px; border-radius:20px; font-weight:700;">Loading...</span>
+                <span id="ref-daily-badge" style="font-size:10px; background:rgba(56,189,248,0.15); color:#22D3EE; padding:3px 8px; border-radius:20px; font-weight:700;">Loading...</span>
             </div>
 
             <p style="font-size:12px; color:var(--text-muted); margin:0 0 6px 0; display:flex; justify-content:space-between;">
@@ -1696,7 +1696,7 @@
                 <b id="ref-daily-text" style="color:var(--text-primary);">— / 600</b>
             </p>
             <div style="background:rgba(255,255,255,0.06); border-radius:20px; height:8px; overflow:hidden; margin-bottom:16px;">
-                <div id="ref-daily-bar" style="height:100%; border-radius:20px; background:linear-gradient(90deg,#34C48D,#7c3aed); width:0%; transition:width 0.5s ease;"></div>
+                <div id="ref-daily-bar" style="height:100%; border-radius:20px; background:linear-gradient(90deg,#22D3EE,#7c3aed); width:0%; transition:width 0.5s ease;"></div>
             </div>
 
             <div id="ref-milestone-block">
@@ -1705,7 +1705,7 @@
                     <b id="ref-ms-text" style="color:var(--gold);">Loading...</b>
                 </p>
                 <div style="background:rgba(255,255,255,0.06); border-radius:20px; height:8px; overflow:hidden; margin-bottom:10px;">
-                    <div id="ref-ms-bar" style="height:100%; border-radius:20px; background:linear-gradient(90deg,#C9A876,#A3835A); width:0%; transition:width 0.5s ease;"></div>
+                    <div id="ref-ms-bar" style="height:100%; border-radius:20px; background:linear-gradient(90deg,#8B5CF6,#3B82F6); width:0%; transition:width 0.5s ease;"></div>
                 </div>
                 <p id="ref-ms-reward-text" style="font-size:11px; color:var(--text-muted); text-align:center; margin:0;">Loading next milestone...</p>
             </div>
@@ -1714,10 +1714,10 @@
         <!-- ── Referral Link ── -->
         <div class="card c-gold" style="padding:14px 16px;">
             <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0 0 10px 0;">🔗 Your Referral Link</p>
-            <div id="display-link" style="background:rgba(201,168,118,0.06); padding:10px 12px; border-radius:10px; font-size:11px; word-break:break-all; border:1px dashed rgba(201,168,118,0.30); margin-bottom:10px; color:var(--gold);">Loading...</div>
+            <div id="display-link" style="background:rgba(139,92,246,0.06); padding:10px 12px; border-radius:10px; font-size:11px; word-break:break-all; border:1px dashed rgba(139,92,246,0.30); margin-bottom:10px; color:var(--gold);">Loading...</div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                 <button class="btn" style="font-size:13px; padding:10px;" onclick="inviteFriend()">📤 Share Link</button>
-                <button class="btn" style="font-size:13px; padding:10px; background:rgba(201,168,118,0.10); border:1px solid rgba(201,168,118,0.3); color:var(--gold);" onclick="copyReferralLink()">📋 Copy Link</button>
+                <button class="btn" style="font-size:13px; padding:10px; background:rgba(139,92,246,0.10); border:1px solid rgba(139,92,246,0.3); color:var(--gold);" onclick="copyReferralLink()">📋 Copy Link</button>
             </div>
         </div>
 
@@ -1744,7 +1744,7 @@
         <div class="card" style="padding:14px 16px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                 <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">💰 Commission History</p>
-                <button onclick="loadReferralDashboard(true)" style="font-size:10px; background:rgba(52,196,141,0.15); color:#34C48D; border:none; padding:3px 10px; border-radius:20px; cursor:pointer; font-weight:700;">↻ Refresh</button>
+                <button onclick="loadReferralDashboard(true)" style="font-size:10px; background:rgba(56,189,248,0.15); color:#22D3EE; border:none; padding:3px 10px; border-radius:20px; cursor:pointer; font-weight:700;">↻ Refresh</button>
             </div>
             <div id="commission-history-list">
                 <p style="color:var(--text-muted); text-align:center; font-size:13px;">Loading...</p>
@@ -1799,9 +1799,9 @@
         .pf-stat-tile:active { transform: scale(0.93); background: rgba(255,255,255,0.07); }
 
         .pf-gender-opt.selected {
-            border-color: rgba(201,168,118,0.5) !important;
-            background: rgba(201,168,118,0.12) !important;
-            color: #E3CFA0 !important;
+            border-color: rgba(139,92,246,0.5) !important;
+            background: rgba(139,92,246,0.12) !important;
+            color: #A78BFA !important;
         }
 
         .badge-tile {
@@ -1811,12 +1811,12 @@
             text-align: center;
         }
         .badge-tile.earned {
-            background: rgba(201,168,118,0.08); border-color: rgba(201,168,118,0.28);
+            background: rgba(139,92,246,0.08); border-color: rgba(139,92,246,0.28);
         }
         .badge-tile .badge-icon { font-size: 22px; }
         .badge-tile.locked .badge-icon { filter: grayscale(1); opacity: 0.35; }
         .badge-tile .badge-name { font-size: 8.5px; font-weight: 700; color: #a1a1aa; line-height: 1.2; }
-        .badge-tile.earned .badge-name { color: #E3CFA0; }
+        .badge-tile.earned .badge-name { color: #A78BFA; }
 
         .ls-tile {
             flex: 1; position: relative; border-radius: 14px; overflow: hidden;
@@ -1831,7 +1831,7 @@
             width: 100%; margin-top: 4px; padding: 6px 4px; border: none; border-radius: 8px;
             font-size: 10px; font-weight: 700; cursor: pointer;
         }
-        .ls-tile .ls-btn.claim { background: linear-gradient(135deg,#E3CFA0,#A3835A); color: #2a1c02; }
+        .ls-tile .ls-btn.claim { background: linear-gradient(135deg,#A78BFA,#3B82F6); color: #2a1c02; }
         .ls-tile .ls-btn.done  { background: rgba(61,214,140,0.16); color: #3dd68c; cursor: default; }
         .ls-tile.locked .ls-locked-overlay {
             position: absolute; inset: 0; backdrop-filter: blur(5px); background: rgba(10,10,12,0.45);
@@ -1848,8 +1848,8 @@
             transition: all 0.35s;
         }
         .mining-lvl-dot.on {
-            background: linear-gradient(135deg, #C9A876, #A3835A);
-            border-color: #C9A876;
+            background: linear-gradient(135deg, #8B5CF6, #3B82F6);
+            border-color: #8B5CF6;
             box-shadow: 0 0 7px rgba(251,191,36,0.7);
         }
 
@@ -1919,13 +1919,13 @@
         <!-- ── Profile Completion Nudge (dismissible, hidden once completed) ── -->
         <div id="profile-nudge-banner" class="pf-block" style="
             display:none; margin-bottom:12px; padding:12px 14px;
-            background:rgba(201,168,118,0.08); border:1px solid rgba(201,168,118,0.25);
+            background:rgba(139,92,246,0.08); border:1px solid rgba(139,92,246,0.25);
             border-radius:14px; align-items:center; gap:10px;
         ">
             <div style="display:flex; align-items:center; gap:10px;">
                 <span style="font-size:20px; flex-shrink:0;">🎁</span>
                 <div style="flex:1; min-width:0;">
-                    <p style="font-size:12.5px; font-weight:700; color:#E3CFA0; margin:0;">Complete your profile</p>
+                    <p style="font-size:12.5px; font-weight:700; color:#A78BFA; margin:0;">Complete your profile</p>
                     <p style="font-size:10.5px; color:#8f8a99; margin:2px 0 0;">Takes 5 seconds — earn 100 coins instantly</p>
                 </div>
                 <span onclick="dismissProfileNudge()" style="font-size:16px; color:#6b6672; padding:4px 6px; cursor:pointer; flex-shrink:0;">✕</span>
@@ -1974,7 +1974,7 @@
 
                 <button onclick="submitProfileDetails()" style="
                     width:100%; padding:11px; border:none; border-radius:12px; cursor:pointer;
-                    background:linear-gradient(135deg,#E3CFA0,#A3835A); color:#2a1c02;
+                    background:linear-gradient(135deg,#A78BFA,#3B82F6); color:#2a1c02;
                     font-size:13px; font-weight:800;
                 ">Save & Claim 100 Coins</button>
             </div>
@@ -1984,7 +1984,7 @@
         <div id="badges-card" class="pf-block card" style="padding:16px 16px 14px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                 <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">🏅 Achievements</p>
-                <span id="badges-count" style="font-size:9.5px; font-weight:700; background:rgba(15,157,107,0.14); color:#34C48D; padding:3px 8px; border-radius:20px;">0 / 0</span>
+                <span id="badges-count" style="font-size:9.5px; font-weight:700; background:rgba(34,211,238,0.14); color:#22D3EE; padding:3px 8px; border-radius:20px;">0 / 0</span>
             </div>
             <div id="badges-grid" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;"></div>
         </div>
@@ -1993,7 +1993,7 @@
         <div id="login-streak-card" class="pf-block card" style="padding:16px 16px 14px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                 <p style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.7px; margin:0;">🔥 Login Streak Rewards</p>
-                <span id="login-streak-count" style="font-size:9.5px; font-weight:700; background:rgba(245,158,11,0.14); color:#A3835A; padding:3px 8px; border-radius:20px;">Day 0</span>
+                <span id="login-streak-count" style="font-size:9.5px; font-weight:700; background:rgba(245,158,11,0.14); color:#3B82F6; padding:3px 8px; border-radius:20px;">Day 0</span>
             </div>
             <p style="font-size:10px; color:#5c5763; margin:0 0 12px;">Claim your daily "All Tasks Complete" bonus every day to keep the streak alive. Miss a day and it resets to 0.</p>
             <div id="login-streak-grid" style="display:flex; gap:10px;"></div>
@@ -2002,8 +2002,8 @@
         <!-- ── Coins Balance Hero ── -->
         <div class="pf-block" style="
             position: relative; margin-bottom: 12px; padding: 18px 20px;
-            background: linear-gradient(135deg, rgba(201,168,118,0.13), rgba(245,158,11,0.06));
-            border: 1px solid rgba(201,168,118,0.32); border-radius: 18px; overflow: hidden;
+            background: linear-gradient(135deg, rgba(139,92,246,0.13), rgba(245,158,11,0.06));
+            border: 1px solid rgba(139,92,246,0.32); border-radius: 18px; overflow: hidden;
             text-align: center;
         ">
             <!-- Sweep shine -->
@@ -2017,7 +2017,7 @@
             <p style="position:relative;margin:0 0 4px;line-height:1;">
                 <span id="profile-coins" style="
                     font-size:42px; font-weight:900;
-                    background: linear-gradient(135deg,#C9A876,#A3835A,#7A6242);
+                    background: linear-gradient(135deg,#8B5CF6,#3B82F6,#1E3A8A);
                     -webkit-background-clip:text; -webkit-text-fill-color:transparent;
                     background-clip:text;
                 ">—</span>
@@ -2036,7 +2036,7 @@
                 <p style="font-size:10px;color:#64748b;margin:5px 0 0;font-weight:600;">🔥 Streak</p>
             </div>
             <div class="pf-stat-tile">
-                <p style="font-size:22px;font-weight:800;color:#34C48D;margin:0;" id="profile-ads">—</p>
+                <p style="font-size:22px;font-weight:800;color:#22D3EE;margin:0;" id="profile-ads">—</p>
                 <p style="font-size:10px;color:#64748b;margin:5px 0 0;font-weight:600;">📺 Ads Today</p>
             </div>
             <div class="pf-stat-tile">
@@ -2056,12 +2056,12 @@
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
                 <div>
                     <p style="font-size:11px;color:#64748b;margin:0 0 5px;letter-spacing:1px;text-transform:uppercase;font-weight:700;">🏅 Your Rank</p>
-                    <p id="profile-rank-label" style="font-size:21px;font-weight:800;color:#C9A876;margin:0;">—</p>
+                    <p id="profile-rank-label" style="font-size:21px;font-weight:800;color:#8B5CF6;margin:0;">—</p>
                 </div>
                 <div style="
                     width:58px; height:58px; border-radius:50%;
-                    background: rgba(201,168,118,0.10);
-                    border: 2px solid rgba(201,168,118,0.28);
+                    background: rgba(139,92,246,0.10);
+                    border: 2px solid rgba(139,92,246,0.28);
                     display:flex; align-items:center; justify-content:center;
                 ">
                     <span id="profile-rank-emoji" style="font-size:30px; line-height:1;">🥉</span>
@@ -2071,10 +2071,10 @@
             <div style="height:8px;background:rgba(255,255,255,0.07);border-radius:20px;overflow:hidden;margin-bottom:6px;">
                 <div id="profile-rank-bar" style="
                     height:100%; width:0%;
-                    background: linear-gradient(90deg,#A3835A,#C9A876,#C9A876);
+                    background: linear-gradient(90deg,#3B82F6,#8B5CF6,#8B5CF6);
                     border-radius:20px;
                     transition:width 0.9s cubic-bezier(.4,0,.2,1);
-                    box-shadow: 0 0 10px rgba(201,168,118,0.45);
+                    box-shadow: 0 0 10px rgba(139,92,246,0.45);
                 "></div>
             </div>
             <p id="profile-rank-sub" style="font-size:11px;color:#64748b;margin:0;text-align:right;"></p>
@@ -2090,7 +2090,7 @@
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
                     <p style="font-size:11px;color:#92400e;margin:0 0 5px;letter-spacing:1px;text-transform:uppercase;font-weight:700;">⛏️ Mining Level</p>
-                    <p id="profile-mining-level" style="font-size:21px;font-weight:800;color:#C9A876;margin:0 0 8px;">Level 1</p>
+                    <p id="profile-mining-level" style="font-size:21px;font-weight:800;color:#8B5CF6;margin:0 0 8px;">Level 1</p>
                     <!-- Level dots -->
                     <div style="display:flex;gap:7px;align-items:center;" id="profile-mining-dots">
                         <span class="mining-lvl-dot on"></span>
@@ -2107,7 +2107,7 @@
                 ">⛏️</div>
             </div>
             <div style="margin-top:12px;padding-top:11px;border-top:1px solid rgba(255,255,255,0.06);">
-                <p id="profile-mining-reward" style="font-size:12px;color:#7A6242;margin:0;font-weight:600;">Earning 30 coins per session</p>
+                <p id="profile-mining-reward" style="font-size:12px;color:#1E3A8A;margin:0;font-weight:600;">Earning 30 coins per session</p>
             </div>
         </div>
 
@@ -2127,7 +2127,7 @@
     <div id="help" class="tab-content" style="display:none;">
 
         <!-- ═══════ FIELD INTEL (Notice Board redesign) ═══════ -->
-        <div class="card" style="padding:0 !important; overflow:hidden !important; background:linear-gradient(160deg,#17151f 0%,#12111a 100%) !important; border-color:rgba(201,168,118,0.18) !important;">
+        <div class="card" style="padding:0 !important; overflow:hidden !important; background:linear-gradient(160deg,#17151f 0%,#12111a 100%) !important; border-color:rgba(139,92,246,0.18) !important;">
             <div style="padding:16px 18px 14px; border-bottom:1px solid rgba(255,255,255,0.06);">
                 <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
                     <span style="font-size:11px;">📡</span>
@@ -2136,10 +2136,10 @@
                 <h4 style="font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; color:#f5f0e8; margin:0;">Field Intel</h4>
 
                 <!-- Daily potential hero strip -->
-                <div style="margin-top:12px; background:rgba(201,168,118,0.07); border:1px solid rgba(201,168,118,0.20); border-radius:12px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="margin-top:12px; background:rgba(139,92,246,0.07); border:1px solid rgba(139,92,246,0.20); border-radius:12px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <p style="font-size:9.5px; color:#a89a72; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 2px;">Today's Max Potential</p>
-                        <p style="font-family:'Space Grotesk',sans-serif; font-size:19px; font-weight:700; color:#E3CFA0; margin:0;">~219 <span style="font-size:11px;font-weight:600;color:#a89a72;">coins</span></p>
+                        <p style="font-family:'Space Grotesk',sans-serif; font-size:19px; font-weight:700; color:#A78BFA; margin:0;">~219 <span style="font-size:11px;font-weight:600;color:#a89a72;">coins</span></p>
                     </div>
                     <div style="text-align:right;">
                         <p style="font-size:9.5px; color:#a89a72; margin:0 0 2px;">👑 Premium</p>
@@ -2224,7 +2224,7 @@
                         <div class="intel-icon">🎡</div>
                         <div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Spin Wheel</p><p style="font-size:10px; color:#78737f; margin:1px 0 0;">5 spins / day · 1 ad each</p></div>
                         <span class="rarity-dot rarity-legendary"></span>
-                        <span style="font-size:12px; font-weight:700; color:#E3CFA0; min-width:44px; text-align:right;">up to 100</span>
+                        <span style="font-size:12px; font-weight:700; color:#A78BFA; min-width:44px; text-align:right;">up to 100</span>
                     </div>
 
                     <div class="intel-row">
@@ -2240,14 +2240,14 @@
             <!-- ── Elite Perks ── -->
             <div class="intel-section" style="border-top:1px solid rgba(255,255,255,0.06);">
                 <div onclick="this.parentElement.classList.toggle('open')" style="display:flex; justify-content:space-between; align-items:center; padding:13px 18px; cursor:pointer;">
-                    <span style="font-size:12.5px; font-weight:700; color:#E3CFA0;">👑 Elite Perks (Premium)</span>
+                    <span style="font-size:12.5px; font-weight:700; color:#A78BFA;">👑 Elite Perks (Premium)</span>
                     <span class="intel-chevron" style="font-size:11px; color:#78737f;">▾</span>
                 </div>
                 <div class="intel-body" style="padding:0 18px 14px;">
-                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Ad Reward</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">5 →</span><span style="font-size:12.5px; font-weight:700; color:#E3CFA0;">10 🪙</span></div>
-                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Daily Spins</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">5 →</span><span style="font-size:12.5px; font-weight:700; color:#E3CFA0;">15 / day</span></div>
-                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Referrals to Withdraw</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">5 →</span><span style="font-size:12.5px; font-weight:700; color:#E3CFA0;">2 Users</span></div>
-                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">VIP-Only Tasks</p></div><span class="rarity-dot rarity-epic"></span><span style="font-size:12.5px; font-weight:700; color:#E3CFA0; margin-left:6px;">Unlocked</span></div>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Ad Reward</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">5 →</span><span style="font-size:12.5px; font-weight:700; color:#A78BFA;">10 🪙</span></div>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Daily Spins</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">5 →</span><span style="font-size:12.5px; font-weight:700; color:#A78BFA;">15 / day</span></div>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Referrals to Withdraw</p></div><span style="font-size:11px; color:#5c5763; margin-right:8px;">5 →</span><span style="font-size:12.5px; font-weight:700; color:#A78BFA;">2 Users</span></div>
+                    <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">VIP-Only Tasks</p></div><span class="rarity-dot rarity-epic"></span><span style="font-size:12.5px; font-weight:700; color:#A78BFA; margin-left:6px;">Unlocked</span></div>
                 </div>
             </div>
 
@@ -2261,7 +2261,7 @@
                     <p style="font-size:10px; color:#78737f; margin:0 0 10px; line-height:1.5;">🪙 Coins are used for tournament entry fees only and can't be withdrawn. Real cash sits in your separate <b style="color:#3dd68c;">Rupee Wallet</b> — credited from tournament prizes and payouts.</p>
                     <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Minimum Withdrawal</p></div><span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">₹30</span></div>
                     <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Maximum Withdrawal</p></div><span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">₹10,000</span></div>
-                    <div class="intel-row"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0; flex:1;" id="help-ref-rule">Referral Requirement: <b style="color:#E3CFA0;">5 Users</b></p></div>
+                    <div class="intel-row"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0; flex:1;" id="help-ref-rule">Referral Requirement: <b style="color:#A78BFA;">5 Users</b></p></div>
                     <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Methods</p></div><span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">UPI · Google Play</span></div>
                     <div class="intel-row"><div style="flex:1;"><p style="font-size:12.5px; color:#e8e6ec; font-weight:600; margin:0;">Pending Requests</p></div><span style="font-size:12.5px; font-weight:700; color:#e8e6ec;">1 at a time</span></div>
                 </div>
@@ -2335,7 +2335,7 @@
         </div>
 
         <!-- Privacy Policy Accordion Card -->
-        <div class="card" style="border-color: rgba(52,196,141,0.25) !important; background: rgba(52,196,141,0.04) !important;">
+        <div class="card" style="border-color: rgba(56,189,248,0.25) !important; background: rgba(56,189,248,0.04) !important;">
             <button class="policy-accordion-btn" onclick="togglePrivacyPolicy()" id="privacy-policy-btn">
                 <div style="display:flex; align-items:center; gap:10px;">
                     <span style="font-size:20px;">🔐</span>
@@ -2385,7 +2385,7 @@
                 <!-- Leaderboard & Scoring -->
                 <p class="policy-section-title">🏆 Leaderboard & Scoring System</p>
                 <p class="policy-bullet">🔫 <b style="color:#e2e8f0;">1 Kill = 1 Point</b></p>
-                <p class="policy-bullet">🟡 <b style="color:#C9A876;">1 Booyah = +5 Bonus Points</b> — displayed as <b style="background:linear-gradient(135deg,#C9A876,#A3835A);color:#1a1200;padding:0 5px;border-radius:4px;font-size:11px;">B!</b> badge next to team name</p>
+                <p class="policy-bullet">🟡 <b style="color:#8B5CF6;">1 Booyah = +5 Bonus Points</b> — displayed as <b style="background:linear-gradient(135deg,#8B5CF6,#3B82F6);color:#1a1200;padding:0 5px;border-radius:4px;font-size:11px;">B!</b> badge next to team name</p>
                 <p class="policy-bullet">🥇 <b style="color:#e2e8f0;">Final Ranking = Placement Points + Kill Points + Booyah Bonus Points</b></p>
                 <p class="policy-text" style="margin-top:6px;">Rankings are calculated automatically after each round. Leaderboard updates live as admin submits results.</p>
 
@@ -2478,7 +2478,7 @@
                 card.innerHTML = `
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
                         <p style="font-size:13px; font-weight:700; color:#22c55e; margin:0;">${escapeHtml(task.title)}</p>
-                        <span style="font-size:12px; color:#C9A876; font-weight:700; white-space:nowrap; margin-left:8px;">+${task.reward || 5} 🪙</span>
+                        <span style="font-size:12px; color:#8B5CF6; font-weight:700; white-space:nowrap; margin-left:8px;">+${task.reward || 5} 🪙</span>
                     </div>
                     ${task.description ? `<p style="font-size:11px; color:#64748b; margin:0 0 8px 0;">${escapeHtml(task.description)}</p>` : ''}
                     <button
@@ -2587,7 +2587,7 @@
                 'z-index:9999;pointer-events:auto;';
             overlay.innerHTML =
                 '<span style="font-size:42px;animation:lock-pulse 1.8s ease-in-out infinite;">🔒</span>' +
-                '<span style="font-size:13px;color:#C9A876;margin-top:8px;font-weight:700;letter-spacing:0.5px;">YouTube tasks coming soon</span>';
+                '<span style="font-size:13px;color:#8B5CF6;margin-top:8px;font-weight:700;letter-spacing:0.5px;">YouTube tasks coming soon</span>';
             section.appendChild(overlay);
         }
     }
@@ -2645,8 +2645,8 @@
                 60%      { transform: translateY(-8px) scale(1.06); }
             }
             @keyframes winner-glow {
-                0%,100% { text-shadow: 0 0 24px #C9A876, 0 0 48px #A3835A; }
-                50%      { text-shadow: 0 0 48px #ffe066, 0 0 96px #C9A876; }
+                0%,100% { text-shadow: 0 0 24px #8B5CF6, 0 0 48px #3B82F6; }
+                50%      { text-shadow: 0 0 48px #ffe066, 0 0 96px #8B5CF6; }
             }
             @keyframes confetti-fall {
                 0%   { transform: translateY(-60px) rotate(0deg);   opacity:1; }
@@ -2659,13 +2659,13 @@
             #winner-popup-box {
                 animation: winner-fadein 0.55s cubic-bezier(.17,.67,.35,1.3) both;
                 background: linear-gradient(145deg, #1a1a2e, #16213e, #0f3460);
-                border: 2px solid #C9A876;
+                border: 2px solid #8B5CF6;
                 border-radius: 24px;
                 padding: 36px 28px 32px;
                 max-width: 340px;
                 width: 100%;
                 position: relative;
-                box-shadow: 0 0 60px rgba(201,168,118,0.35), 0 8px 32px rgba(0,0,0,0.6);
+                box-shadow: 0 0 60px rgba(139,92,246,0.35), 0 8px 32px rgba(0,0,0,0.6);
             }
             #winner-trophy {
                 font-size: 72px;
@@ -2676,7 +2676,7 @@
             #winner-title {
                 font-size: 22px;
                 font-weight: 800;
-                color: #C9A876;
+                color: #8B5CF6;
                 animation: winner-glow 2s ease-in-out infinite;
                 letter-spacing: 1px;
                 margin: 8px 0 4px;
@@ -2687,8 +2687,8 @@
                 margin: 4px 0 16px;
             }
             #winner-prize-box {
-                background: linear-gradient(135deg, #C9A87622, #A3835A11);
-                border: 1px solid #C9A87655;
+                background: linear-gradient(135deg, #8B5CF622, #3B82F611);
+                border: 1px solid #8B5CF655;
                 border-radius: 14px;
                 padding: 14px 20px;
                 margin: 12px 0 20px;
@@ -2696,7 +2696,7 @@
             #winner-prize-coins {
                 font-size: 32px;
                 font-weight: 900;
-                color: #C9A876;
+                color: #8B5CF6;
                 display: block;
             }
             #winner-prize-label {
@@ -2705,7 +2705,7 @@
                 margin-top: 2px;
             }
             #winner-close-btn {
-                background: linear-gradient(135deg, #C9A876, #A3835A);
+                background: linear-gradient(135deg, #8B5CF6, #3B82F6);
                 color: #1a1a2e;
                 border: none;
                 border-radius: 50px;
@@ -2714,7 +2714,7 @@
                 font-weight: 800;
                 cursor: pointer;
                 letter-spacing: 0.5px;
-                box-shadow: 0 4px 18px rgba(201,168,118,0.4);
+                box-shadow: 0 4px 18px rgba(139,92,246,0.4);
                 transition: transform 0.15s, box-shadow 0.15s;
                 width: 100%;
             }
@@ -2752,7 +2752,7 @@
         display:none; position:fixed; bottom:0; left:0; right:0;
         background:linear-gradient(180deg,#0d1b2a 0%,#07111a 100%);
         border-radius:24px 24px 0 0;
-        border-top:1px solid rgba(201,168,118,0.25);
+        border-top:1px solid rgba(139,92,246,0.25);
         z-index:3001; max-height:88vh; overflow-y:auto;
         padding:0 0 32px 0;
     ">
@@ -2777,7 +2777,7 @@
         </div>
 
         <!-- Benefits list -->
-        <div style="margin:14px 20px 0; background:rgba(201,168,118,0.06); border:1px solid rgba(201,168,118,0.15); border-radius:14px; padding:14px;">
+        <div style="margin:14px 20px 0; background:rgba(139,92,246,0.06); border:1px solid rgba(139,92,246,0.15); border-radius:14px; padding:14px;">
             <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">✨ Premium Benefits</p>
             <div style="display:flex;flex-direction:column;gap:8px;">
                 <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px;">🎯</span><span style="font-size:13px;color:#e2e8f0;">Task reward <b style="color:#4ade80;">+25% bonus</b> coins</span></div>
@@ -2795,9 +2795,9 @@
 
                 <!-- Weekly -->
                 <div id="plan-weekly" onclick="selectPlan('weekly')" style="
-                    border:2px solid rgba(201,168,118,0.2); border-radius:14px;
+                    border:2px solid rgba(139,92,246,0.2); border-radius:14px;
                     padding:14px 16px; cursor:pointer; position:relative;
-                    background:rgba(201,168,118,0.04); transition:all 0.2s;
+                    background:rgba(34,211,238,0.05); transition:all 0.2s;
                     display:flex; justify-content:space-between; align-items:center;
                 ">
                     <div>
@@ -2805,36 +2805,36 @@
                         <p style="font-size:11px;color:#64748b;margin:3px 0 0;">7 days — Best for trying out</p>
                     </div>
                     <div style="text-align:right;">
-                        <p style="font-size:20px;font-weight:800;color:#C9A876;margin:0;">₹29</p>
+                        <p style="font-size:20px;font-weight:800;color:#8B5CF6;margin:0;">₹29</p>
                         <p style="font-size:10px;color:#64748b;margin:0;">~₹4/day</p>
                     </div>
                 </div>
 
                 <!-- Monthly (Recommended) -->
                 <div id="plan-monthly" onclick="selectPlan('monthly')" style="
-                    border:2px solid #C9A876; border-radius:14px;
+                    border:2px solid #8B5CF6; border-radius:14px;
                     padding:14px 16px; cursor:pointer; position:relative;
-                    background:rgba(201,168,118,0.08); transition:all 0.2s;
+                    background:rgba(139,92,246,0.08); transition:all 0.2s;
                     display:flex; justify-content:space-between; align-items:center;
                 ">
-                    <div style="position:absolute;top:-10px;left:14px;background:linear-gradient(135deg,#C9A876,#A3835A);border-radius:20px;padding:2px 10px;">
+                    <div style="position:absolute;top:-10px;left:14px;background:linear-gradient(135deg,#8B5CF6,#3B82F6);border-radius:20px;padding:2px 10px;">
                         <p style="font-size:10px;font-weight:800;color:#1e293b;margin:0;">⭐ POPULAR</p>
                     </div>
                     <div>
-                        <p style="font-size:14px;font-weight:800;color:#C9A876;margin:0;">📆 Monthly</p>
+                        <p style="font-size:14px;font-weight:800;color:#8B5CF6;margin:0;">📆 Monthly</p>
                         <p style="font-size:11px;color:#94a3b8;margin:3px 0 0;">30 days — Most value!</p>
                     </div>
                     <div style="text-align:right;">
-                        <p style="font-size:20px;font-weight:800;color:#C9A876;margin:0;">₹79</p>
+                        <p style="font-size:20px;font-weight:800;color:#8B5CF6;margin:0;">₹79</p>
                         <p style="font-size:10px;color:#64748b;margin:0;">~₹2.6/day</p>
                     </div>
                 </div>
 
                 <!-- Quarterly -->
                 <div id="plan-quarterly" onclick="selectPlan('quarterly')" style="
-                    border:2px solid rgba(201,168,118,0.2); border-radius:14px;
+                    border:2px solid rgba(139,92,246,0.2); border-radius:14px;
                     padding:14px 16px; cursor:pointer; position:relative;
-                    background:rgba(201,168,118,0.04); transition:all 0.2s;
+                    background:rgba(34,211,238,0.05); transition:all 0.2s;
                     display:flex; justify-content:space-between; align-items:center;
                 ">
                     <div style="position:absolute;top:-10px;right:14px;background:linear-gradient(135deg,#22c55e,#16a34a);border-radius:20px;padding:2px 10px;">
@@ -2845,7 +2845,7 @@
                         <p style="font-size:11px;color:#64748b;margin:3px 0 0;">90 days — Save 16%</p>
                     </div>
                     <div style="text-align:right;">
-                        <p style="font-size:20px;font-weight:800;color:#C9A876;margin:0;">₹199</p>
+                        <p style="font-size:20px;font-weight:800;color:#8B5CF6;margin:0;">₹199</p>
                         <p style="font-size:10px;color:#64748b;margin:0;">~₹2.2/day</p>
                     </div>
                 </div>
@@ -2865,7 +2865,7 @@
 
                         <!-- QR Code -->
                         <div id="prem-qr-wrap" style="margin-top:10px;text-align:center;display:none;">
-                            <div style="background:#fff;border-radius:14px;padding:10px;display:inline-block;box-shadow:0 0 20px rgba(201,168,118,0.2);">
+                            <div style="background:#fff;border-radius:14px;padding:10px;display:inline-block;box-shadow:0 0 20px rgba(139,92,246,0.2);">
                                 <img id="prem-qr-img" src="" alt="UPI QR Code" style="width:170px;height:170px;object-fit:contain;border-radius:8px;display:block;">
                             </div>
                             <p style="font-size:11px;color:#4ade80;margin:6px 0 0;font-weight:700;">📷 Scan QR or copy UPI ID below</p>
@@ -2873,8 +2873,8 @@
 
                         <!-- UPI ID row -->
                         <div style="background:rgba(0,0,0,0.3);border-radius:10px;padding:10px 14px;margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-                            <p id="prem-upi-display" style="font-size:14px;font-weight:800;color:#C9A876;margin:0;letter-spacing:0.5px;word-break:break-all;">loading...</p>
-                            <button onclick="copyUpi()" style="background:rgba(201,168,118,0.15);border:1px solid rgba(201,168,118,0.3);color:#C9A876;border-radius:8px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;margin-left:8px;">📋 Copy</button>
+                            <p id="prem-upi-display" style="font-size:14px;font-weight:800;color:#8B5CF6;margin:0;letter-spacing:0.5px;word-break:break-all;">loading...</p>
+                            <button onclick="copyUpi()" style="background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);color:#8B5CF6;border-radius:8px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;margin-left:8px;">📋 Copy</button>
                         </div>
                         <p id="prem-amount-display" style="font-size:12px;color:#94a3b8;margin:4px 0 0;">Amount: loading...</p>
                     </div>
@@ -2916,7 +2916,7 @@
                             border:1.5px solid rgba(255,255,255,0.1);
                             border-radius:12px; padding:12px 44px 12px 14px;
                             font-size:14px; font-weight:700;
-                            color:#C9A876; outline:none;
+                            color:#8B5CF6; outline:none;
                             letter-spacing:0.5px;
                             transition:border-color 0.2s;
                         "
@@ -2934,11 +2934,11 @@
 
             <button id="prem-pay-btn" onclick="openBotForPayment()" style="
                 width:100%; margin-top:12px;
-                background:linear-gradient(135deg,#C9A876,#A3835A);
+                background:linear-gradient(135deg,#8B5CF6,#3B82F6);
                 border:none; border-radius:14px;
                 padding:14px; font-size:15px; font-weight:800;
                 color:#1e293b; cursor:pointer;
-                box-shadow:0 4px 20px rgba(201,168,118,0.3);
+                box-shadow:0 4px 20px rgba(139,92,246,0.3);
             ">✅ I've Paid — Open Bot to Send Screenshot</button>
 
             <button onclick="resetPremiumModal()" style="
