@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Daksh Grand Earn</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
     <script src='//libtl.com/sdk.js' data-zone='10822310' data-sdk='show_10822310'></script>
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
@@ -2854,21 +2853,93 @@
         </div>
 
         <!-- Payment (shown after plan selected) -->
+        <!-- Payment Instructions (shown after plan selected) -->
         <div id="prem-pay-section" style="display:none; padding:0 20px; margin-top:16px;">
-            <div style="background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.2); border-radius:14px; padding:18px; text-align:center;">
-                <p style="font-size:12px;font-weight:800;color:#4ade80;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">💳 Secure Payment</p>
-                <p id="prem-amount-display" style="font-size:22px;font-weight:800;color:#C9A876;margin:0 0 4px;">₹—</p>
-                <p style="font-size:11px;color:#94a3b8;margin:0 0 16px;">Powered by Razorpay — Cards, UPI, Netbanking &amp; Wallets accepted</p>
-                <button id="prem-pay-btn" onclick="startRazorpayPayment()" style="
-                    width:100%;
-                    background:linear-gradient(135deg,#C9A876,#A3835A);
-                    border:none; border-radius:14px;
-                    padding:14px; font-size:15px; font-weight:800;
-                    color:#1e293b; cursor:pointer;
-                    box-shadow:0 4px 20px rgba(201,168,118,0.3);
-                ">🔒 Pay Securely with Razorpay</button>
-                <p style="font-size:10px;color:#64748b;margin:10px 0 0;">Premium activates automatically the moment payment is confirmed.</p>
+            <div style="background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.2); border-radius:14px; padding:16px;">
+                <p style="font-size:12px;font-weight:800;color:#4ade80;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 12px;">💳 Payment Steps</p>
+
+                <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">
+                    <span style="background:#4ade80;color:#0d1b2a;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;">1</span>
+                    <div style="flex:1;">
+                        <p style="font-size:13px;font-weight:700;color:#e2e8f0;margin:0;">Pay via UPI</p>
+
+                        <!-- QR Code -->
+                        <div id="prem-qr-wrap" style="margin-top:10px;text-align:center;display:none;">
+                            <div style="background:#fff;border-radius:14px;padding:10px;display:inline-block;box-shadow:0 0 20px rgba(201,168,118,0.2);">
+                                <img id="prem-qr-img" src="" alt="UPI QR Code" style="width:170px;height:170px;object-fit:contain;border-radius:8px;display:block;">
+                            </div>
+                            <p style="font-size:11px;color:#4ade80;margin:6px 0 0;font-weight:700;">📷 Scan QR or copy UPI ID below</p>
+                        </div>
+
+                        <!-- UPI ID row -->
+                        <div style="background:rgba(0,0,0,0.3);border-radius:10px;padding:10px 14px;margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
+                            <p id="prem-upi-display" style="font-size:14px;font-weight:800;color:#C9A876;margin:0;letter-spacing:0.5px;word-break:break-all;">loading...</p>
+                            <button onclick="copyUpi()" style="background:rgba(201,168,118,0.15);border:1px solid rgba(201,168,118,0.3);color:#C9A876;border-radius:8px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;margin-left:8px;">📋 Copy</button>
+                        </div>
+                        <p id="prem-amount-display" style="font-size:12px;color:#94a3b8;margin:4px 0 0;">Amount: loading...</p>
+                    </div>
+                </div>
+
+                <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">
+                    <span style="background:#4ade80;color:#0d1b2a;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;">2</span>
+                    <div>
+                        <p style="font-size:13px;font-weight:700;color:#e2e8f0;margin:0;">Take a Screenshot</p>
+                        <p style="font-size:11px;color:#64748b;margin:2px 0 0;">Save screenshot of the successful payment</p>
+                    </div>
+                </div>
+
+                <div style="display:flex;align-items:flex-start;gap:10px;">
+                    <span style="background:#4ade80;color:#0d1b2a;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;">3</span>
+                    <div>
+                        <p style="font-size:13px;font-weight:700;color:#e2e8f0;margin:0;">Send screenshot to the bot</p>
+                        <p style="font-size:11px;color:#64748b;margin:2px 0 0;">Admin will verify and activate your premium within 10–30 minutes</p>
+                    </div>
+                </div>
             </div>
+
+            <!-- Transaction ID input -->
+            <div style="margin-top:14px;">
+                <label style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.7px;display:block;margin-bottom:6px;">
+                    🧾 Transaction / UTR ID <span style="color:#ef4444;">*</span>
+                </label>
+                <div style="position:relative;">
+                    <input
+                        id="prem-txn-input"
+                        type="text"
+                        inputmode="numeric"
+                        placeholder="Enter 12-digit UTR or Transaction ID"
+                        maxlength="30"
+                        oninput="validateTxnInput()"
+                        style="
+                            width:100%; box-sizing:border-box;
+                            background:rgba(0,0,0,0.35);
+                            border:1.5px solid rgba(255,255,255,0.1);
+                            border-radius:12px; padding:12px 44px 12px 14px;
+                            font-size:14px; font-weight:700;
+                            color:#C9A876; outline:none;
+                            letter-spacing:0.5px;
+                            transition:border-color 0.2s;
+                        "
+                    />
+                    <span id="prem-txn-tick" style="
+                        position:absolute; right:14px; top:50%;
+                        transform:translateY(-50%);
+                        font-size:16px; display:none;
+                    ">✅</span>
+                </div>
+                <p id="prem-txn-err" style="font-size:11px;color:#ef4444;margin:4px 0 0;display:none;">
+                    ⚠️ Please enter a valid Transaction / UTR ID before proceeding.
+                </p>
+            </div>
+
+            <button id="prem-pay-btn" onclick="openBotForPayment()" style="
+                width:100%; margin-top:12px;
+                background:linear-gradient(135deg,#C9A876,#A3835A);
+                border:none; border-radius:14px;
+                padding:14px; font-size:15px; font-weight:800;
+                color:#1e293b; cursor:pointer;
+                box-shadow:0 4px 20px rgba(201,168,118,0.3);
+            ">✅ I've Paid — Open Bot to Send Screenshot</button>
 
             <button onclick="resetPremiumModal()" style="
                 width:100%; margin-top:8px;
@@ -2889,4 +2960,3 @@
 
 </body>
 </html>
-j
