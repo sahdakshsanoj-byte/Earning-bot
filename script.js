@@ -5369,8 +5369,13 @@ function resetPremiumModal() {
             ? 'rgba(241,196,15,0.08)'
             : 'rgba(241,196,15,0.04)';
     });
-    const btn = document.getElementById('prem-pay-btn');
-    if (btn) { btn.disabled = false; btn.innerText = '🔒 Pay Securely with Razorpay'; }
+    // Clear transaction ID input
+    const txnInput = document.getElementById('prem-txn-input');
+    const txnTick  = document.getElementById('prem-txn-tick');
+    const txnErr   = document.getElementById('prem-txn-err');
+    if (txnInput) { txnInput.value = ''; txnInput.style.borderColor = 'rgba(255,255,255,0.1)'; }
+    if (txnTick)  txnTick.style.display  = 'none';
+    if (txnErr)   txnErr.style.display   = 'none';
 }
 
 function selectPlan(plan) {
@@ -5387,8 +5392,36 @@ function selectPlan(plan) {
         el.style.background  = selected ? 'rgba(34,197,94,0.08)' : 'rgba(241,196,15,0.03)';
     });
 
+    // UPI ID — from CONFIG.ADMIN_UPI, fallback to hardcoded default
+    const adminUpi = (typeof CONFIG !== 'undefined' && CONFIG.ADMIN_UPI)
+        ? CONFIG.ADMIN_UPI
+        : 'sahdaksh@fam';
+
+    // QR Image — CONFIG.ADMIN_QR_URL > absolute URL built from page location > hidden
+    let qrUrl = '';
+    if (typeof CONFIG !== 'undefined' && CONFIG.ADMIN_QR_URL) {
+        qrUrl = CONFIG.ADMIN_QR_URL;
+    } else {
+        // Build absolute URL from current page so relative paths always work
+        const base = window.location.href.replace(/[^/]*$/, '');
+        qrUrl = base + 'payment_qr.jpg';
+    }
+
+    // Show QR image
+    const qrWrap = document.getElementById('prem-qr-wrap');
+    const qrImg  = document.getElementById('prem-qr-img');
+    if (qrImg && qrWrap) {
+        qrImg.src        = qrUrl;
+        qrImg.onerror    = () => { qrWrap.style.display = 'none'; };
+        qrImg.onload     = () => { qrWrap.style.display = 'block'; };
+        qrWrap.style.display = 'block';
+    }
+
+    // Update payment section
+    const upiEl    = document.getElementById('prem-upi-display');
     const amountEl = document.getElementById('prem-amount-display');
-    if (amountEl) amountEl.textContent = `₹${info.price} — ${info.label} (${info.days} days)`;
+    if (upiEl)    upiEl.textContent    = adminUpi;
+    if (amountEl) amountEl.textContent = `Amount: ₹${info.price} (${info.label} — ${info.days} days)`;
 
     // Show payment section, hide plan section
     document.getElementById('prem-plan-section').style.display = 'none';
@@ -5399,82 +5432,61 @@ function selectPlan(plan) {
     if (modal) modal.scrollTop = 0;
 }
 
-async function startRazorpayPayment() {
-    if (!_selectedPlan || !userId) return;
-    const btn = document.getElementById('prem-pay-btn');
-    if (btn) { btn.disabled = true; btn.innerText = '⏳ Starting payment...'; }
-
-    try {
-        const orderRes  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/premium/create_order`, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ user_id: userId, plan: _selectedPlan }),
-        }, 3, 2000, 25000);  // longer timeout — this call reaches Razorpay's servers too, not just our own DB
-        const order = await orderRes.json();
-
-        if (order.status !== 'success') {
-            showToast(order.message || 'Could not start payment.', 'error');
-            if (btn) { btn.disabled = false; btn.innerText = '🔒 Pay Securely with Razorpay'; }
-            return;
-        }
-
-        if (typeof Razorpay === 'undefined') {
-            showToast('Payment SDK failed to load. Check your connection.', 'error');
-            if (btn) { btn.disabled = false; btn.innerText = '🔒 Pay Securely with Razorpay'; }
-            return;
-        }
-
-        const rzp = new Razorpay({
-            key:      order.key_id,
-            amount:   order.amount,
-            currency: order.currency,
-            order_id: order.order_id,
-            name:     'Daksh Grand Earn',
-            description: `${order.plan_label} Premium`,
-            theme:    { color: '#C9A876' },
-            handler: async function (response) {
-                if (btn) btn.innerText = '⏳ Verifying payment...';
-                try {
-                    const verifyRes = await fetchWithRetry(`${CONFIG.API_BASE_URL}/premium/verify_payment`, {
-                        method:  'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body:    JSON.stringify({
-                            user_id: userId,
-                            plan:    _selectedPlan,
-                            razorpay_order_id:   response.razorpay_order_id,
-                            razorpay_payment_id: response.razorpay_payment_id,
-                            razorpay_signature:  response.razorpay_signature,
-                        }),
-                    }, 3, 2000, 25000);
-                    const verify = await verifyRes.json();
-                    if (verify.status === 'success') {
-                        showToast(verify.message || '🎉 Premium activated!', 'success');
-                        hidePremiumModal();
-                        fetchLiveData();
-                    } else {
-                        showToast(verify.message || 'Payment verification failed.', 'error');
-                    }
-                } catch (e) {
-                    showToast('Network error during verification. Contact support if money was deducted.', 'error');
-                } finally {
-                    if (btn) { btn.disabled = false; btn.innerText = '🔒 Pay Securely with Razorpay'; }
-                }
-            },
-            modal: {
-                ondismiss: function () {
-                    if (btn) { btn.disabled = false; btn.innerText = '🔒 Pay Securely with Razorpay'; }
-                },
-            },
-        });
-        rzp.on('payment.failed', function (resp) {
-            showToast('Payment failed. Please try again.', 'error');
-            if (btn) { btn.disabled = false; btn.innerText = '🔒 Pay Securely with Razorpay'; }
-        });
-        rzp.open();
-    } catch (e) {
-        showToast('⚠️ Connection error. Please retry.', 'error');
-        if (btn) { btn.disabled = false; btn.innerText = '🔒 Pay Securely with Razorpay'; }
+function copyUpi() {
+    const adminUpi = (typeof CONFIG !== 'undefined' && CONFIG.ADMIN_UPI)
+        ? CONFIG.ADMIN_UPI
+        : 'sahdaksh@fam';
+    if (!adminUpi) {
+        showToast('⚠️ UPI ID not configured. Contact admin.', 'error');
+        return;
     }
+    copyText(adminUpi, 'UPI ID copied!');
+}
+
+function validateTxnInput() {
+    const inp  = document.getElementById('prem-txn-input');
+    const tick = document.getElementById('prem-txn-tick');
+    const err  = document.getElementById('prem-txn-err');
+    if (!inp) return;
+    const val = inp.value.trim();
+    const valid = val.length >= 6;
+    // Border colour feedback
+    inp.style.borderColor = val.length === 0
+        ? 'rgba(255,255,255,0.1)'
+        : valid ? '#4ade80' : '#ef4444';
+    // Tick icon
+    if (tick) tick.style.display = valid ? 'inline' : 'none';
+    // Hide error when user starts typing valid input
+    if (err && valid) err.style.display = 'none';
+}
+
+function openBotForPayment() {
+    if (!_selectedPlan) return;
+
+    // Validate transaction ID
+    const txnInput = document.getElementById('prem-txn-input');
+    const txnErr   = document.getElementById('prem-txn-err');
+    const txnId    = txnInput ? txnInput.value.trim() : '';
+    if (txnId.length < 6) {
+        if (txnErr)   txnErr.style.display = 'block';
+        if (txnInput) {
+            txnInput.style.borderColor = '#ef4444';
+            txnInput.focus();
+        }
+        return;
+    }
+
+    const info  = PREMIUM_PLANS_INFO[_selectedPlan];
+    const botUN = (typeof CONFIG !== 'undefined' && CONFIG.BOT_USERNAME) ? CONFIG.BOT_USERNAME : '';
+    if (!botUN) {
+        showToast('⚠️ Bot username not configured.', 'error');
+        return;
+    }
+    const uid    = userId || 'unknown';
+    const botUrl = `https://t.me/${botUN.replace('@','')}?start=premium_pay_${_selectedPlan}_${uid}_${encodeURIComponent(txnId)}`;
+    hidePremiumModal();
+    openExternalLink(botUrl);
+    showToast('📤 Bot opened — send your screenshot!', 'ok');
 }
 
 // ============================================================
