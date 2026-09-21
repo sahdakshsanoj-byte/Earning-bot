@@ -47,7 +47,6 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from telebot import types
 import telebot
-import razorpay
 
 
 # ============================================================
@@ -74,14 +73,6 @@ FRONTEND_URL      = (os.getenv("FRONTEND_URL")       or "https://sahdakshsanoj-b
 ADMIN_TOKEN       = (os.getenv("ADMIN_TOKEN")        or "").strip()
 MOD_TOKEN         = (os.getenv("MOD_TOKEN")          or "").strip()
 MONETAG_API_TOKEN = (os.getenv("MONETAG_API_TOKEN")  or "").strip()  # Monetag publisher API token
-RAZORPAY_KEY_ID     = (os.getenv("RAZORPAY_KEY_ID")     or "").strip()
-RAZORPAY_KEY_SECRET = (os.getenv("RAZORPAY_KEY_SECRET") or "").strip()
-razorpay_client = None
-if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
-    try:
-        razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
-    except Exception as _rzp_exc:
-        logging.getLogger(__name__).warning("Razorpay client init failed: %s", _rzp_exc)
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:32] if BOT_TOKEN else ""
 
 # Referral Lock — Render dashboard mein set karo: REFERRAL_ACTIVE = false → bypass referral check
@@ -2260,137 +2251,6 @@ def claim_login_milestone_api():
     except Exception as exc:
         logger.error("claim_login_milestone_api error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
-
-
-# ============================================================
-# RAZORPAY — Premium purchase (test mode until live keys are set)
-# ============================================================
-
-@app.route("/premium/create_order", methods=["POST"])
-def premium_create_order_api():
-    """Step 1: frontend calls this after the user picks a plan. Creates a
-    Razorpay Order and returns just enough for Checkout to open — the key
-    secret never leaves the server."""
-    if not razorpay_client:
-        return jsonify({"status": "error", "message": "Payments are not configured yet. Contact admin."}), 400
-
-    try:
-        data    = request.get_json(force=True) or {}
-        user_id = int(data.get("user_id", 0))
-        plan    = str(data.get("plan", "")).strip().lower()
-    except (TypeError, ValueError):
-        return jsonify({"status": "error", "message": "Invalid request."}), 400
-
-    plan_info = PREMIUM_PLANS.get(plan)
-    if not user_id or not plan_info:
-        return jsonify({"status": "error", "message": "Invalid plan."}), 400
-
-    try:
-        order = razorpay_client.order.create({
-            "amount":   plan_info["price"] * 100,  # paise
-            "currency": "INR",
-            "notes":    {"user_id": str(user_id), "plan": plan},
-        })
-        return jsonify({
-            "status":   "success",
-            "order_id": order["id"],
-            "amount":   order["amount"],
-            "currency": order["currency"],
-            "key_id":   RAZORPAY_KEY_ID,
-            "plan":     plan,
-            "plan_label": plan_info["label"],
-        })
-    except Exception as exc:
-        logger.error("premium_create_order_api error for %s: %s", user_id, exc)
-        return jsonify({
-            "status":  "error",
-            "message": f"Could not start payment: {str(exc)[:150]}",
-        }), 400
-
-
-@app.route("/premium/verify_payment", methods=["POST"])
-def premium_verify_payment_api():
-    """Step 2: frontend calls this after Razorpay Checkout succeeds. Verifies
-    the signature server-side (proves the payment is genuine and wasn't
-    tampered with) and activates premium immediately — no manual /setpremium
-    needed."""
-    if not razorpay_client:
-        return jsonify({"status": "error", "message": "Payments are not configured yet. Contact admin."}), 400
-
-    try:
-        data          = request.get_json(force=True) or {}
-        user_id       = int(data.get("user_id", 0))
-        plan          = str(data.get("plan", "")).strip().lower()
-        razorpay_order_id   = str(data.get("razorpay_order_id", ""))
-        razorpay_payment_id = str(data.get("razorpay_payment_id", ""))
-        razorpay_signature  = str(data.get("razorpay_signature", ""))
-    except (TypeError, ValueError):
-        return jsonify({"status": "error", "message": "Invalid request."}), 400
-
-    plan_info = PREMIUM_PLANS.get(plan)
-    if not user_id or not plan_info or not all([razorpay_order_id, razorpay_payment_id, razorpay_signature]):
-        return jsonify({"status": "error", "message": "Invalid payment data."}), 400
-
-    try:
-        razorpay_client.utility.verify_payment_signature({
-            "razorpay_order_id":   razorpay_order_id,
-            "razorpay_payment_id": razorpay_payment_id,
-            "razorpay_signature":  razorpay_signature,
-        })
-    except razorpay.errors.SignatureVerificationError:
-        logger.warning("Razorpay signature verification FAILED for user %s, order %s", user_id, razorpay_order_id)
-        return jsonify({"status": "error", "message": "Payment verification failed. If money was deducted, contact support."}), 400
-    except Exception as exc:
-        logger.error("premium_verify_payment_api verify error for %s: %s", user_id, exc)
-        return jsonify({
-            "status":  "error",
-            "message": f"Verification error: {str(exc)[:150]}",
-        }), 400
-
-    # Signature valid — activate premium.
-    days      = plan_info["days"]
-    expiry_dt = datetime.utcnow() + timedelta(days=days)
-    users_col.update_one(
-        {"user_id": user_id},
-        {"$set": {
-            "premium":                 True,
-            "premium_expiry":          expiry_dt,
-            "premium_plan":            plan,
-            "premium_set_by":          "razorpay",
-            "premium_set_at":          datetime.utcnow(),
-            "razorpay_last_payment_id": razorpay_payment_id,
-        }},
-    )
-    _invalidate_user_cache(user_id)
-    logger.info("Razorpay premium activated: user=%s plan=%s payment_id=%s", user_id, plan, razorpay_payment_id)
-
-    try:
-        bot.send_message(
-            user_id,
-            f"\U0001f389 *Payment Successful — Premium Activated!*\n\n"
-            f"\U0001f451 Plan: *{plan_info['label']}*\n"
-            f"\U0001f4c5 Expires: {expiry_dt.strftime('%d %b %Y')} ({days} days)\n\n"
-            f"Enjoy your premium benefits!",
-            parse_mode="Markdown",
-        )
-    except Exception:
-        pass
-    try:
-        bot.send_message(
-            ADMIN_ID,
-            f"\U0001f4b3 *Razorpay Payment Received*\n\n"
-            f"User: `{user_id}`\nPlan: {plan_info['label']} (\u20b9{plan_info['price']})\n"
-            f"Payment ID: `{razorpay_payment_id}`",
-            parse_mode="Markdown",
-        )
-    except Exception:
-        pass
-
-    return jsonify({
-        "status":  "success",
-        "message": f"\U0001f389 Payment verified! Premium activated for {days} days.",
-        "expiry":  expiry_dt.strftime('%d %b %Y'),
-    })
 
 
 @app.route("/verify_task", methods=["POST"])
@@ -6125,6 +5985,50 @@ def start(message):
     username  = message.from_user.first_name or "User"
     params    = message.text.split()
     deep_link = params[1] if len(params) > 1 else None
+
+    # ── Premium payment deep link: premium_pay_<plan>_<uid>_<txnId> ──
+    if deep_link and deep_link.startswith("premium_pay_"):
+        try:
+            # Format: premium_pay_monthly_123456789_UTR123456789012
+            parts_dl  = deep_link.split("_", 4)   # ['premium','pay','plan','uid','txnId']
+            plan_key  = parts_dl[2] if len(parts_dl) > 2 else "unknown"
+            pay_uid   = parts_dl[3] if len(parts_dl) > 3 else str(user_id)
+            txn_id    = parts_dl[4] if len(parts_dl) > 4 else "N/A"
+
+            plan_labels = {"weekly": "Weekly ₹29", "monthly": "Monthly ₹79", "quarterly": "Quarterly ₹199"}
+            plan_days   = {"weekly": 7, "monthly": 30, "quarterly": 90}
+            plan_label  = plan_labels.get(plan_key, plan_key)
+            plan_day    = plan_days.get(plan_key, 30)
+
+            # Notify admin
+            admin_text = (
+                f"💳 *New Premium Payment Request*\n\n"
+                f"👤 User ID: `{pay_uid}`\n"
+                f"📛 Name: {username}\n"
+                f"📦 Plan: *{plan_label}*\n"
+                f"🧾 UTR / Txn ID: `{txn_id}`\n\n"
+                f"✅ Verify & activate:\n"
+                f"`/setpremium {pay_uid} {plan_day} {plan_key}`\n\n"
+                f"❌ To reject: simply ignore or notify user."
+            )
+            try:
+                bot.send_message(ADMIN_ID, admin_text, parse_mode="Markdown")
+            except Exception:
+                pass
+
+            # Acknowledge user
+            bot.send_message(
+                user_id,
+                f"✅ *Payment request received!*\n\n"
+                f"📦 Plan: *{plan_label}*\n"
+                f"🧾 UTR ID: `{txn_id}`\n\n"
+                f"📸 Please send your payment screenshot below so the admin can verify faster.\n\n"
+                f"⏳ Premium will be activated within *10–30 minutes* after verification.",
+                parse_mode="Markdown"
+            )
+            return
+        except Exception as e:
+            logger.error("premium_pay deep link error: %s", e)
 
     # ── Normal /start ──
     referrer_id = deep_link if deep_link and not deep_link.startswith("premium") else None
