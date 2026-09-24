@@ -1,0 +1,91 @@
+/* ═══ AURORA THEME — index.html me style.css ke BAAD load hota hai ═══ */
+:root{
+  --ac1:#8b5cf6; --ac2:#22d3ee;
+  --surface:linear-gradient(160deg,rgba(255,255,255,.055),rgba(255,255,255,.015));
+  --edge:rgba(255,255,255,.08);
+  --r:22px;
+}
+html,body{
+  background:
+    radial-gradient(60% 40% at 15% 0%,rgba(139,92,246,.20),transparent 70%),
+    radial-gradient(50% 35% at 100% 30%,rgba(34,211,238,.12),transparent 70%),
+    #05070d !important;
+  background-attachment:fixed !important;
+  font-family:'Plus Jakarta Sans',system-ui,sans-serif !important;
+}
+
+/* Header */
+.header{
+  background:rgba(5,7,13,.72) !important;
+  backdrop-filter:blur(18px) !important; -webkit-backdrop-filter:blur(18px) !important;
+  border-bottom:1px solid var(--edge) !important;
+  position:sticky; top:0; z-index:50;
+}
+#tab-title{
+  font-family:'Space Grotesk',sans-serif !important;
+  font-size:24px !important; font-weight:700 !important; letter-spacing:-.4px;
+  background:linear-gradient(90deg,#fff,#c4b5fd 60%,#67e8f9);
+  -webkit-background-clip:text; background-clip:text; color:transparent !important;
+}
+#tournament-trophy-btn,#lb-crown-btn{
+  width:38px; height:38px; display:flex; align-items:center; justify-content:center;
+  background:var(--surface); border:1px solid var(--edge); border-radius:12px;
+}
+
+/* Cards */
+.card{
+  background:var(--surface) !important;
+  border:1px solid var(--edge) !important;
+  border-radius:var(--r) !important;
+  padding:18px !important; margin-bottom:14px !important;
+  box-shadow:0 10px 30px rgba(0,0,0,.45) !important;
+}
+.card::before{background:linear-gradient(90deg,transparent,rgba(255,255,255,.22),transparent) !important;}
+.card.c-gold  {background:linear-gradient(160deg,rgba(245,185,66,.14),rgba(245,185,66,.02)) !important;border-color:rgba(245,185,66,.30) !important;}
+.card.c-purple{background:linear-gradient(160deg,rgba(139,92,246,.18),rgba(139,92,246,.02)) !important;border-color:rgba(139,92,246,.32) !important;}
+.card.c-blue  {background:linear-gradient(160deg,rgba(34,211,238,.14),rgba(34,211,238,.02)) !important;border-color:rgba(34,211,238,.28) !important;}
+.card.c-green {background:linear-gradient(160deg,rgba(34,197,94,.14),rgba(34,197,94,.02)) !important;border-color:rgba(34,197,94,.28) !important;}
+.card.c-red   {background:linear-gradient(160deg,rgba(239,68,68,.14),rgba(239,68,68,.02)) !important;border-color:rgba(239,68,68,.28) !important;}
+.card.c-amber {background:linear-gradient(160deg,rgba(245,158,11,.14),rgba(245,158,11,.02)) !important;border-color:rgba(245,158,11,.28) !important;}
+.balance-card{
+  background:
+    radial-gradient(80% 90% at 50% 0%,rgba(139,92,246,.30),transparent 70%),
+    linear-gradient(160deg,rgba(255,255,255,.07),rgba(255,255,255,.02)) !important;
+  border-color:rgba(139,92,246,.35) !important;
+}
+.pf-block,.pf-stat-tile{
+  background:var(--surface) !important; border:1px solid var(--edge) !important;
+  border-radius:18px !important;
+}
+
+/* Buttons (colors same rehte hain, sirf shape/feel badalta hai) */
+.btn,.btn-sm{
+  border-radius:14px !important; font-weight:700 !important; letter-spacing:.2px;
+  box-shadow:0 6px 18px rgba(0,0,0,.35) !important;
+  transition:transform .12s ease, filter .12s ease !important;
+}
+.btn:active,.btn-sm:active{transform:scale(.96); filter:brightness(1.1);}
+.t-input,input[type=text],input[type=number],input[type=email]{
+  border-radius:14px !important; border:1px solid var(--edge) !important;
+  background:rgba(255,255,255,.04) !important;
+}
+.divider{background:linear-gradient(90deg,transparent,var(--edge),transparent) !important;border:0 !important;height:1px !important;}
+
+/* Floating pill bottom nav */
+.bottom-nav{
+  left:12px !important; right:12px !important;
+  bottom:calc(10px + env(safe-area-inset-bottom,0px)) !important;
+  padding:6px !important; border-radius:28px !important;
+  background:rgba(12,15,26,.82) !important;
+  border:1px solid var(--edge) !important;
+  box-shadow:0 16px 40px rgba(0,0,0,.6) !important;
+}
+.bottom-nav .nav-item{
+  flex:1; margin:0 2px; padding:8px 4px !important;
+  border-radius:22px !important; font-weight:600;
+}
+.bottom-nav .nav-item.active{
+  background:linear-gradient(135deg,rgba(139,92,246,.30),rgba(34,211,238,.18)) !important;
+  color:#fff !important; box-shadow:inset 0 0 0 1px rgba(255,255,255,.10) !important;
+}
+.tab-content{padding-bottom:110px !important;}
