@@ -3987,15 +3987,38 @@ function _renderTournament(t, winners, roundsData) {
 
     let html = '';
 
-    // ── Title + meta banner
+    // ── Registration status (used by the hero chip below)
+    const _regEarly = _tournamentRegCache[_selectedTid] || { registered: false };
+
+    // ── Hero banner: gradient header with status glow + tags + "you're in" chip
+    const _heroBadgeCls   = { coming_soon:'coming-soon', registration_open:'reg-open', registration_closed:'reg-closed', match_live:'match-live', completed:'completed' }[t.status] || 'coming-soon';
+    const _heroBadgeEmoji = { coming_soon:'🔜', registration_open:'✅', registration_closed:'🔒', match_live:'🔴', completed:'🏆' }[t.status] || '🔜';
+    const _heroBadgeLabel = { coming_soon:'Coming Soon', registration_open:'Registration Open', registration_closed:'Registration Closed', match_live:'Match Live', completed:'Completed' }[t.status] || t.status;
+
     html += `
-    <div style="padding:14px 16px 0;">
-        <h2 style="color:#e2e8f0;font-size:18px;font-weight:800;margin:0 0 2px;">${_esc(t.title || 'Free Fire Tournament')}</h2>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+    <div class="t-hero">
+        <div class="t-hero-top">
+            <span class="t-hero-badge ${_heroBadgeCls}">${_heroBadgeEmoji} ${_heroBadgeLabel}</span>
+            ${_regEarly.registered ? `<span class="t-hero-chip">✅ You're In${_regEarly.data && _regEarly.data.team_id ? ` · #${_esc(_regEarly.data.team_id)}` : ''}</span>` : ''}
+        </div>
+        <h2 class="t-hero-title">${_esc(t.title || 'Free Fire Tournament')}</h2>
+        <div class="t-hero-tags">
             ${t.mode ? `<span style="background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);border-radius:8px;padding:3px 10px;font-size:11px;color:#a78bfa;font-weight:700;">🎮 ${_esc(t.mode)}</span>` : ''}
             ${t.map  ? `<span style="background:rgba(56,189,248,0.10);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#38bdf8;font-weight:700;">🗺️ ${_esc(t.map)}</span>`  : ''}
             ${t.entry_fee == 0 ? `<span style="background:rgba(74,222,128,0.10);border:1px solid rgba(74,222,128,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#4ade80;font-weight:700;">🆓 Free Entry</span>` : `<span style="background:rgba(241,196,15,0.10);border:1px solid rgba(241,196,15,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#f1c40f;font-weight:700;">💰 ${t.entry_fee} 🪙 Entry</span>`}
         </div>
+        ${(() => {
+            const _firstPrize = (t.prizes && t.prizes.length > 0) ? (t.prizes.find(p => (p.rank||1) === 1) || t.prizes[0]) : null;
+            const _heroPrizeText = _firstPrize ? (_firstPrize.prize || '') : (t.prize_pool || '');
+            return _heroPrizeText ? `
+        <div class="t-hero-prize">
+            <span class="t-hero-prize-icon">🏆</span>
+            <div>
+                <p class="t-hero-prize-lbl">Prize Pool</p>
+                <p class="t-hero-prize-val">${_esc(_heroPrizeText)}</p>
+            </div>
+        </div>` : '';
+        })()}
     </div>`;
 
     // ── Description (if set)
@@ -4035,10 +4058,6 @@ function _renderTournament(t, winners, roundsData) {
         </div>
         ${t.date ? `<div class="t-stat-tile"><p class="t-lbl">📅 Date</p><p class="t-val" style="font-size:12px;">${_esc(t.date)}</p></div>` : ''}
         ${t.time ? `<div class="t-stat-tile"><p class="t-lbl">⏰ Time</p><p class="t-val" style="font-size:12px;">${_esc(t.time)}</p></div>` : ''}
-        <div class="t-stat-tile">
-            <p class="t-lbl">🏆 Prize</p>
-            <p class="t-val" style="font-size:11px;color:#f1c40f;">GP Codes</p>
-        </div>
     </div>`;
 
     html += '<div class="t-body">';
