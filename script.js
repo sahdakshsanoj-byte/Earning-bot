@@ -61,25 +61,33 @@ window.USER_ID = userId;
 window._tgUser = tg.initDataUnsafe?.user || null;
 
 // ── BUG FIX: "ID Error" / "User id not found" / ref link "?start=undefined" ──
-// `userId` used to be read ONCE, the instant this script file parsed. On some
-// devices/Telegram client versions, Telegram injects initDataUnsafe a few
-// hundred ms AFTER the page's scripts start running — so that one-time read
-// captured `undefined` forever, even though the real id arrived moments
-// later. Every button, balance display and referral link all read this same
-// frozen value, so one bad timing race broke the entire app for that
-// session. Fix: poll for up to ~3s for Telegram to hand over the id before
-// the rest of the app initializes, updating the shared `userId`/window
-// globals the moment it shows up.
+// `userId` only ever came from Telegram's injected initDataUnsafe. But the
+// bot (main.py) already puts the user's real id in the Web App button URL
+// itself — https://.../?user_id=12345 — and this page never read it. When
+// Telegram fails to hand over initDataUnsafe.user (happens on some device/
+// client combinations, independent of timing), there was no fallback at
+// all, so every feature broke for that session even though the correct id
+// was sitting right there in the page's own URL the whole time.
+function _getUserIdFromUrl() {
+    try {
+        const v = new URLSearchParams(window.location.search).get('user_id');
+        return v && /^\d+$/.test(v) ? Number(v) : undefined;
+    } catch (_) { return undefined; }
+}
+
+// Fix: poll for up to ~3s for Telegram to hand over the id (covers the
+// genuine timing race), and if that still comes up empty, fall back to the
+// id already present in the URL before giving up.
 function _waitForTelegramUserId(maxWaitMs = 3000, intervalMs = 100) {
     return new Promise((resolve) => {
         if (userId) { resolve(userId); return; }
         const start = Date.now();
         const timer = setInterval(() => {
-            const found = tg.initDataUnsafe?.user?.id;
+            const found = tg.initDataUnsafe?.user?.id || (Date.now() - start >= maxWaitMs ? _getUserIdFromUrl() : null);
             if (found) {
                 userId = found;
                 window.USER_ID = found;
-                window._tgUser = tg.initDataUnsafe?.user || null;
+                window._tgUser = tg.initDataUnsafe?.user || window._tgUser;
                 clearInterval(timer);
                 resolve(found);
             } else if (Date.now() - start >= maxWaitMs) {
