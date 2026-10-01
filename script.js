@@ -54,11 +54,41 @@ if (typeof CONFIG === 'undefined') {
     window.CONFIG = CONFIG;
 }
 
-const userId = tg.initDataUnsafe?.user?.id;
+let userId = tg.initDataUnsafe?.user?.id;
 
 window.USER_ID = userId;
 // Store full user object for tournament + other features
 window._tgUser = tg.initDataUnsafe?.user || null;
+
+// ── BUG FIX: "ID Error" / "User id not found" / ref link "?start=undefined" ──
+// `userId` used to be read ONCE, the instant this script file parsed. On some
+// devices/Telegram client versions, Telegram injects initDataUnsafe a few
+// hundred ms AFTER the page's scripts start running — so that one-time read
+// captured `undefined` forever, even though the real id arrived moments
+// later. Every button, balance display and referral link all read this same
+// frozen value, so one bad timing race broke the entire app for that
+// session. Fix: poll for up to ~3s for Telegram to hand over the id before
+// the rest of the app initializes, updating the shared `userId`/window
+// globals the moment it shows up.
+function _waitForTelegramUserId(maxWaitMs = 3000, intervalMs = 100) {
+    return new Promise((resolve) => {
+        if (userId) { resolve(userId); return; }
+        const start = Date.now();
+        const timer = setInterval(() => {
+            const found = tg.initDataUnsafe?.user?.id;
+            if (found) {
+                userId = found;
+                window.USER_ID = found;
+                window._tgUser = tg.initDataUnsafe?.user || null;
+                clearInterval(timer);
+                resolve(found);
+            } else if (Date.now() - start >= maxWaitMs) {
+                clearInterval(timer);
+                resolve(undefined); // give up — caller shows a clear retry message
+            }
+        }, intervalMs);
+    });
+}
 
 let userData = {};
 let _winnerPopupShown    = false;   // guard: show winner popup only once per session
@@ -5307,7 +5337,7 @@ async function _initTournamentIndicator() {
 // ============================================================
 // APP INIT
 // ============================================================
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
     // Buttons in this page are actions, not form submits. Explicitly setting
     // the type also protects future HTML changes from accidental reloads.
     document.querySelectorAll('button:not([type])').forEach(button => {
@@ -5322,8 +5352,18 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // Draw spin wheel immediately so it shows on load
     drawSpinWheel(_wheelRot);
-
     renderSponsorSlots({}, [], {});
+
+    // BUG FIX: wait (up to 3s) for Telegram to hand over the real user id
+    // before doing anything that depends on it — see _waitForTelegramUserId.
+    const _uid = await _waitForTelegramUserId();
+    if (!_uid) {
+        const bal = document.getElementById('balance');
+        if (bal) bal.innerText = 'ID Error';
+        showToast('⚠️ Telegram se connect nahi ho paaya. App ko band karke dobara kholo.', 'error');
+        return; // don't run the rest of init with a broken id
+    }
+
     fetchLiveData();
     checkDevice();
     preloadMonetagAd();
