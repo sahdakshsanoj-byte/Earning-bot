@@ -54,49 +54,11 @@ if (typeof CONFIG === 'undefined') {
     window.CONFIG = CONFIG;
 }
 
-let userId = tg.initDataUnsafe?.user?.id;
+const userId = tg.initDataUnsafe?.user?.id;
 
 window.USER_ID = userId;
 // Store full user object for tournament + other features
 window._tgUser = tg.initDataUnsafe?.user || null;
-
-// ── BUG FIX: "ID Error" / "User id not found" / ref link "?start=undefined" ──
-// `userId` only ever came from Telegram's injected initDataUnsafe. But the
-// bot (main.py) already puts the user's real id in the Web App button URL
-// itself — https://.../?user_id=12345 — and this page never read it. When
-// Telegram fails to hand over initDataUnsafe.user (happens on some device/
-// client combinations, independent of timing), there was no fallback at
-// all, so every feature broke for that session even though the correct id
-// was sitting right there in the page's own URL the whole time.
-function _getUserIdFromUrl() {
-    try {
-        const v = new URLSearchParams(window.location.search).get('user_id');
-        return v && /^\d+$/.test(v) ? Number(v) : undefined;
-    } catch (_) { return undefined; }
-}
-
-// Fix: poll for up to ~3s for Telegram to hand over the id (covers the
-// genuine timing race), and if that still comes up empty, fall back to the
-// id already present in the URL before giving up.
-function _waitForTelegramUserId(maxWaitMs = 3000, intervalMs = 100) {
-    return new Promise((resolve) => {
-        if (userId) { resolve(userId); return; }
-        const start = Date.now();
-        const timer = setInterval(() => {
-            const found = tg.initDataUnsafe?.user?.id || (Date.now() - start >= maxWaitMs ? _getUserIdFromUrl() : null);
-            if (found) {
-                userId = found;
-                window.USER_ID = found;
-                window._tgUser = tg.initDataUnsafe?.user || window._tgUser;
-                clearInterval(timer);
-                resolve(found);
-            } else if (Date.now() - start >= maxWaitMs) {
-                clearInterval(timer);
-                resolve(undefined); // give up — caller shows a clear retry message
-            }
-        }, intervalMs);
-    });
-}
 
 let userData = {};
 let _winnerPopupShown    = false;   // guard: show winner popup only once per session
@@ -4025,38 +3987,15 @@ function _renderTournament(t, winners, roundsData) {
 
     let html = '';
 
-    // ── Registration status (used by the hero chip below)
-    const _regEarly = _tournamentRegCache[_selectedTid] || { registered: false };
-
-    // ── Hero banner: gradient header with status glow + tags + "you're in" chip
-    const _heroBadgeCls   = { coming_soon:'coming-soon', registration_open:'reg-open', registration_closed:'reg-closed', match_live:'match-live', completed:'completed' }[t.status] || 'coming-soon';
-    const _heroBadgeEmoji = { coming_soon:'🔜', registration_open:'✅', registration_closed:'🔒', match_live:'🔴', completed:'🏆' }[t.status] || '🔜';
-    const _heroBadgeLabel = { coming_soon:'Coming Soon', registration_open:'Registration Open', registration_closed:'Registration Closed', match_live:'Match Live', completed:'Completed' }[t.status] || t.status;
-
+    // ── Title + meta banner
     html += `
-    <div class="t-hero">
-        <div class="t-hero-top">
-            <span class="t-hero-badge ${_heroBadgeCls}">${_heroBadgeEmoji} ${_heroBadgeLabel}</span>
-            ${_regEarly.registered ? `<span class="t-hero-chip">✅ You're In${_regEarly.data && _regEarly.data.team_id ? ` · #${_esc(_regEarly.data.team_id)}` : ''}</span>` : ''}
-        </div>
-        <h2 class="t-hero-title">${_esc(t.title || 'Free Fire Tournament')}</h2>
-        <div class="t-hero-tags">
+    <div style="padding:14px 16px 0;">
+        <h2 style="color:#e2e8f0;font-size:18px;font-weight:800;margin:0 0 2px;">${_esc(t.title || 'Free Fire Tournament')}</h2>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
             ${t.mode ? `<span style="background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);border-radius:8px;padding:3px 10px;font-size:11px;color:#a78bfa;font-weight:700;">🎮 ${_esc(t.mode)}</span>` : ''}
             ${t.map  ? `<span style="background:rgba(56,189,248,0.10);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#38bdf8;font-weight:700;">🗺️ ${_esc(t.map)}</span>`  : ''}
             ${t.entry_fee == 0 ? `<span style="background:rgba(74,222,128,0.10);border:1px solid rgba(74,222,128,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#4ade80;font-weight:700;">🆓 Free Entry</span>` : `<span style="background:rgba(241,196,15,0.10);border:1px solid rgba(241,196,15,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#f1c40f;font-weight:700;">💰 ${t.entry_fee} 🪙 Entry</span>`}
         </div>
-        ${(() => {
-            const _firstPrize = (t.prizes && t.prizes.length > 0) ? (t.prizes.find(p => (p.rank||1) === 1) || t.prizes[0]) : null;
-            const _heroPrizeText = _firstPrize ? (_firstPrize.prize || '') : (t.prize_pool || '');
-            return _heroPrizeText ? `
-        <div class="t-hero-prize">
-            <span class="t-hero-prize-icon">🏆</span>
-            <div>
-                <p class="t-hero-prize-lbl">Prize Pool</p>
-                <p class="t-hero-prize-val">${_esc(_heroPrizeText)}</p>
-            </div>
-        </div>` : '';
-        })()}
     </div>`;
 
     // ── Description (if set)
@@ -4096,6 +4035,10 @@ function _renderTournament(t, winners, roundsData) {
         </div>
         ${t.date ? `<div class="t-stat-tile"><p class="t-lbl">📅 Date</p><p class="t-val" style="font-size:12px;">${_esc(t.date)}</p></div>` : ''}
         ${t.time ? `<div class="t-stat-tile"><p class="t-lbl">⏰ Time</p><p class="t-val" style="font-size:12px;">${_esc(t.time)}</p></div>` : ''}
+        <div class="t-stat-tile">
+            <p class="t-lbl">🏆 Prize</p>
+            <p class="t-val" style="font-size:11px;color:#f1c40f;">GP Codes</p>
+        </div>
     </div>`;
 
     html += '<div class="t-body">';
@@ -5345,7 +5288,7 @@ async function _initTournamentIndicator() {
 // ============================================================
 // APP INIT
 // ============================================================
-window.addEventListener('DOMContentLoaded', async () => {
+window.addEventListener('DOMContentLoaded', () => {
     // Buttons in this page are actions, not form submits. Explicitly setting
     // the type also protects future HTML changes from accidental reloads.
     document.querySelectorAll('button:not([type])').forEach(button => {
@@ -5360,18 +5303,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // Draw spin wheel immediately so it shows on load
     drawSpinWheel(_wheelRot);
+
     renderSponsorSlots({}, [], {});
-
-    // BUG FIX: wait (up to 3s) for Telegram to hand over the real user id
-    // before doing anything that depends on it — see _waitForTelegramUserId.
-    const _uid = await _waitForTelegramUserId();
-    if (!_uid) {
-        const bal = document.getElementById('balance');
-        if (bal) bal.innerText = 'ID Error';
-        showToast('⚠️ Telegram se connect nahi ho paaya. App ko band karke dobara kholo.', 'error');
-        return; // don't run the rest of init with a broken id
-    }
-
     fetchLiveData();
     checkDevice();
     preloadMonetagAd();
