@@ -5253,6 +5253,30 @@ def tournament_register_api():
                 "entry_fee_paid":    0,
             }
 
+        # ── Prevent the same Free Fire player from being registered in
+        # multiple teams for this tournament (checked across ALL teams,
+        # regardless of which Telegram account is registering) ──
+        candidate_uids = [m["ff_uid"] for m in members] if is_team else [ff_uid]
+        dupe = tournament_registrations_col.find_one({
+            "tournament_id": tid,
+            "$or": [
+                {"ff_uid": {"$in": candidate_uids}},
+                {"members.ff_uid": {"$in": candidate_uids}},
+            ],
+        })
+        if dupe:
+            dupe_uid = dupe.get("ff_uid")
+            if not dupe_uid:
+                for m in dupe.get("members", []):
+                    if m.get("ff_uid") in candidate_uids:
+                        dupe_uid = m.get("ff_uid")
+                        break
+            dupe_team = dupe.get("team_id") or dupe.get("team_name") or "another team"
+            return jsonify({
+                "status":  "error",
+                "message": f"FF UID {dupe_uid} is already registered in {dupe_team} for this tournament. One player can only be in one team.",
+            }), 400
+
         # ── Entry fee: check balance and deduct atomically ──
         entry_fee = int(t.get("entry_fee", 0) or 0)
         if entry_fee > 0:
