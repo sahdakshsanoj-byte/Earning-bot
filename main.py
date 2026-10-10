@@ -9614,6 +9614,93 @@ def cmd_cancel_tournament(message):
         logger.error("cmd_cancel_tournament error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
 
+# ============================================================
+# /deletetournament — paste this in main.py, right BELOW cmd_cancel_tournament
+# ============================================================
+
+@bot.message_handler(commands=["deletetournament"])
+def cmd_delete_tournament(message):
+    """Admin: /deletetournament <tournament_id> [purge]
+    Sirf COMPLETED tournament hataata hai — koi refund nahi, koi notification nahi.
+    Default: app se hide (active=False), data DB mein safe rehta hai.
+    'purge' likhne par registrations/rounds/results/winners bhi permanently delete.
+    """
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/deletetournament <tournament_id> [purge]`\n\n"
+            "• Sirf *completed* tournament delete hota hai\n"
+            "• Refund nahi milta, users ko notify nahi hota\n"
+            "• `purge` = saara related data bhi permanently delete\n\n"
+            "IDs dekhne ke liye: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid   = parts[1].strip()
+    purge = len(parts) >= 3 and parts[2].strip().lower() == "purge"
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(
+                message,
+                f"❌ Tournament `{tid}` nahi mila ya already delete ho chuka hai.",
+                parse_mode="Markdown",
+            )
+
+        if t.get("status") != "completed":
+            return bot.reply_to(
+                message,
+                f"⛔ Tournament `{tid}` abhi *{t.get('status')}* hai, completed nahi.\n"
+                f"Ye command sirf completed tournament ke liye hai.\n"
+                f"Refund ke saath cancel karna ho to `/canceltournament {tid}` use karo.",
+                parse_mode="Markdown",
+            )
+
+        if purge:
+            tournament_registrations_col.delete_many({"tournament_id": tid})
+            tournament_rounds_col.delete_many({"tournament_id": tid})
+            tournament_results_col.delete_many({"tournament_id": tid})
+            tournament_winners_col.delete_many({"tournament_id": tid})
+            tournaments_col.delete_one({"tournament_id": tid})
+            mode_text = "🗑 Permanently deleted (saara data hata diya)"
+        else:
+            tournaments_col.update_one(
+                {"tournament_id": tid},
+                {"$set": {"active": False, "deleted_at": datetime.utcnow()}},
+            )
+            mode_text = "🙈 App se hata diya (data DB mein safe hai)"
+
+        bot.reply_to(
+            message,
+            f"✅ *Tournament Deleted!*\n\n"
+            f"🏆 {t.get('title', 'N/A')} `[{tid}]`\n"
+            f"{mode_text}\n"
+            f"💰 Refund: *None*",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin deleted completed tournament %s (purge=%s)", tid, purge)
+    except Exception as exc:
+        logger.error("cmd_delete_tournament error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+# ============================================================
+# OPTIONAL 1 — /adminpanel text mein, Tournament section ke andar
+# (/canceltournament wali line ke paas) ye line add karo:
+# ============================================================
+#
+#   "\u2022 /deletetournament `<id> [purge]` \u2014 Completed tournament hatao (no refund)\n"
+#
+#
+# ============================================================
+# OPTIONAL 2 — run_bot() ke admin_commands list mein ye line add karo:
+# ============================================================
+#
+#   types.BotCommand("deletetournament", "🗑 Delete completed tournament (no refund)"),
+
+
 
 @bot.message_handler(commands=["setprizes"])
 def cmd_set_prizes(message):
