@@ -1154,7 +1154,7 @@ async function doSpin() {
     try {
         await requireAdWatch();
     } catch (e) {
-        showToast('📺 Watch the full ad to spin!', 'error');
+        showToast('📺 Watch the full ad to spin!' + (window._lastAdErr ? ' [' + window._lastAdErr + ']' : ''), 'error');
         _pendingRequests.delete('doSpin');
         if (btn) { btn.disabled = false; btn.innerText = '🎡 Watch Ad & Spin'; }
         return;
@@ -2582,14 +2582,26 @@ async function claimAllBonus() {
 // MANDATORY AD GATE
 // ============================================================
 async function requireAdWatch() {
+    window._lastAdErr = '';
     if (!CONFIG.CLAIM_AD_ENABLED) return;
     const zoneId = getMonetagZoneId();
-    if (!zoneId) throw new Error('ad_config_missing');
-    try { await loadMonetagSdk(); } catch (e) { throw new Error('ad_sdk_failed'); }
+    if (!zoneId) { window._lastAdErr = 'zone_id_missing'; throw new Error('ad_config_missing'); }
+    try { await loadMonetagSdk(); } catch (e) { window._lastAdErr = 'sdk_load_failed'; throw new Error('ad_sdk_failed'); }
     const showMonetagAd = getMonetagShowFunction();
-    if (!showMonetagAd) throw new Error('ad_function_missing');
-    const result = await showMonetagAd({ ymid: String(userId), requestVar: 'claim_gate' });
-    if (!result?.reward_event_type || result.reward_event_type !== 'valued') throw new Error('ad_skipped');
+    if (!showMonetagAd) { window._lastAdErr = 'show_fn_missing'; throw new Error('ad_function_missing'); }
+    let result;
+    try {
+        result = await showMonetagAd({ ymid: String(userId), requestVar: 'claim_gate' });
+    } catch (e) {
+        // Monetag rejects when no ad is available / ad failed / user closed it
+        window._lastAdErr = 'monetag_rejected:' + String((e && (e.message || e.reason)) || e || 'unknown').slice(0, 40);
+        console.warn('Monetag ad error:', e);
+        throw new Error('ad_failed');
+    }
+    if (!result?.reward_event_type || result.reward_event_type !== 'valued') {
+        window._lastAdErr = 'not_valued:' + String(result?.reward_event_type || 'none');
+        throw new Error('ad_skipped');
+    }
 }
 
 // 10-second cooldown after ad — shows countdown on button
