@@ -79,7 +79,6 @@ let _tournamentTncAccepted = false;
 const MAX_ADS_PER_DAY       = 10;
 const MAX_YT_PER_DAY        = 3;
 const MAX_WEB_PER_DAY       = 3;
-const MIN_WITHDRAW_COINS    = 25000;
 const ALL_TASKS_BONUS       = 10;
 const BOMB_BOX_COOLDOWN_SECS = 900;
 
@@ -130,6 +129,39 @@ async function preloadMonetagAd() {
         monetagPreloaded = true;
     } catch (e) {
         monetagPreloaded = false;
+    }
+}
+
+// ============================================================
+// IN-APP INTERSTITIAL (non-rewarded, publisher revenue only)
+// Monetag zone 10822310 — self-manages its own timing (frequency,
+// capping, interval) after this single call. No coins involved,
+// so failures here must never surface to the user.
+// ============================================================
+let _inAppAdRetries = 0;
+async function initInAppInterstitialAd() {
+    try {
+        const cfg = await getFeatureConfig();
+        if (cfg && cfg.in_app_ad_active === false) return; // admin turned it off via /toggleinappad
+
+        if (typeof show_10822310 === 'function') {
+            show_10822310({
+                type: 'inApp',
+                inAppSettings: {
+                    frequency: 2,
+                    capping:   0.1,
+                    interval:  30,
+                    timeout:   5,
+                    everyPage: false,
+                },
+            }).catch(() => {});
+        } else if (_inAppAdRetries < 5) {
+            // SDK <script> may still be loading — retry a few times.
+            _inAppAdRetries++;
+            setTimeout(initInAppInterstitialAd, 1500);
+        }
+    } catch (e) {
+        // Ad SDK issues must never break the app.
     }
 }
 
@@ -217,12 +249,12 @@ function openExternalLink(url) {
 // ============================================================
 // FETCH WITH RETRY — 3 retries, 10s timeout
 // ============================================================
-async function fetchWithRetry(url, options = {}, retries = 3, delayMs = 2000) {
+async function fetchWithRetry(url, options = {}, retries = 3, delayMs = 2000, timeoutMs = 10000) {
     for (let attempt = 1; attempt <= retries; attempt++) {
         let timeout;
         try {
             const controller = new AbortController();
-            timeout = setTimeout(() => controller.abort(), 10000);
+            timeout = setTimeout(() => controller.abort(), timeoutMs);
             const res        = await fetch(url, { ...options, signal: controller.signal });
             if (!res.ok && res.status >= 400 && res.status < 500) return res;
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -262,14 +294,6 @@ async function getFeatureConfig() {
         try {
             const res = await fetchWithRetry(`${CONFIG.API_BASE_URL}/get_feature_config`);
             const cfg = await res.json();
-            // Live referral toggle (/togglereferral) overrides static CONFIG
-            if (typeof cfg.referral_active === 'boolean') {
-                const changed = CONFIG.REFERRAL_ACTIVE !== cfg.referral_active;
-                CONFIG.REFERRAL_ACTIVE = cfg.referral_active;
-                if (changed && typeof applyReferralLock === 'function') {
-                    setTimeout(applyReferralLock, 0);
-                }
-            }
             _featureCfgCache     = cfg;
             _featureCfgCacheTime = Date.now();
             return cfg;
@@ -548,10 +572,6 @@ async function fetchLiveData() {
             const premInfo   = data.premium_info || {};
             const isPremium  = !!premInfo.premium;
 
-            // Dynamic withdrawal threshold based on premium
-            const _minWd    = isPremium ? 10000 : MIN_WITHDRAW_COINS;
-            const _refNeeded = isPremium ? 2 : 5;
-
             const balEl = document.getElementById('balance');
             if (balEl) animateBalance(balEl, coins);
 
@@ -587,24 +607,6 @@ async function fetchLiveData() {
             }
             // ─────────────────────────────────────────────────────────────
 
-            const coinsPct = Math.min((coins / _minWd) * 100, 100);
-            const refPct   = Math.min((refCount / _refNeeded) * 100, 100);
-
-            const coinsBar  = document.getElementById('coins-progress-bar');
-            const refBar    = document.getElementById('ref-progress-bar');
-            const coinsText = document.getElementById('coins-progress-text');
-            const refText   = document.getElementById('ref-progress-text');
-
-            if (coinsBar) {
-                coinsBar.style.width      = coinsPct + '%';
-                coinsBar.style.background = coins >= _minWd
-                    ? 'linear-gradient(90deg,#2ecc71,#27ae60)'
-                    : 'linear-gradient(90deg,#f1c40f,#f39c12)';
-            }
-            if (refBar)    refBar.style.width    = refPct + '%';
-            if (coinsText) coinsText.innerText   = `${coins} / ${_minWd}${coins >= _minWd ? ' ✅' : ''}${isPremium ? ' ✓' : ''}`;
-            if (refText)   refText.innerText     = `${refCount} / ${_refNeeded}${refCount >= _refNeeded ? ' ✅' : ''}${isPremium ? ' ✓' : ''}`;
-
             applyReferralLock();
             // Update rupee withdrawal referral progress UI
             updateRupeeRefUI(refCount, isPremium ? 2 : 5);
@@ -635,9 +637,6 @@ async function fetchLiveData() {
             loadPremiumCardStatus();
             loadVipTasks();
             loadProfileTab();
-
-            // Update withdraw minimum check with premium dynamic value
-            window._dynamicMinWithdraw = isPremium ? 10000 : MIN_WITHDRAW_COINS;
 
             // Update premium card on home tab
             updatePremiumCard(premInfo);
@@ -1154,7 +1153,7 @@ async function doSpin() {
     try {
         await requireAdWatch();
     } catch (e) {
-        showToast('📺 Watch the full ad to spin!' + (window._lastAdErr ? ' [' + window._lastAdErr + ']' : ''), 'error');
+        showToast('📺 Watch the full ad to spin!', 'error');
         _pendingRequests.delete('doSpin');
         if (btn) { btn.disabled = false; btn.innerText = '🎡 Watch Ad & Spin'; }
         return;
@@ -1804,6 +1803,10 @@ function loadProfileTab() {
     const rs = document.getElementById('profile-rank-sub');
     if (rs) rs.innerText = nextTier ? `${(nextTier.min - coins).toLocaleString()} coins to ${nextTier.label}` : '🌟 Max Rank Achieved!';
 
+    // Age / Gender profile completion
+    renderProfileDetails(d);
+    renderBadges(d);
+
     // Mining level dots
     const mDots = document.querySelectorAll('#profile-mining-dots .mining-lvl-dot');
     const mLvl  = parseInt(d.mining_level) || 1;
@@ -1815,6 +1818,169 @@ function loadProfileTab() {
     // Tournament participation count
     const pt = document.getElementById('profile-tournaments');
     if (pt) pt.innerText = d.tournament_count != null ? d.tournament_count : '—';
+
+    fetchLoginStreakStatus();
+}
+
+let _selectedProfileGender = null;
+
+function renderProfileDetails(d) {
+    const card    = document.getElementById('profile-details-card');
+    const locked  = document.getElementById('profile-details-locked');
+    const form    = document.getElementById('profile-details-form');
+    const badge   = document.getElementById('profile-details-badge');
+    const nudge   = document.getElementById('profile-nudge-banner');
+    if (!card) return;
+
+    if (d.profile_completed) {
+        if (locked) locked.style.display = 'flex';
+        if (locked) locked.style.flexDirection = 'column';
+        if (form)   form.style.display = 'none';
+        if (badge)  badge.style.display = 'inline-block';
+        if (nudge)  nudge.style.display = 'none';
+
+        const av = document.getElementById('profile-age-value');
+        if (av) av.innerText = d.age != null ? d.age : '—';
+        const gv = document.getElementById('profile-gender-value');
+        if (gv) gv.innerText = d.gender ? d.gender.charAt(0).toUpperCase() + d.gender.slice(1) : '—';
+    } else {
+        if (locked) locked.style.display = 'none';
+        if (form)   form.style.display = 'block';
+        if (badge)  badge.style.display = 'none';
+
+        let dismissed = false;
+        try { dismissed = sessionStorage.getItem('profileNudgeDismissed') === '1'; } catch(_) {}
+        if (nudge) nudge.style.display = dismissed ? 'none' : 'flex';
+    }
+}
+
+function renderBadges(d) {
+    const grid  = document.getElementById('badges-grid');
+    const count = document.getElementById('badges-count');
+    if (!grid) return;
+    const badges = Array.isArray(d.badges) ? d.badges : [];
+    if (count) {
+        const earnedCount = badges.filter(b => b.earned).length;
+        count.innerText = `${earnedCount} / ${badges.length}`;
+    }
+    grid.innerHTML = badges.map(b => `
+        <div class="badge-tile ${b.earned ? 'earned' : 'locked'}" title="${b.desc.replace(/"/g, '&quot;')}">
+            <span class="badge-icon">${b.icon}</span>
+            <span class="badge-name">${b.name}</span>
+        </div>
+    `).join('');
+}
+
+async function fetchLoginStreakStatus() {
+    if (!userId) return;
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/login_streak/${userId}`);
+        const data = await res.json();
+        if (data.status === 'success') renderLoginStreak(data);
+    } catch (e) { /* card just stays on its last known state */ }
+}
+
+function renderLoginStreak(data) {
+    const grid  = document.getElementById('login-streak-grid');
+    const count = document.getElementById('login-streak-count');
+    if (!grid) return;
+    if (count) count.innerText = `Day ${data.streak_day || 0}`;
+
+    grid.innerHTML = (data.milestones || []).map(m => {
+        if (m.claimed) {
+            return `
+            <div class="ls-tile claimed">
+                <div class="ls-days">${m.days} Days</div>
+                <div class="ls-amount">₹${m.reward_inr}</div>
+                <button class="ls-btn done" disabled>✅ Claimed</button>
+            </div>`;
+        }
+        if (m.unlocked) {
+            return `
+            <div class="ls-tile unlocked">
+                <div class="ls-days">${m.days} Days</div>
+                <div class="ls-amount">₹${m.reward_inr}</div>
+                <button class="ls-btn claim" onclick="claimLoginMilestone(${m.days})">🎉 Claim</button>
+            </div>`;
+        }
+        return `
+        <div class="ls-tile locked">
+            <div class="ls-days">${m.days} Days</div>
+            <div class="ls-amount">₹${m.reward_inr}</div>
+            <button class="ls-btn claim" disabled style="opacity:0.4;">Locked</button>
+            <div class="ls-locked-overlay">
+                <span class="ls-lock-icon">🔒</span>
+                <span class="ls-progress">${m.progress}/${m.days}</span>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function claimLoginMilestone(days) {
+    if (!userId) return;
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/claim_login_milestone`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ user_id: userId, days }),
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(data.message || '🎉 Claimed!', 'success');
+            fetchLoginStreakStatus();
+            fetchLiveData();
+        } else {
+            showToast(data.message || 'Could not claim.', 'error');
+        }
+    } catch (e) {
+        showToast('Network error — try again.', 'error');
+    }
+}
+
+function dismissProfileNudge() {
+    const nudge = document.getElementById('profile-nudge-banner');
+    if (nudge) nudge.style.display = 'none';
+    try { sessionStorage.setItem('profileNudgeDismissed', '1'); } catch(_) {}
+}
+
+function selectProfileGender(gender) {
+    _selectedProfileGender = gender;
+    document.querySelectorAll('.pf-gender-opt').forEach(el => {
+        el.classList.toggle('selected', el.dataset.gender === gender);
+    });
+}
+
+async function submitProfileDetails() {
+    if (!userId) return;
+    const ageInput = document.getElementById('profile-age-input');
+    const age = parseInt(ageInput ? ageInput.value : '', 10);
+
+    if (!age || age < 10 || age > 100) {
+        showToast('Enter a valid age (10-100)', 'error');
+        return;
+    }
+    if (!_selectedProfileGender) {
+        showToast('Select a gender', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetchWithRetry(`${CONFIG.API_BASE_URL}/complete_profile`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, age, gender: _selectedProfileGender }),
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(data.message || '🎉 Profile completed!', 'success');
+            dismissProfileNudge();
+            fetchLiveData();
+        } else {
+            showToast(data.message || 'Could not save profile.', 'error');
+        }
+    } catch (e) {
+        showToast('Network error — try again.', 'error');
+    }
 }
 
 async function loadBombBoxStatus() {
@@ -2183,100 +2349,6 @@ async function redeemPromo() {
 }
 
 // ============================================================
-// WITHDRAW
-// ============================================================
-let _selectedWithdrawMethod = 'upi';
-
-function selectWithdrawMethod(method) {
-    _selectedWithdrawMethod = method;
-    const colors = { upi: '#2ecc71', google: '#f59e0b' };
-    const bg     = { upi: '#0d2318', google: '#1c1600' };
-    ['upi', 'google'].forEach(m => {
-        const btn   = document.getElementById(`method-btn-${m}`);
-        const panel = document.getElementById(`method-input-${m}`);
-        if (btn) {
-            const active = m === method;
-            btn.style.borderColor = active ? colors[m] : '#334155';
-            btn.style.color       = active ? colors[m] : '#94a3b8';
-            btn.style.background  = active ? bg[m]     : '#0f2027';
-        }
-        if (panel) panel.style.display = m === method ? '' : 'none';
-    });
-}
-
-async function requestWithdraw() {
-    if (!userId) return showToast("User ID not found!", "error");
-    if (_pendingRequests.has('withdraw')) return showToast("Request already in progress...", "error");
-
-    const amountEl   = document.getElementById('withdraw-amount');
-    const rawAmount  = amountEl ? amountEl.value.trim() : '';
-    const reqAmount  = parseInt(rawAmount);
-    const totalCoins = userData.coins || 0;
-    const refCount   = getRefCount(userData.referrals);
-    const method     = _selectedWithdrawMethod;
-
-    if (!rawAmount)                     return showToast("Please enter the coin amount!", "error");
-    if (isNaN(reqAmount))               return showToast("Please enter a valid number!", "error");
-    if (reqAmount <= 0)                 return showToast("Amount cannot be zero or negative!", "error");
-    const _minWdCheck = window._dynamicMinWithdraw || MIN_WITHDRAW_COINS;
-    if (reqAmount < _minWdCheck) return showToast(`Minimum ${_minWdCheck} coins required.${_minWdCheck < MIN_WITHDRAW_COINS ? ' (Premium)' : ''}`, "error");
-    if (reqAmount > totalCoins)         return showToast(`Insufficient balance. You have ${totalCoins} coins.`, "error");
-
-    // BUG FIX #2: Premium user ke liye sirf 2 referrals chahiye, free user ke liye 5.
-    // Pehle hardcoded 5 tha — premium users ke 3-4 referrals hone par bhi block ho jaate the.
-    if (CONFIG.REFERRAL_ACTIVE === true) {
-        const isPremForRef = !!(userData && userData.premium_info && userData.premium_info.premium);
-        const _refNeeded   = isPremForRef ? 2 : 5;
-        if (refCount < _refNeeded) {
-            return showToast(`You need ${_refNeeded - refCount} more referral(s) to unlock withdrawal.`, "error");
-        }
-    }
-
-    let paymentAddress = '';
-    if (method === 'upi') {
-        const upi = document.getElementById('upi-id')?.value.trim();
-        if (!upi || !upi.includes('@')) return showToast("Please enter a valid UPI ID! (Example: name@upi)", "error");
-        paymentAddress = upi;
-    } else if (method === 'google') {
-        paymentAddress = 'via_telegram';
-    }
-
-    _pendingRequests.add('withdraw');
-    const btn = document.querySelector('[onclick="requestWithdraw()"]');
-    if (btn) { btn.disabled = true; btn.innerText = "Processing..."; }
-
-    try {
-        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/withdraw`, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({
-                user_id:         userId,
-                method,
-                payment_address: paymentAddress,
-                upi_id:          method === 'upi' ? paymentAddress : undefined,
-                amount:          reqAmount,
-            }),
-        });
-        const data = await res.json();
-        if (data.status === "success") {
-            const methodLabel = method === 'upi' ? 'UPI' : 'Google Play';
-            showToast(`💸 ${methodLabel} withdrawal request submitted!`, "success");
-            if (amountEl) amountEl.value = '';
-            const upiEl = document.getElementById('upi-id');
-            if (upiEl) upiEl.value = '';
-            fetchLiveData();
-        } else {
-            showToast(data.message || "An error occurred. Please retry.", "error");
-        }
-    } catch (e) {
-        showToast("⚠️ Connection error! Please retry.", "error");
-    } finally {
-        _pendingRequests.delete('withdraw');
-        if (btn) { btn.disabled = false; btn.innerText = "Withdraw Now"; }
-    }
-}
-
-// ============================================================
 // TASKS
 // ============================================================
 function openTask(taskKey, type) {
@@ -2505,9 +2577,12 @@ function updateAllBonusUI(data) {
     const adsToday = (adsDate === today) ? (data.ads_today || 0) : 0;
     const adsFull  = adsToday >= MAX_ADS_PER_DAY;
 
-    const completed = data.completed_tasks || [];
-    const ytDone    = ['yt1','yt2','yt3'].filter(t => completed.includes(t)).length;
-    const webDone   = ['web1','web2','web3'].filter(t => completed.includes(t)).length;
+    const spinLimit = data.spin_limit_today || 5;
+    const spinsDone = data.spins_today || 0;
+    const spinFull  = spinsDone >= spinLimit;
+
+    const miningDone  = !!data.mined_today;
+    const bombboxDone = !!data.bombbox_played_today;
 
     const alreadyClaimed = (data.allcomplete_bonus_date || '') === today;
 
@@ -2515,21 +2590,21 @@ function updateAllBonusUI(data) {
         const el = document.getElementById(id);
         if (el) el.textContent = done ? '✅' : '⬜';
     };
-    setCheck('check-daily', dailyDone);
-    setCheck('check-ads',   adsFull);
-    setCheck('check-yt',    ytDone  >= MAX_YT_PER_DAY);
-    setCheck('check-web',   webDone >= MAX_WEB_PER_DAY);
+    setCheck('check-daily',   dailyDone);
+    setCheck('check-ads',     adsFull);
+    setCheck('check-spin',    spinFull);
+    setCheck('check-mining',  miningDone);
+    setCheck('check-bombbox', bombboxDone);
 
     const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
-    setText('allbonus-ads-count', `(${Math.min(adsToday, MAX_ADS_PER_DAY)}/${MAX_ADS_PER_DAY})`);
-    setText('allbonus-yt-count',  `(${ytDone}/${MAX_YT_PER_DAY})`);
-    setText('allbonus-web-count', `(${webDone}/${MAX_WEB_PER_DAY})`);
+    setText('allbonus-ads-count',  `(${Math.min(adsToday, MAX_ADS_PER_DAY)}/${MAX_ADS_PER_DAY})`);
+    setText('allbonus-spin-count', `(${Math.min(spinsDone, spinLimit)}/${spinLimit})`);
 
-    const doneCount = [dailyDone, adsFull, ytDone >= MAX_YT_PER_DAY, webDone >= MAX_WEB_PER_DAY].filter(Boolean).length;
+    const doneCount = [dailyDone, adsFull, spinFull, miningDone, bombboxDone].filter(Boolean).length;
     const badge = document.getElementById('allbonus-status-badge');
-    if (badge) badge.textContent = `${doneCount}/4`;
+    if (badge) badge.textContent = `${doneCount}/5`;
 
-    const allDone = dailyDone && adsFull && ytDone >= MAX_YT_PER_DAY && webDone >= MAX_WEB_PER_DAY;
+    const allDone = dailyDone && adsFull && spinFull && miningDone && bombboxDone;
     const btn = document.getElementById('allbonus-btn');
     if (!btn) return;
 
@@ -2538,7 +2613,7 @@ function updateAllBonusUI(data) {
     } else if (allDone) {
         btn.disabled = false; btn.innerText = '🏅 Claim Bonus 10 Coins'; btn.style.background = 'linear-gradient(135deg,#22c55e,#16a34a)';
     } else {
-        btn.disabled = true; btn.innerText = `🏅 Complete All Tasks (${doneCount}/4)`; btn.style.background = '#1e3a1e';
+        btn.disabled = true; btn.innerText = `🏅 Complete All Tasks (${doneCount}/5)`; btn.style.background = '#1e3a1e';
     }
 }
 
@@ -2582,26 +2657,14 @@ async function claimAllBonus() {
 // MANDATORY AD GATE
 // ============================================================
 async function requireAdWatch() {
-    window._lastAdErr = '';
     if (!CONFIG.CLAIM_AD_ENABLED) return;
     const zoneId = getMonetagZoneId();
-    if (!zoneId) { window._lastAdErr = 'zone_id_missing'; throw new Error('ad_config_missing'); }
-    try { await loadMonetagSdk(); } catch (e) { window._lastAdErr = 'sdk_load_failed'; throw new Error('ad_sdk_failed'); }
+    if (!zoneId) throw new Error('ad_config_missing');
+    try { await loadMonetagSdk(); } catch (e) { throw new Error('ad_sdk_failed'); }
     const showMonetagAd = getMonetagShowFunction();
-    if (!showMonetagAd) { window._lastAdErr = 'show_fn_missing'; throw new Error('ad_function_missing'); }
-    let result;
-    try {
-        result = await showMonetagAd({ ymid: String(userId), requestVar: 'claim_gate' });
-    } catch (e) {
-        // Monetag rejects when no ad is available / ad failed / user closed it
-        window._lastAdErr = 'monetag_rejected:' + String((e && (e.message || e.reason)) || e || 'unknown').slice(0, 40);
-        console.warn('Monetag ad error:', e);
-        throw new Error('ad_failed');
-    }
-    if (!result?.reward_event_type || result.reward_event_type !== 'valued') {
-        window._lastAdErr = 'not_valued:' + String(result?.reward_event_type || 'none');
-        throw new Error('ad_skipped');
-    }
+    if (!showMonetagAd) throw new Error('ad_function_missing');
+    const result = await showMonetagAd({ ymid: String(userId), requestVar: 'claim_gate' });
+    if (!result?.reward_event_type || result.reward_event_type !== 'valued') throw new Error('ad_skipped');
 }
 
 // 10-second cooldown after ad — shows countdown on button
@@ -2782,8 +2845,8 @@ function _renderRefDashboardFallback() {
         active_referrals:      0,
         today_commission:      0,
         lifetime_commission:   0,
-        daily_limit:           200,
-        daily_limit_remaining: 200,
+        daily_limit:           600,
+        daily_limit_remaining: 600,
         commission_rate_pct:   10,
         active_min_coins:      10,
         referral_link:         link,
@@ -3476,12 +3539,8 @@ function renderSponsorSlots(channelClaims, completedTasks, verifyCompletions) {
 // REFERRAL LOCK — Refer tab + Withdraw card
 // ============================================================
 function applyReferralLock() {
-    const withdrawTab = document.getElementById('withdraw-card');
-    const referTab    = document.getElementById('refer');
-    const refBox      = document.getElementById('ref-requirement-box');
-    const refText     = document.getElementById('ref-progress-text');
-    const refBarWrap  = document.getElementById('ref-bar-wrap');
-    const helpRef     = document.getElementById('help-ref-rule');
+    const referTab = document.getElementById('refer');
+    const helpRef  = document.getElementById('help-ref-rule');
 
     const refCount   = getRefCount(userData.referrals);
     const refsMet    = refCount >= 5;
@@ -3512,61 +3571,14 @@ function applyReferralLock() {
         }
     }
 
-    // ── CASE 1: Referrals not yet completed ───────────────────────────────────
+    // ── Cash-Out Rules "Referral Requirement" line (Field Intel) ──────────
     if (lockActive) {
-        // BUG FIX #6: this used to call _removeWithdrawLock here — the exact
-        // opposite of what CASE 1 means (refs NOT met yet). No function ever
-        // applied the withdraw lock, so the withdraw card never visually
-        // showed as locked even when referrals were incomplete. (The actual
-        // withdrawal request was still safely blocked server-side either way —
-        // this fixes the visual/UX bypass, not a money bug.)
-        _applyWithdrawLock(withdrawTab, refCount);
-        if (refBox)  { refBox.style.borderColor = '#e74c3c'; refBox.style.opacity = '1'; }
-        if (refText) { refText.style.color = '#e74c3c'; }
-        if (helpRef) helpRef.innerHTML = '• Referral Requirement: <b style="color:#f1c40f;">5 Users</b>';
-
-    // ── CASE 2: REFERRAL_ACTIVE = false — bypass mode ──────────────────────
+        if (helpRef) helpRef.innerHTML = 'Referral Requirement: <b style="color:#f1c40f;">5 Users</b>';
     } else if (CONFIG.REFERRAL_ACTIVE === false) {
-        _removeWithdrawLock(withdrawTab);
-        if (refBox)  { refBox.style.borderColor = '#2ecc71'; refBox.style.opacity = '1'; }
-        if (refText) { refText.innerText = '✅ Not Required'; refText.style.color = '#2ecc71'; }
-        if (refBarWrap) {
-            refBarWrap.innerHTML =
-                '<div style="height:100%;background:linear-gradient(90deg,#2ecc71,#27ae60);' +
-                'border-radius:20px;width:100%;transition:width 0.5s;"></div>';
-        }
-        if (helpRef) helpRef.innerHTML = '• Referral Requirement: <b style="color:#2ecc71;">Not Required ✅</b>';
-
-    // ── CASE 3: Refs poore hain — lock hata do ─────────────────────────────
+        if (helpRef) helpRef.innerHTML = 'Referral Requirement: <b style="color:#2ecc71;">Not Required ✅</b>';
     } else {
-        _removeWithdrawLock(withdrawTab);
-        if (refBox)  { refBox.style.borderColor = '#2ecc71'; refBox.style.opacity = '1'; }
-        if (refText) { refText.style.color = '#2ecc71'; }
-        if (helpRef) helpRef.innerHTML = '• Referral Requirement: <b style="color:#2ecc71;">Completed ✅</b>';
+        if (helpRef) helpRef.innerHTML = 'Referral Requirement: <b style="color:#2ecc71;">Completed ✅</b>';
     }
-}
-
-function _removeWithdrawLock(withdrawTab) {
-    if (!withdrawTab) withdrawTab = document.getElementById('withdraw-card');
-    if (withdrawTab) {
-        const stale = withdrawTab.querySelector('.refer-lock-overlay');
-        if (stale) stale.remove();
-        const btn = withdrawTab.querySelector('[onclick="requestWithdraw()"]');
-        if (btn) btn.disabled = false;
-    }
-}
-
-/** BUG FIX #6: was never defined/called — see CASE 1 above. */
-function _applyWithdrawLock(withdrawTab, refCount) {
-    if (!withdrawTab) withdrawTab = document.getElementById('withdraw-card');
-    if (!withdrawTab) return;
-    const btn = withdrawTab.querySelector('[onclick="requestWithdraw()"]');
-    if (btn) btn.disabled = true;
-    if (withdrawTab.querySelector('.refer-lock-overlay')) return;
-    const ov = document.createElement('div');
-    ov.className = 'refer-lock-overlay app-lock-pill';
-    ov.innerHTML = `<span class="lock-label">Refer ${5 - (refCount || 0)} more to unlock withdrawal</span>`;
-    withdrawTab.prepend(ov);
 }
 
 // ============================================================
@@ -3731,6 +3743,66 @@ let _selectedTid        = null;        // Currently selected tournament_id
 let _tournamentCache    = {};          // { tid: { tournament, winners, ts } }
 let _tournamentRegCache = {};          // { tid: regData }
 const TOURNAMENT_CACHE_TTL = 60 * 1000;
+
+function openTournamentEntries(tid) {
+    const modal = document.getElementById('entries-modal');
+    if (!modal || !tid) return;
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    loadTournamentEntries(tid);
+}
+
+function closeTournamentEntries() {
+    const modal = document.getElementById('entries-modal');
+    if (!modal) return;
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+async function loadTournamentEntries(tid) {
+    const list  = document.getElementById('entries-list');
+    const label = document.getElementById('entries-count-label');
+    if (!list) return;
+    list.innerHTML = '<div style="text-align:center; padding:40px 16px; color:#64748b; font-size:12.5px;">Loading…</div>';
+    try {
+        const res  = await fetchWithRetry(`${CONFIG.API_BASE_URL}/tournament/${tid}/entries`);
+        const data = await res.json();
+        if (data.status !== 'success') {
+            list.innerHTML = '<div style="text-align:center; padding:40px 16px; color:#64748b; font-size:12.5px;">Could not load entries.</div>';
+            return;
+        }
+        const entries = data.entries || [];
+        if (label) {
+            const capText = data.max_players ? ` / ${data.max_players}` : '';
+            label.innerText = `${data.filled}${capText} slots filled`;
+        }
+        if (!entries.length) {
+            list.innerHTML = '<div style="text-align:center; padding:40px 16px; color:#64748b; font-size:12.5px;">📭 No one has registered yet. Be the first!</div>';
+            return;
+        }
+        list.innerHTML = entries.map(en => {
+            const memberLine = en.member_names && en.member_names.length
+                ? `<p style="font-size:10.5px; color:#64748b; margin:2px 0 0;">${en.member_names.map(_esc).join(' · ')}</p>`
+                : '';
+            const dqBadge = en.disqualified
+                ? `<span style="font-size:9px; font-weight:800; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#f87171; padding:2px 7px; border-radius:20px; margin-left:6px;">DISQUALIFIED</span>`
+                : '';
+            return `
+            <div style="display:flex; align-items:center; gap:12px; padding:11px 4px; border-bottom:1px solid rgba(255,255,255,0.05); ${en.disqualified ? 'opacity:0.55;' : ''}">
+                <div style="width:34px; height:34px; border-radius:10px; background:rgba(241,196,15,0.12); border:1px solid rgba(241,196,15,0.3); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:800; color:#f1c40f; flex-shrink:0;">
+                    ${en.slot_no}
+                </div>
+                <div style="flex:1; min-width:0;">
+                    <p style="font-size:12.5px; font-weight:700; color:#e2e8f0; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${_esc(en.name)}${dqBadge}</p>
+                    <p style="font-size:10px; color:#64748b; margin:1px 0 0;">${_esc(en.team_id)} · ${en.type === 'solo' ? 'Solo' : en.type === 'duo' ? 'Duo' : 'Squad'}</p>
+                    ${memberLine}
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        list.innerHTML = '<div style="text-align:center; padding:40px 16px; color:#64748b; font-size:12.5px;">⚠️ Network error.</div>';
+    }
+}
 
 function openTournamentHub(e) {
     if (e) e.stopPropagation();
@@ -3943,11 +4015,6 @@ function _renderTournament(t, winners, roundsData) {
     const _roundColor  = t.status === 'match_live' ? '#f87171' : '#38bdf8';
     const _roundTileLabel = t.status === 'match_live' ? '🔴 Current Round' : '🔄 Total Rounds';
 
-    // ── Prize tile text (dynamic): prefer 1st-place individual prize, else prize_pool, else fallback
-    const _firstPrize   = (t.prizes || []).find(p => (p.rank || 1) === 1);
-    const _prizeTileText = _firstPrize ? (_firstPrize.prize || '—')
-                          : (t.prize_pool ? t.prize_pool : 'TBA');
-
     html += `
     <div class="t-stats-grid">
         <div class="t-stat-tile">
@@ -3970,7 +4037,7 @@ function _renderTournament(t, winners, roundsData) {
         ${t.time ? `<div class="t-stat-tile"><p class="t-lbl">⏰ Time</p><p class="t-val" style="font-size:12px;">${_esc(t.time)}</p></div>` : ''}
         <div class="t-stat-tile">
             <p class="t-lbl">🏆 Prize</p>
-            <p class="t-val" style="font-size:11px;color:#f1c40f;">${_esc(_prizeTileText)}</p>
+            <p class="t-val" style="font-size:11px;color:#f1c40f;">GP Codes</p>
         </div>
     </div>`;
 
@@ -4021,6 +4088,15 @@ function _renderTournament(t, winners, roundsData) {
                 </div>
             </div>`;
         });
+    }
+
+    // ── View Entries button — visible from registration_open onward ──
+    if (t.status !== 'coming_soon') {
+        html += `
+        <div onclick="openTournamentEntries('${_selectedTid}')" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:11px;background:rgba(167,139,250,0.10);border:1px solid rgba(167,139,250,0.3);border-radius:12px;cursor:pointer;margin-bottom:12px;">
+            <span style="font-size:16px;">📋</span>
+            <span style="font-size:12.5px;font-weight:700;color:#a78bfa;">View Registered Entries &amp; Slots</span>
+        </div>`;
     }
 
     // ── State-specific action area
@@ -4079,12 +4155,25 @@ function _renderTournament(t, winners, roundsData) {
                 const teamIdRow = rd.team_id
                     ? `<p style="font-size:12px;margin:6px 0 4px;"><span style="color:#a78bfa;font-weight:700;">🛡️ Team ID:</span> <b style="color:#e2e8f0;letter-spacing:1px;">${_esc(rd.team_id)}</b></p>`
                     : '';
+                const slotRow = rd.slot_no
+                    ? `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(241,196,15,0.12);border:1px solid rgba(241,196,15,0.3);border-radius:20px;padding:4px 12px;margin:4px 0 8px;">
+                        <span style="font-size:13px;">🎯</span>
+                        <span style="font-size:12.5px;font-weight:800;color:#f1c40f;">Slot #${rd.slot_no}</span>
+                       </div>`
+                    : '';
                 regDetails = `
+                    ${slotRow}
                     ${teamIdRow}
                     <p style="font-size:13px;font-weight:800;color:#f1c40f;margin:4px 0 6px;">🏟️ Team: ${_esc(rd.team_name||'')}</p>
                     <div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:8px 10px;margin-bottom:4px;">${memberRows}</div>`;
             } else {
-                regDetails = `<p style="font-size:12px;color:#64748b;margin:4px 0 0;">FF UID: <b style="color:#e2e8f0;">${_esc(rd.ff_uid||'')}</b> &nbsp;·&nbsp; Nick: <b style="color:#e2e8f0;">${_esc(rd.ff_nickname||'')}</b></p>`;
+                const soloSlot = rd.slot_no
+                    ? `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(241,196,15,0.12);border:1px solid rgba(241,196,15,0.3);border-radius:20px;padding:4px 12px;margin:4px 0 8px;">
+                        <span style="font-size:13px;">🎯</span>
+                        <span style="font-size:12.5px;font-weight:800;color:#f1c40f;">Slot #${rd.slot_no}</span>
+                       </div><br>`
+                    : '';
+                regDetails = `${soloSlot}<p style="font-size:12px;color:#64748b;margin:4px 0 0;">FF UID: <b style="color:#e2e8f0;">${_esc(rd.ff_uid||'')}</b> &nbsp;·&nbsp; Nick: <b style="color:#e2e8f0;">${_esc(rd.ff_nickname||'')}</b></p>`;
             }
             html += `
             <div class="t-registered-badge">
@@ -4564,21 +4653,27 @@ async function openTournamentLeaderboard(tid) {
             board.forEach(row => {
                 const pos     = row.position || '?';
                 const isTop3  = pos <= 3;
-                const teamBg  = pos === 1 ? 'rgba(241,196,15,0.07)' : pos === 2 ? 'rgba(148,163,184,0.06)' : pos === 3 ? 'rgba(180,83,9,0.07)' : 'rgba(255,255,255,0.025)';
-                const teamBdr = pos === 1 ? 'rgba(241,196,15,0.25)' : pos === 2 ? 'rgba(148,163,184,0.18)' : pos === 3 ? 'rgba(180,83,9,0.20)' : 'rgba(255,255,255,0.06)';
+                const isDQ    = !!row.disqualified;
+                const teamBg  = isDQ ? 'rgba(239,68,68,0.07)' : pos === 1 ? 'rgba(241,196,15,0.07)' : pos === 2 ? 'rgba(148,163,184,0.06)' : pos === 3 ? 'rgba(180,83,9,0.07)' : 'rgba(255,255,255,0.025)';
+                const teamBdr = isDQ ? 'rgba(239,68,68,0.30)' : pos === 1 ? 'rgba(241,196,15,0.25)' : pos === 2 ? 'rgba(148,163,184,0.18)' : pos === 3 ? 'rgba(180,83,9,0.20)' : 'rgba(255,255,255,0.06)';
 
                 let roundPts = '';
                 for (let rn = 1; rn <= totalRounds; rn++) {
                     const pts = row.rounds?.[rn] ?? '—';
                     roundPts += `<span style="flex:0.8;text-align:center;font-size:11px;color:${typeof pts === 'number' ? '#e2e8f0' : '#475569'};">${pts}</span>`;
                 }
+                const dqBadge = isDQ
+                    ? `<span style="display:inline-block;margin-left:6px;padding:1px 6px;background:rgba(239,68,68,0.15);
+                             border:1px solid rgba(239,68,68,0.4);border-radius:6px;font-size:9px;font-weight:800;
+                             color:#f87171;letter-spacing:0.3px;vertical-align:middle;">⛔ DISQUALIFIED</span>`
+                    : '';
                 html += `
                 <div style="display:flex;align-items:center;gap:6px;padding:8px;
                              background:${teamBg};border:1px solid ${teamBdr};
-                             border-radius:10px;margin-bottom:5px;">
-                    <span style="width:28px;font-size:${isTop3 ? '18px' : '12px'};text-align:center;">${rankEmoji[pos] || ('#' + pos)}</span>
+                             border-radius:10px;margin-bottom:5px;${isDQ ? 'opacity:0.7;' : ''}">
+                    <span style="width:28px;font-size:${isTop3 ? '18px' : '12px'};text-align:center;">${isDQ ? '⛔' : (rankEmoji[pos] || ('#' + pos))}</span>
                     <div style="flex:2;min-width:0;">
-                        <p style="font-size:12px;font-weight:800;color:#e2e8f0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(row.team_name || row.team_id)}</p>
+                        <p style="font-size:12px;font-weight:800;color:#e2e8f0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(row.team_name || row.team_id)}${dqBadge}</p>
                         <p style="font-size:10px;color:#64748b;margin:1px 0 0;">${_esc(row.team_id)}</p>
                     </div>
                     ${roundPts}
@@ -4818,8 +4913,9 @@ async function viewPublicLeaderboard() {
         top3.forEach(row => {
             const pos       = row.position;
             const isMyTeam  = (row.team_id || '').toLowerCase() === searchTeamId;
+            const isDQ      = !!row.disqualified;
             const cardCls   = pos === 1 ? 'rank-1' : pos === 2 ? 'rank-2' : 'rank-3';
-            const nameClr   = pos === 1 ? '#f1c40f' : pos === 2 ? '#94a3b8' : '#cd7f32';
+            const nameClr   = isDQ ? '#f87171' : pos === 1 ? '#f1c40f' : pos === 2 ? '#94a3b8' : '#cd7f32';
             const myStyle   = isMyTeam
                 ? 'box-shadow:0 0 0 2px #a78bfa,0 0 18px rgba(139,92,246,0.28);'
                 : '';
@@ -4832,16 +4928,22 @@ async function viewPublicLeaderboard() {
                        B!${booyahCnt > 1 ? ' ×' + booyahCnt : ''}
                    </span>`
                 : '';
+            const dqBadgeTop3 = isDQ
+                ? `<span style="display:inline-block;margin-left:6px;padding:1px 6px;background:rgba(239,68,68,0.15);
+                         border:1px solid rgba(239,68,68,0.4);border-radius:6px;font-size:9px;font-weight:800;
+                         color:#f87171;letter-spacing:0.3px;flex-shrink:0;">⛔ DISQUALIFIED</span>`
+                : '';
             html += `
-            <div class="t-winner-card ${cardCls}" style="${myStyle}">
-                <span style="font-size:30px;flex-shrink:0;">${rankEmoji[pos]}</span>
+            <div class="t-winner-card ${cardCls}" style="${myStyle}${isDQ ? 'opacity:0.7;' : ''}">
+                <span style="font-size:30px;flex-shrink:0;">${isDQ ? '⛔' : rankEmoji[pos]}</span>
                 <div style="flex:1;min-width:0;">
-                    <div style="display:flex;align-items:center;gap:0;flex-wrap:nowrap;">
+                    <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;">
                         <p style="font-size:14px;font-weight:800;color:${nameClr};margin:0;
                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                             ${_esc(row.team_name || row.team_id)}
                         </p>
                         ${booyahBadge}
+                        ${dqBadgeTop3}
                     </div>
                     <p style="font-size:11px;color:#64748b;margin:2px 0 0;">${_esc(row.team_id)}</p>
                     ${isMyTeam ? `<span style="display:inline-flex;align-items:center;gap:3px;
@@ -4875,6 +4977,7 @@ async function viewPublicLeaderboard() {
             rest.forEach(row => {
                 const pos       = row.position || '?';
                 const isMyTeam  = (row.team_id || '').toLowerCase() === searchTeamId;
+                const isDQ      = !!row.disqualified;
                 const booyahCnt = row.total_booyah || 0;
                 const booyahBadge = booyahCnt > 0
                     ? `<span style="display:inline-flex;align-items:center;
@@ -4884,6 +4987,11 @@ async function viewPublicLeaderboard() {
                            B!${booyahCnt > 1 ? ' ×' + booyahCnt : ''}
                        </span>`
                     : '';
+                const dqBadgeRest = isDQ
+                    ? `<span style="display:inline-block;margin-left:4px;padding:1px 6px;background:rgba(239,68,68,0.15);
+                             border:1px solid rgba(239,68,68,0.4);border-radius:6px;font-size:9px;font-weight:800;
+                             color:#f87171;letter-spacing:0.3px;flex-shrink:0;">⛔ DISQUALIFIED</span>`
+                    : '';
                 let roundPts = '';
                 for (let rn = 1; rn <= totalRounds; rn++) {
                     const pts = row.rounds?.[rn] ?? '—';
@@ -4891,19 +4999,20 @@ async function viewPublicLeaderboard() {
                 }
                 html += `
                 <div style="display:flex;align-items:center;gap:6px;padding:8px;
-                             background:${isMyTeam ? 'rgba(139,92,246,0.10)' : 'rgba(255,255,255,0.025)'};
-                             border:1px solid ${isMyTeam ? 'rgba(139,92,246,0.35)' : 'rgba(255,255,255,0.06)'};
-                             border-radius:10px;margin-bottom:5px;
+                             background:${isDQ ? 'rgba(239,68,68,0.06)' : isMyTeam ? 'rgba(139,92,246,0.10)' : 'rgba(255,255,255,0.025)'};
+                             border:1px solid ${isDQ ? 'rgba(239,68,68,0.28)' : isMyTeam ? 'rgba(139,92,246,0.35)' : 'rgba(255,255,255,0.06)'};
+                             border-radius:10px;margin-bottom:5px;${isDQ ? 'opacity:0.7;' : ''}
                              ${isMyTeam ? 'box-shadow:0 0 10px rgba(139,92,246,0.18);' : ''}">
-                    <span style="width:28px;font-size:12px;text-align:center;color:#64748b;font-weight:700;">#${_esc(String(pos))}</span>
+                    <span style="width:28px;font-size:12px;text-align:center;color:#64748b;font-weight:700;">${isDQ ? '⛔' : '#' + _esc(String(pos))}</span>
                     <div style="flex:2;min-width:0;">
-                        <div style="display:flex;align-items:center;flex-wrap:nowrap;">
+                        <div style="display:flex;align-items:center;flex-wrap:wrap;">
                             <p style="font-size:12px;font-weight:800;
-                                       color:${isMyTeam ? '#a78bfa' : '#e2e8f0'};
+                                       color:${isDQ ? '#f87171' : isMyTeam ? '#a78bfa' : '#e2e8f0'};
                                        margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                                 ${_esc(row.team_name || row.team_id)}
                             </p>
                             ${booyahBadge}
+                            ${dqBadgeRest}
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                             <p style="font-size:10px;color:#64748b;margin:1px 0 0;">${_esc(row.team_id)}</p>
@@ -5200,6 +5309,7 @@ window.addEventListener('DOMContentLoaded', () => {
     checkDevice();
     preloadMonetagAd();
     applyReferralLock();
+    initInAppInterstitialAd();
 
     setInterval(fetchLiveData,      300000);  // data refresh every 5 min
     setInterval(refreshLeaderboard, 600000);  // leaderboard refresh every 10 min
