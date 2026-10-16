@@ -111,6 +111,7 @@ try:
     db = client["earning_bot_db"]
 
     users_col                 = db["users"]
+    withdrawals_col           = db["withdrawals"]
     rate_col                  = db["rate_limits"]
     config_col                = db["config"]
     sponsor_clicks_col        = db["sponsor_clicks"]
@@ -147,6 +148,8 @@ try:
         users_col.create_index("fingerprint", sparse=True, **_idx_opts)
         users_col.create_index("blocked", sparse=True, **_idx_opts)
         users_col.create_index("joined", **_idx_opts)
+        withdrawals_col.create_index("user_id", **_idx_opts)
+        withdrawals_col.create_index("status", **_idx_opts)
         promos_col.create_index("code", unique=True, **_idx_opts)
         support_messages_col.create_index("user_id", **_idx_opts)
         support_messages_col.create_index("created_at", **_idx_opts)
@@ -184,6 +187,8 @@ try:
         referral_commissions_col.create_index([("sponsor_id", 1), ("date", 1)], **_idx_opts)
         referral_commissions_col.create_index([("sponsor_id", 1), ("earner_id", 1), ("date", 1)], **_idx_opts)
         referral_commissions_col.create_index("timestamp", **_idx_opts)
+        # Withdrawal sort indexes
+        withdrawals_col.create_index([("user_id", 1), ("timestamp", -1)], **_idx_opts)
         # Rupee withdrawal sort indexes
         rupee_withdrawals_col.create_index([("user_id", 1), ("created_at", -1)], **_idx_opts)
         rupee_withdrawals_col.create_index("status", **_idx_opts)
@@ -194,25 +199,6 @@ try:
         # Users username for admin search
         users_col.create_index("username", sparse=True, **_idx_opts)
         logger.info("MongoDB indexes ensured.")
-
-        # One-time migration: backfill lifetime_earned for existing users.
-        # "Active referral" used to be based on live coin balance, which
-        # incorrectly turned a referral "inactive" the moment they withdrew.
-        # Existing accounts have no historical earning ledger, so current
-        # balance is used as the best available starting approximation —
-        # every new coin from here on is tracked precisely via
-        # lifetime_earned increments alongside each earning event. Filter
-        # ensures this only ever runs once per user (idempotent / safe to
-        # run on every restart).
-        try:
-            migrated = users_col.update_many(
-                {"lifetime_earned": {"$exists": False}},
-                [{"$set": {"lifetime_earned": {"$ifNull": ["$coins", 0]}}}],
-            )
-            if migrated.modified_count:
-                logger.info("Backfilled lifetime_earned for %s existing users.", migrated.modified_count)
-        except Exception as mig_err:
-            logger.warning("lifetime_earned backfill skipped: %s", mig_err)
     except Exception as idx_err:
         logger.warning("Index creation warning: %s", idx_err)
 
@@ -268,24 +254,18 @@ AD_MIN_PER_DAY             = 8
 
 PROMO_TASK_REWARD = 5
 ALL_TASKS_BONUS   = 10
-PROFILE_COMPLETE_REWARD = 100  # One-time reward for filling age + gender in profile
 
-# Login-streak rupee milestones — gated by claiming the All-Tasks-Bonus each
-# day (not just opening the app). Each tier is a permanent one-time unlock;
-# breaking the streak resets progress back to 0 for whichever tiers are
-# still unclaimed.
-LOGIN_STREAK_MILESTONES = [
-    {"days": 10, "reward_inr": 10},
-    {"days": 30, "reward_inr": 30},
-    {"days": 50, "reward_inr": 50},
-]
+MIN_WITHDRAW      = 25000
+MAX_WITHDRAW      = 100000
+WITHDRAW_COOLDOWN = 86400
 
 # ── Premium Membership ────────────────────────────────────────────────────
 PREMIUM_TASK_BONUS_PCT    = 25    # Task reward pe +25% bonus
 PREMIUM_SPIN_PER_DAY      = 15   # Premium: 15 spins/day (free: SPIN_PER_DAY)
+PREMIUM_MIN_WITHDRAW      = 10000 # Premium: lower withdrawal minimum
 PREMIUM_REFERRAL_NEEDED   = 2    # Premium: sirf 2 referrals chahiye
 PREMIUM_AD_REWARD         = 10   # Premium: 10 coins/ad (normal: AD_COIN_REWARD=5)
-PREMIUM_REFERRAL_BONUS    = 200  # Premium sponsor: coins earned when a referral joins (2x the normal REFERRAL_JOIN_BONUS)
+PREMIUM_REFERRAL_BONUS    = 200  # Premium: 2x referral join bonus (normal: REFERRAL_JOIN_BONUS=30... wait its commission based)
 PREMIUM_PLANS = {
     "weekly":    {"label": "Weekly",    "days": 7,   "price": 29},
     "monthly":   {"label": "Monthly",   "days": 30,  "price": 79},
@@ -326,7 +306,7 @@ def format_team_id(counter: int) -> str:
 
 
 COMMISSION_RATE          = 0.10   # 10% commission on eligible earnings
-COMMISSION_DAILY_LIMIT   = 600    # Max commission coins a sponsor earns per day
+COMMISSION_DAILY_LIMIT   = 200    # Max commission coins a sponsor earns per day
 COMMISSION_PER_REF_LIMIT = 50     # Max commission from a single referral per day
 ACTIVE_REF_MIN_COINS     = 10     # Referral is "active" if they've earned >= this many coins
 REFERRAL_JOIN_BONUS      = 30     # Coins sponsor earns when referral joins (existing)
@@ -410,7 +390,8 @@ def get_feature_config() -> dict:
             # is wajah se frontend mein dono hamesha LOCKED dikhte the
             "web_tasks_active": bool(doc.get("web_tasks_active", True)),
             "premium_active":   bool(doc.get("premium_active",   True)),
-            "in_app_ad_active": bool(doc.get("in_app_ad_active", True)),
+            # Referral requirement toggle (/togglereferral). Default = env REFERRAL_ACTIVE.
+            "referral_active":  bool(doc.get("referral_active",  REFERRAL_ACTIVE)),
             # ── Tournament Lock Mode ──────────────────────────────────────────
             "tournament_lock_active":   bool(doc.get("tournament_lock_active",   False)),
             "tournament_lock_features": list(doc.get("tournament_lock_features", [])),
@@ -419,7 +400,7 @@ def get_feature_config() -> dict:
         merged = {
             "spin_active": True, "mining_active": True, "bomb_box_active": True,
             "web_tasks_active": True, "premium_active": True,  # BUG FIX #1
-            "in_app_ad_active": True,
+            "referral_active": REFERRAL_ACTIVE,
             "tournament_lock_active": False, "tournament_lock_features": [],
         }
     _feature_cfg_cache      = merged
@@ -1134,36 +1115,6 @@ def sanitize_text(value: str, max_length: int = 1000) -> str:
 
 
 # ── Premium Membership Helpers ────────────────────────────────────────────
-BADGE_DEFINITIONS = [
-    {"id": "first_steps",   "icon": "\U0001f331", "name": "First Steps",   "desc": "Earn 100 lifetime coins",        "check": lambda u: u.get("lifetime_earned", 0) >= 100},
-    {"id": "grinder",       "icon": "\U0001f4aa", "name": "Grinder",       "desc": "Earn 1,000 lifetime coins",       "check": lambda u: u.get("lifetime_earned", 0) >= 1000},
-    {"id": "elite_earner",  "icon": "\U0001f4b0", "name": "Elite Earner",  "desc": "Earn 5,000 lifetime coins",       "check": lambda u: u.get("lifetime_earned", 0) >= 5000},
-    {"id": "week_warrior",  "icon": "\U0001f525", "name": "Week Warrior",  "desc": "Reach a 7-day streak",            "check": lambda u: u.get("streak_day", 0) >= 7},
-    {"id": "streak_master", "icon": "\U0001f48e", "name": "Streak Master", "desc": "Reach a 21-day streak",           "check": lambda u: u.get("streak_day", 0) >= 21},
-    {"id": "master_miner",  "icon": "\u26cf\ufe0f", "name": "Master Miner", "desc": "Reach Mining Level 3",           "check": lambda u: u.get("mining_level", 1) >= 3},
-    {"id": "squad_leader",  "icon": "\U0001f465", "name": "Squad Leader",  "desc": "Refer 5 users",                   "check": lambda u: u.get("referral_count", 0) >= 5},
-    {"id": "super_sponsor", "icon": "\U0001f31f", "name": "Super Sponsor", "desc": "Refer 20 users",                  "check": lambda u: u.get("referral_count", 0) >= 20},
-    {"id": "vip_member",    "icon": "\U0001f451", "name": "VIP Member",    "desc": "Become a Premium member",         "check": lambda u: bool(u.get("premium"))},
-    {"id": "all_set",       "icon": "\u2705",     "name": "All Set",       "desc": "Complete your profile",           "check": lambda u: bool(u.get("profile_completed"))},
-]
-
-
-def check_and_award_badges(user_id: int, user: dict) -> list:
-    """Computes which badges the user currently qualifies for and persists any
-    newly-earned ones (badges are permanent — once earned they never get
-    removed, even if the underlying stat later drops, e.g. streak resets)."""
-    try:
-        already  = set(user.get("badges_earned", []))
-        newly    = [b["id"] for b in BADGE_DEFINITIONS if b["id"] not in already and b["check"](user)]
-        if newly:
-            users_col.update_one({"user_id": user_id}, {"$addToSet": {"badges_earned": {"$each": newly}}})
-            already |= set(newly)
-        return sorted(already)
-    except Exception as exc:
-        logger.error("check_and_award_badges error for %s: %s", user_id, exc)
-        return user.get("badges_earned", [])
-
-
 def is_premium(user_id: int) -> bool:
     """Returns True if user has active (non-expired) premium membership."""
     try:
@@ -1478,7 +1429,7 @@ def award_referral_commission(earner_id: int, coins_earned: int, source: str, ev
         except pymongo.errors.DuplicateKeyError:
             return
 
-        users_col.update_one({"user_id": sponsor_id}, {"$inc": {"coins": commission, "lifetime_earned": commission}})
+        users_col.update_one({"user_id": sponsor_id}, {"$inc": {"coins": commission}})
         # BUG FIX #3: commission milne ke baad sponsor ka user cache clear karo
         # warna 15 seconds tak purana (stale) balance dikhta tha
         _invalidate_user_cache(sponsor_id)
@@ -1533,15 +1484,6 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
                 "user_id":                user_id,
                 "username":               username,
                 "coins":                  0,
-                "lifetime_earned":        0,
-                "mining_reminder_sent":   False,
-                "badges_earned":          [],
-                "login_streak_day":            0,
-                "login_streak_last_date":      "",
-                "login_milestones_claimed":    [],
-                "age":                    None,
-                "gender":                 None,
-                "profile_completed":      False,
                 "rupees":                 0.0,   # INR wallet balance
                 "referred_by":            None,
                 "referral_count":         0,
@@ -1563,16 +1505,15 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
             if referrer_id and str(referrer_id) != str(user_id):
                 referrer = users_col.find_one({"user_id": int(referrer_id)})
                 if referrer:
-                    join_bonus = PREMIUM_REFERRAL_BONUS if is_premium(int(referrer_id)) else REFERRAL_JOIN_BONUS
                     users_col.update_one(
                         {"user_id": int(referrer_id)},
-                        {"$inc": {"coins": join_bonus, "referral_count": 1, "lifetime_earned": join_bonus}},
+                        {"$inc": {"coins": 30, "referral_count": 1}},
                     )
                     new_user["referred_by"] = str(referrer_id)
                     try:
                         bot.send_message(
                             int(referrer_id),
-                            f"\U0001f38a *Referral Bonus!*\n\nYou earned {join_bonus} coins for inviting a friend!",
+                            "\U0001f38a *Referral Bonus!*\n\nYou earned 30 coins for inviting a friend!",
                             parse_mode="Markdown",
                         )
                     except Exception as notify_exc:
@@ -1629,28 +1570,6 @@ def get_user_data_api(user_id: int):
         if not user:
             return jsonify({"status": "error", "message": "User not found."}), 404
 
-        # Presence heartbeat — powers "Active Today" stats and the live-users
-        # count. This field was queried in a couple of places but never
-        # actually written anywhere, so both were silently always zero.
-        today = str(date.today())
-        if user.get("last_active") != today:
-            users_col.update_one(
-                {"user_id": user_id},
-                {"$set": {"last_active": today, "last_seen_at": datetime.utcnow().isoformat()}},
-            )
-        else:
-            # Still refresh the precise timestamp for the live-now count,
-            # but only every ~90s per user to avoid a write on every request.
-            last_seen = user.get("last_seen_at")
-            stale = True
-            if last_seen:
-                try:
-                    stale = (datetime.utcnow() - datetime.fromisoformat(last_seen)).total_seconds() > 90
-                except Exception:
-                    stale = True
-            if stale:
-                users_col.update_one({"user_id": user_id}, {"$set": {"last_seen_at": datetime.utcnow().isoformat()}})
-
         is_blocked = bool(user.get("blocked"))
         # BUG FIX: blocked users used to get literally nothing back but
         # {"status":"blocked"} — so even their own Profile tab (coins,
@@ -1696,31 +1615,6 @@ def get_user_data_api(user_id: int):
 
         promo_task_completions = user.get("promo_task_completions", [])
 
-        # ── Spin / Mining / Bomb Box "done today" status — used by the
-        # All-Tasks-Bonus checklist on the frontend ──
-        spins_date_v  = user.get("spins_date", "")
-        spins_today_v = user.get("spins_today", 0) if spins_date_v == today else 0
-
-        last_collect_v = user.get("last_mining_collect", "")
-        mined_today_v  = False
-        if last_collect_v:
-            try:
-                mined_today_v = datetime.fromisoformat(last_collect_v).date().isoformat() == today
-            except ValueError:
-                pass
-
-        today_start_epoch_v = datetime.combine(date.today(), datetime.min.time()).timestamp()
-        bombbox_today_v = bool(bomb_box_col.find_one({
-            "user_id":   user_id,
-            "played":    True,
-            "timestamp": {"$gte": today_start_epoch_v},
-        }))
-
-        # Achievement badges — compute freshest premium status for the check
-        _badge_user = dict(user)
-        _badge_user["premium"] = is_premium(user_id)
-        earned_badge_ids = set(check_and_award_badges(user_id, _badge_user))
-
         resp = {
             "status":                 "blocked" if is_blocked else "success",
             "coins":                  user.get("coins", 0),
@@ -1733,10 +1627,6 @@ def get_user_data_api(user_id: int):
             "referred_by":            user.get("referred_by", ""),
             "rupees":                 round(float(user.get("rupees", 0.0)), 2),
             "mining_level":           int(user.get("mining_level", 1)),
-            "spins_today":            spins_today_v,
-            "spin_limit_today":       (PREMIUM_SPIN_PER_DAY if is_premium(user_id) else SPIN_PER_DAY),
-            "mined_today":            mined_today_v,
-            "bombbox_played_today":   bombbox_today_v,
             "ads_today":              ads_today,
             "total_ads_today":        total_ads_today,
             "tournament_count":       tournament_count,
@@ -1749,13 +1639,6 @@ def get_user_data_api(user_id: int):
             "premium_info":           get_premium_info(user_id),
             "username":               user.get("username", ""),
             "first_name":             user.get("first_name", ""),
-            "profile_completed":      user.get("profile_completed", False),
-            "age":                    user.get("age"),
-            "gender":                 user.get("gender"),
-            "badges":                 [
-                dict(id=b["id"], icon=b["icon"], name=b["name"], desc=b["desc"], earned=b["id"] in earned_badge_ids)
-                for b in BADGE_DEFINITIONS
-            ],
         }
         # Cache response — invalidated whenever user data is written.
         # Blocked snapshots aren't cached: as soon as an admin unblocks the
@@ -1894,63 +1777,6 @@ def get_streak_tier(day: int) -> str:
         return "💎 Tier 3 (Days 21-30)"
 
 
-VALID_GENDERS = {"male", "female", "other"}
-
-
-@app.route("/complete_profile", methods=["POST"])
-def complete_profile_api():
-    """One-time profile completion (age + gender) — rewards PROFILE_COMPLETE_REWARD
-    coins. Locked after first successful submission; cannot be changed by the
-    user again (admin can override via /editprofile)."""
-    try:
-        data    = request.get_json(force=True) or {}
-        user_id = int(data.get("user_id", 0))
-        age     = data.get("age")
-        gender  = str(data.get("gender", "")).strip().lower()
-
-        if not user_id:
-            return jsonify({"status": "error", "message": "Invalid user."}), 400
-        try:
-            age = int(age)
-        except (TypeError, ValueError):
-            return jsonify({"status": "error", "message": "Enter a valid age."}), 400
-        if age < 10 or age > 100:
-            return jsonify({"status": "error", "message": "Enter a valid age (10-100)."}), 400
-        if gender not in VALID_GENDERS:
-            return jsonify({"status": "error", "message": "Select a valid gender."}), 400
-
-        # Atomic — only succeeds once. If profile_completed is already true,
-        # this matches zero documents and the user gets a clean "already done".
-        result = users_col.find_one_and_update(
-            {"user_id": user_id, "profile_completed": {"$ne": True}},
-            {
-                "$set": {
-                    "age":               age,
-                    "gender":            gender,
-                    "profile_completed": True,
-                },
-                "$inc": {
-                    "coins":           PROFILE_COMPLETE_REWARD,
-                    "lifetime_earned": PROFILE_COMPLETE_REWARD,
-                },
-            },
-        )
-        if not result:
-            return jsonify({"status": "error", "message": "Profile already completed."}), 400
-
-        _invalidate_user_cache(user_id)
-        _fire_commission(user_id, PROFILE_COMPLETE_REWARD, "task", f"profile_complete_{user_id}")
-
-        return jsonify({
-            "status":  "success",
-            "message": f"🎉 Profile completed! +{PROFILE_COMPLETE_REWARD} coins",
-            "reward":  PROFILE_COMPLETE_REWARD,
-        })
-    except Exception as exc:
-        logger.error("complete_profile_api error: %s", exc)
-        return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
-
-
 @app.route("/claim_daily/<int:user_id>", methods=["POST"])
 def claim_daily_api(user_id: int):
     if is_rate_limited(f"claim_{user_id}", 60):
@@ -2042,7 +1868,7 @@ def claim_daily_api(user_id: int):
                 ],
             },
             {
-                "$inc": {"coins": reward, "lifetime_earned": reward},
+                "$inc": {"coins": reward},
                 "$set": {
                     "last_claim_ts": now.isoformat(),
                     "streak_day":    streak_day,
@@ -2112,145 +1938,205 @@ def claim_allcomplete_bonus_api(user_id: int):
                 "message": f"Watch {MAX_ADS_PER_DAY - ads_today} more ad(s) to complete all tasks!",
             }), 400
 
-        # ── Spin Wheel — all of today's free spins used ──
-        spins_date  = user.get("spins_date", "")
-        spins_today = user.get("spins_today", 0) if spins_date == today else 0
-        spin_limit  = PREMIUM_SPIN_PER_DAY if is_premium(user_id) else SPIN_PER_DAY
-        if spins_today < spin_limit:
+        task_completions = user.get("task_completions", {})
+        live_codes       = get_live_task_codes()
+        yt_done  = count_task_type_completions_today(task_completions, "yt",  today, live_codes)
+        web_done = count_task_type_completions_today(task_completions, "web", today, live_codes)
+
+        if yt_done < MAX_YT_TASKS_PER_DAY:
             return jsonify({
                 "status":  "error",
-                "message": f"Use {spin_limit - spins_today} more spin(s) on the Spin Wheel first!",
+                "message": f"Complete {MAX_YT_TASKS_PER_DAY - yt_done} more YouTube task(s) first!",
             }), 400
-
-        # ── Mining — today's session collected ──
-        last_collect = user.get("last_mining_collect", "")
-        mined_today  = False
-        if last_collect:
-            try:
-                mined_today = datetime.fromisoformat(last_collect).date().isoformat() == today
-            except ValueError:
-                pass
-        if not mined_today:
-            return jsonify({"status": "error", "message": "Collect today's Mining reward first!"}), 400
-
-        # ── Bomb Box — played at least once today ──
-        today_start_epoch = datetime.combine(date.today(), datetime.min.time()).timestamp()
-        bombbox_today = bomb_box_col.find_one({
-            "user_id":   user_id,
-            "played":    True,
-            "timestamp": {"$gte": today_start_epoch},
-        })
-        if not bombbox_today:
-            return jsonify({"status": "error", "message": "Play the Bomb Box challenge first!"}), 400
-
-        # ── Login streak (gated by all-tasks-bonus claim) ──
-        # Counts a "login day" only when the user has claimed the full daily
-        # set of tasks — not just opened the app. Breaks (resets to 1) if a
-        # calendar day was skipped since the last counted day.
-        yesterday      = (date.today() - timedelta(days=1)).isoformat()
-        last_login_day = user.get("login_streak_last_date", "")
-        new_login_streak = (user.get("login_streak_day", 0) + 1) if last_login_day == yesterday else 1
+        if web_done < MAX_WEB_TASKS_PER_DAY:
+            return jsonify({
+                "status":  "error",
+                "message": f"Complete {MAX_WEB_TASKS_PER_DAY - web_done} more website task(s) first!",
+            }), 400
 
         users_col.update_one(
             {"user_id": user_id},
-            {
-                "$inc": {"coins": ALL_TASKS_BONUS, "lifetime_earned": ALL_TASKS_BONUS},
-                "$set": {
-                    "allcomplete_bonus_date":  today,
-                    "login_streak_day":        new_login_streak,
-                    "login_streak_last_date":  today,
-                },
-            },
+            {"$inc": {"coins": ALL_TASKS_BONUS}, "$set": {"allcomplete_bonus_date": today}},
         )
         _invalidate_user_cache(user_id)
-        logger.info("All-tasks bonus of %s coins credited to user %s (login streak: %s)", ALL_TASKS_BONUS, user_id, new_login_streak)
+        logger.info("All-tasks bonus of %s coins credited to user %s", ALL_TASKS_BONUS, user_id)
         return jsonify({
             "status":  "success",
             "message": f"\U0001f389 All tasks complete! Bonus {ALL_TASKS_BONUS} coins credited!",
-            "data":    {"bonus": ALL_TASKS_BONUS, "login_streak_day": new_login_streak},
+            "data":    {"bonus": ALL_TASKS_BONUS},
         })
     except Exception as exc:
         logger.error("claim_allcomplete_bonus error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
 
 
-@app.route("/login_streak/<int:user_id>", methods=["GET"])
-def login_streak_status_api(user_id: int):
-    """Current login streak + per-milestone lock/unlock/claimed status."""
+# ============================================================
+# WITHDRAW — REFERRAL_ACTIVE env var se control hota hai
+# ============================================================
+
+@app.route("/withdraw", methods=["POST"])
+def withdraw_api():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"status": "error", "message": "No data received."}), 400
+
+    user_id_raw      = data.get("user_id")
+    # Quick in-memory rate-limit before any DB work (complements DB cooldown)
     try:
-        user = users_col.find_one({"user_id": user_id}, {"login_streak_day": 1, "login_milestones_claimed": 1, "_id": 0})
-        if not user:
-            return jsonify({"status": "error", "message": "User not found."}), 404
-
-        streak_day = user.get("login_streak_day", 0)
-        claimed    = set(user.get("login_milestones_claimed", []))
-
-        milestones = []
-        for m in LOGIN_STREAK_MILESTONES:
-            is_claimed  = m["days"] in claimed
-            is_unlocked = streak_day >= m["days"]
-            milestones.append({
-                "days":       m["days"],
-                "reward_inr": m["reward_inr"],
-                "claimed":    is_claimed,
-                "unlocked":   is_unlocked and not is_claimed,
-                "progress":   min(streak_day, m["days"]),
-            })
-
-        return jsonify({"status": "success", "streak_day": streak_day, "milestones": milestones})
-    except Exception as exc:
-        logger.error("login_streak_status_api error for %s: %s", user_id, exc)
-        return jsonify({"status": "error", "message": "Server error."}), 500
-
-
-@app.route("/claim_login_milestone", methods=["POST"])
-def claim_login_milestone_api():
-    """One-time claim — credits reward_inr to the Rupee Wallet. Permanently
-    locked afterwards even if the streak later resets and grows back
-    through the same day-count."""
-    try:
-        data    = request.get_json(force=True) or {}
-        user_id = int(data.get("user_id", 0))
-        days    = int(data.get("days", 0))
+        _uid_for_rl = int(user_id_raw or 0)
+        if _uid_for_rl and is_rate_limited(f"withdraw_{_uid_for_rl}", 30):
+            return jsonify({"status": "error", "message": "Too many requests. Please wait."}), 429
     except (TypeError, ValueError):
-        return jsonify({"status": "error", "message": "Invalid request."}), 400
+        pass
+    requested_amount = data.get("amount")
 
-    tier = next((m for m in LOGIN_STREAK_MILESTONES if m["days"] == days), None)
-    if not tier:
-        return jsonify({"status": "error", "message": "Invalid milestone."}), 400
+    method_raw      = sanitize_text(data.get("method", "upi")).lower().strip()
+    payment_address = sanitize_text(
+        data.get("payment_address", "") or data.get("upi_id", ""), max_length=256
+    )
+
+    METHOD_ALIASES = {
+        "upi":           "upi",
+        "google":        "google_redeem",
+        "google_redeem": "google_redeem",
+    }
+    method = METHOD_ALIASES.get(method_raw)
+    if not method:
+        return jsonify({"status": "error", "message": "Invalid withdrawal method."}), 400
+
+    if not user_id_raw or requested_amount is None:
+        return jsonify({"status": "error", "message": "Missing required fields."}), 400
 
     try:
-        # Atomic — only succeeds if the streak actually reached this tier AND
-        # it hasn't been claimed before. Prevents double-claims from a
-        # double-tap/race the same way the referral milestone claim does.
+        user_id          = int(user_id_raw)
+        requested_amount = int(requested_amount)
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid user ID or amount."}), 400
+
+    if requested_amount <= 0:
+        return jsonify({"status": "error", "message": "Amount cannot be zero or negative."}), 400
+    _min_wd  = PREMIUM_MIN_WITHDRAW if is_premium(user_id) else MIN_WITHDRAW
+    if requested_amount < _min_wd:
+        return jsonify({"status": "error", "message": f"Minimum withdrawal is {_min_wd} coins."}), 400
+    if requested_amount > MAX_WITHDRAW:
+        return jsonify({"status": "error", "message": "Amount exceeds maximum limit."}), 400
+
+    if method == "upi":
+        upi_pattern = re.compile(r"^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$")
+        if not payment_address or not upi_pattern.match(payment_address):
+            return jsonify({
+                "status":  "error",
+                "message": "Invalid UPI ID format. (Example: name@upi)",
+            }), 400
+    elif method == "google_redeem":
+        payment_address = "via_telegram"
+
+    # MongoDB-backed withdrawal cooldown — server restart se reset nahi hoga
+    _last_wd = withdrawals_col.find_one(
+        {"user_id": user_id},
+        sort=[("timestamp", -1)],
+        projection={"timestamp": 1},
+    )
+    if _last_wd and _last_wd.get("timestamp"):
+        _wd_elapsed = (datetime.utcnow() - _last_wd["timestamp"]).total_seconds()
+        if _wd_elapsed < WITHDRAW_COOLDOWN:
+            _wd_remaining_h = int((WITHDRAW_COOLDOWN - _wd_elapsed) // 3600)
+            _wd_remaining_m = int(((WITHDRAW_COOLDOWN - _wd_elapsed) % 3600) // 60)
+            return jsonify({
+                "status":  "error",
+                "message": f"One withdrawal per day allowed. Try again in {_wd_remaining_h}h {_wd_remaining_m}m.",
+            }), 429
+
+    # ── Referral check (/togglereferral se live on/off) ─────────────────────
+    if get_feature_config().get("referral_active", REFERRAL_ACTIVE):
+        _ref_user    = users_col.find_one({"user_id": user_id}, {"referral_count": 1, "_id": 0})
+        ref_count    = _ref_user.get("referral_count", 0) if _ref_user else 0
+        _ref_needed  = PREMIUM_REFERRAL_NEEDED if is_premium(user_id) else 5
+        if ref_count < _ref_needed:
+            return jsonify({
+                "status":  "error",
+                "message": f"You need {_ref_needed - ref_count} more referral(s) to unlock withdrawal.",
+            }), 400
+
+    # ── Withdrawal Duplicate Guard — ek pending request hote hue doosra nahi jayega ──
+    _existing_pending = withdrawals_col.find_one({"user_id": user_id, "status": "Pending \u23f3"})
+    if _existing_pending:
+        return jsonify({
+            "status":  "error",
+            "message": "Aapki ek withdrawal request already pending hai. Pehle approve/reject hone ka wait karo.",
+        }), 400
+
+    try:
         result = users_col.find_one_and_update(
-            {
-                "user_id":                 user_id,
-                "login_streak_day":        {"$gte": days},
-                "login_milestones_claimed": {"$ne": days},
-            },
-            {
-                "$inc": {"rupees": tier["reward_inr"]},
-                "$addToSet": {"login_milestones_claimed": days},
-            },
+            {"user_id": user_id, "coins": {"$gte": requested_amount}, "blocked": {"$ne": True}},
+            {"$inc": {"coins": -requested_amount}},
             return_document=True,
         )
-        if not result:
-            user = users_col.find_one({"user_id": user_id}, {"login_streak_day": 1, "login_milestones_claimed": 1, "_id": 0})
-            if user and days in user.get("login_milestones_claimed", []):
-                return jsonify({"status": "error", "message": "Already claimed!"}), 400
-            return jsonify({"status": "error", "message": f"You need a {days}-day streak first."}), 400
+        if result is not None:
+            _invalidate_user_cache(user_id)
+        if result is None:
+            user = users_col.find_one({"user_id": user_id})
+            if not user:
+                return jsonify({"status": "error", "message": "User not found."}), 404
+            if user.get("blocked"):
+                return jsonify({"status": "error", "message": "Your account has been blocked."}), 403
+            return jsonify({
+                "status":  "error",
+                "message": f"Insufficient balance. You have {user.get('coins', 0)} coins.",
+            }), 400
 
-        _invalidate_user_cache(user_id)
-        logger.info("User %s claimed login-streak milestone: %s days -> \u20b9%s", user_id, days, tier["reward_inr"])
-        return jsonify({
-            "status":     "success",
-            "message":    f"\U0001f389 Claimed! \u20b9{tier['reward_inr']} added to your Rupee Wallet.",
-            "reward_inr": tier["reward_inr"],
-        })
+        inr_value = requested_amount * 0.02
+
+        METHOD_LABELS = {
+            "upi":           "\U0001f3e6 UPI",
+            "usdt_trc20":    "\U0001f48e USDT TRC20",
+            "google_redeem": "\U0001f381 Google Play",
+        }
+        method_label = METHOD_LABELS.get(method, method)
+
+        now_utc    = datetime.utcnow()
+        IST_OFFSET = timedelta(hours=5, minutes=30)
+        now_ist    = now_utc + IST_OFFSET
+        withdrawal = {
+            "user_id":         user_id,
+            "method":          method,
+            "payment_address": payment_address,
+            "upi_id":          payment_address,
+            "amount":          requested_amount,
+            "inr_value":       inr_value,
+            "status":          "Pending \u23f3",
+            "timestamp":       now_utc,
+            "date":            now_ist.strftime("%d %b %Y, %I:%M %p IST"),
+        }
+        withdrawals_col.insert_one(withdrawal)
+
+        addr_display  = payment_address if payment_address != "via_telegram" else "Telegram DM"
+        tg_username   = result.get("username") or ""
+        username_line = ""
+        if method == "google_redeem":
+            username_line = f"Username: @{tg_username}\n" if tg_username else "Username: _(not set)_\n"
+
+        try:
+            bot.send_message(
+                ADMIN_ID,
+                f"\U0001f4b8 *New Withdrawal Request*\n\n"
+                f"User ID: `{user_id}`\n"
+                f"{username_line}"
+                f"Method: {method_label}\n"
+                f"Address: `{addr_display}`\n"
+                f"Requested: `{requested_amount}` coins (\u20b9{inr_value:.2f})\n"
+                f"Remaining Balance: `{result.get('coins', 0)}` coins\n"
+                f"Date: {withdrawal['date']}",
+                parse_mode="Markdown",
+            )
+        except Exception as notify_exc:
+            logger.warning("Admin notify failed for withdrawal: %s", notify_exc)
+
+        return jsonify({"status": "success", "message": "Withdrawal request submitted successfully!"})
+
     except Exception as exc:
-        logger.error("claim_login_milestone_api error for %s: %s", user_id, exc)
-        return jsonify({"status": "error", "message": "Server error."}), 500
+        logger.error("withdraw_api critical error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
 
 
 @app.route("/verify_task", methods=["POST"])
@@ -2390,7 +2276,7 @@ def verify_task_api():
 
         upd = users_col.update_one(
             guard_filter,
-            {"$inc": {"coins": reward, "lifetime_earned": reward}, "$set": {completion_field: completion_record}},
+            {"$inc": {"coins": reward}, "$set": {completion_field: completion_record}},
         )
         if upd.modified_count == 0:
             _check_and_flag_already_done(user_id, task_id)
@@ -2431,8 +2317,8 @@ def create_ad_claim_token(user_id: int) -> tuple[dict, int]:
         if last_ad_claim:
             try:
                 last_ad_claim_dt = datetime.fromisoformat(last_ad_claim)
-                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=10):
-                    return {"status": "error", "message": "Please wait 10 seconds before watching the next ad."}, 429
+                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=30):
+                    return {"status": "error", "message": "Please wait 30 seconds before watching the next ad."}, 429
             except ValueError:
                 pass
 
@@ -2486,8 +2372,8 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
         if last_ad_claim:
             try:
                 last_ad_claim_dt = datetime.fromisoformat(last_ad_claim)
-                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=10):
-                    return {"status": "error", "message": "Please wait 10 seconds before claiming the next ad reward."}, 429
+                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=30):
+                    return {"status": "error", "message": "Please wait 30 seconds before claiming the next ad reward."}, 429
             except ValueError:
                 pass
 
@@ -2510,7 +2396,7 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
         users_col.update_one(
             {"user_id": user_id},
             {
-                "$inc": {"coins": _ad_reward, "lifetime_earned": _ad_reward},
+                "$inc": {"coins": _ad_reward},
                 "$set": {
                     "ads_date":        today,
                     "ads_today":       done,
@@ -2626,7 +2512,7 @@ def claim_channel_api():
         users_col.update_one(
             {"user_id": user_id},
             {
-                "$inc": {"coins": reward, "lifetime_earned": reward},
+                "$inc": {"coins": reward},
                 "$set": {f"channel_claims.{channel_id}": claim_value},
             },
         )
@@ -2689,7 +2575,7 @@ def claim_promo_task_api():
                 "blocked":               {"$ne": True},
                 "promo_task_completions": {"$ne": task_id},
             },
-            {"$inc": {"coins": reward, "lifetime_earned": reward}, "$addToSet": {"promo_task_completions": task_id}},
+            {"$inc": {"coins": reward}, "$addToSet": {"promo_task_completions": task_id}},
             projection={"_id": 1},
         )
         if result is None:
@@ -2707,10 +2593,6 @@ def claim_promo_task_api():
             return jsonify({"status": "error", "message": "Server error."}), 500
 
         _invalidate_user_cache(user_id)
-
-        # Referral commission — non-blocking, 10% to sponsor
-        _fire_commission(user_id, reward, "task", f"promotask_{user_id}_{task_id}")
-
         return jsonify({
             "status":  "success",
             "message": f"{reward} coins added for completing the promotion task!",
@@ -2836,7 +2718,7 @@ def withdraw_rupees_api():
         return jsonify({"status": "error", "message": "Please wait before retrying."}), 429
 
     # ── Referral Check — same logic as coin withdrawal ──────────────────────────
-    if REFERRAL_ACTIVE:
+    if get_feature_config().get("referral_active", REFERRAL_ACTIVE):
         _ref_user   = users_col.find_one({"user_id": user_id}, {"referral_count": 1, "_id": 0})
         ref_count   = _ref_user.get("referral_count", 0) if _ref_user else 0
         _ref_needed = PREMIUM_REFERRAL_NEEDED if is_premium(user_id) else 5
@@ -3001,7 +2883,7 @@ def claim_vip_task_api():
                 "blocked":              {"$ne": True},
                 "vip_task_completions": {"$ne": task_id},
             },
-            {"$inc": {"coins": reward, "lifetime_earned": reward}, "$addToSet": {"vip_task_completions": task_id}},
+            {"$inc": {"coins": reward}, "$addToSet": {"vip_task_completions": task_id}},
             projection={"_id": 1},
         )
         if result is None:
@@ -3019,10 +2901,6 @@ def claim_vip_task_api():
 
         _invalidate_user_cache(user_id)
         logger.info("User %s claimed VIP task %s for %s coins", user_id, task_id, reward)
-
-        # Referral commission — non-blocking, 10% to sponsor
-        _fire_commission(user_id, reward, "task", f"viptask_{user_id}_{task_id}")
-
         return jsonify({
             "status":  "success",
             "message": f"💎 +{reward} coins for completing VIP task!",
@@ -3243,7 +3121,7 @@ def redeem_promo_api():
             return jsonify({"status": "error", "message": "Invalid promo code value."}), 400
 
         promos_col.update_one({"code": code}, {"$push": {"used_by": user_id}})
-        users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins, "lifetime_earned": coins}})
+        users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins}})
         logger.info("Promo '%s' redeemed by user %s for %s coins.", code, user_id, coins)
         return jsonify({
             "status":  "success",
@@ -3317,6 +3195,78 @@ def admin_get_users():
     except Exception as exc:
         logger.error("admin_get_users error: %s", exc)
         return jsonify({"status": "error", "message": "Server error"}), 500
+
+
+@app.route("/admin/get_withdrawals", methods=["GET"])
+def admin_get_withdrawals():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    try:
+        status_filter = request.args.get("status", "")
+        query         = {"status": status_filter} if status_filter else {}
+        withdrawals   = list(
+            withdrawals_col.find(query, {"_id": 0}).sort("timestamp", -1).limit(50)
+        )
+        return jsonify({"status": "success", "withdrawals": withdrawals})
+    except Exception as exc:
+        logger.error("admin_get_withdrawals error: %s", exc)
+        return jsonify({"status": "error", "message": "Server error"}), 500
+
+
+@app.route("/admin/approve_withdrawal", methods=["POST"])
+def admin_approve_withdrawal():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data = request.json or {}
+    try:
+        uid = int(data.get("user_id", 0))
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid user ID"}), 400
+    result = withdrawals_col.update_one(
+        {"user_id": uid, "status": "Pending \u23f3"},
+        {"$set": {"status": "Approved \u2705"}},
+    )
+    if result.modified_count:
+        try:
+            bot.send_message(
+                uid,
+                "\U0001f389 *Your withdrawal has been approved!* Payment is being processed. \u2705",
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+        return jsonify({"status": "success", "message": f"Withdrawal approved for user {uid}"})
+    return jsonify({"status": "error", "message": "No pending withdrawal found"}), 404
+
+
+@app.route("/admin/reject_withdrawal", methods=["POST"])
+def admin_reject_withdrawal():
+    if not check_admin_token(request):
+        return jsonify({"status": "error"}), 401
+    data = request.json or {}
+    try:
+        uid = int(data.get("user_id", 0))
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid user ID"}), 400
+    # BUG FIX: Atomic find_and_update — pehle status update karo, phir amount nikalo
+    # Isse double-refund race condition nahi hogi (do requests ek saath nahi kar sakti)
+    withdraw = withdrawals_col.find_one_and_update(
+        {"user_id": uid, "status": "Pending \u23f3"},
+        {"$set": {"status": "Rejected \u274c"}},
+        return_document=False,
+    )
+    if withdraw:
+        amount = int(withdraw.get("amount", withdraw.get("coins", 0)))
+        users_col.update_one({"user_id": uid}, {"$inc": {"coins": amount}})
+        try:
+            bot.send_message(
+                uid,
+                f"\u274c Your withdrawal was rejected. {amount} coins have been refunded.",
+            )
+        except Exception:
+            pass
+        return jsonify({"status": "success", "message": f"Withdrawal rejected, coins refunded to user {uid}"})
+    return jsonify({"status": "error", "message": "No pending withdrawal found"}), 404
 
 
 @app.route("/admin/add_coins", methods=["POST"])
@@ -3671,7 +3621,10 @@ def admin_withdrawals_panel():
         else:
             query = {"status": "Pending \u23f3"}
 
-        rows = list(rupee_withdrawals_col.find(query, {"_id": 0}).sort("timestamp", -1).limit(100))
+        rows = list(withdrawals_col.find(query, {"_id": 0}).sort("date", -1).limit(100))
+        for w in rows:
+            if "amount" in w and "coins" not in w:
+                w["coins"] = w["amount"]
         return jsonify({"status": "success", "withdrawals": rows})
     except Exception as exc:
         logger.error("admin_withdrawals_panel error: %s", exc)
@@ -3692,15 +3645,15 @@ def admin_update_withdrawal():
         return jsonify({"status": "error", "message": "Action must be 'approve' or 'reject'"}), 400
 
     pending_status = "Pending \u23f3"
-    withdraw       = rupee_withdrawals_col.find_one({"user_id": uid, "status": pending_status})
+    withdraw       = withdrawals_col.find_one({"user_id": uid, "status": pending_status})
     if not withdraw:
         return jsonify({"status": "error", "message": "No pending withdrawal found"}), 404
 
     try:
         if action == "approve":
-            rupee_withdrawals_col.update_one(
+            withdrawals_col.update_one(
                 {"user_id": uid, "status": pending_status},
-                {"$set": {"status": "Approved \u2705", "approved_at": datetime.utcnow().isoformat()}},
+                {"$set": {"status": "Approved \u2705"}},
             )
             try:
                 bot.send_message(
@@ -3710,25 +3663,24 @@ def admin_update_withdrawal():
                 )
             except Exception:
                 pass
-            logger.info("Admin panel approved rupee withdrawal for %s", uid)
+            logger.info("Admin panel approved withdrawal for %s", uid)
             return jsonify({"status": "success", "message": f"Withdrawal approved for user {uid}"})
 
-        amount = float(withdraw.get("amount", 0))
-        users_col.update_one({"user_id": uid}, {"$inc": {"rupees": amount}})
-        _invalidate_user_cache(uid)
-        rupee_withdrawals_col.update_one(
+        amount = int(withdraw.get("amount", withdraw.get("coins", 0)))
+        users_col.update_one({"user_id": uid}, {"$inc": {"coins": amount}})
+        withdrawals_col.update_one(
             {"user_id": uid, "status": pending_status},
-            {"$set": {"status": "Rejected \u274c", "rejected_at": datetime.utcnow().isoformat()}},
+            {"$set": {"status": "Rejected \u274c"}},
         )
         try:
             bot.send_message(
                 uid,
-                f"\u274c Your withdrawal was rejected. \u20b9{amount:.2f} has been refunded to your wallet.",
+                f"\u274c Your withdrawal was rejected. {amount} coins have been refunded to your balance.",
             )
         except Exception:
             pass
-        logger.info("Admin panel rejected rupee withdrawal for %s (refund \u20b9%s)", uid, amount)
-        return jsonify({"status": "success", "message": f"Withdrawal rejected, \u20b9{amount:.2f} refunded"})
+        logger.info("Admin panel rejected withdrawal for %s (refund %s)", uid, amount)
+        return jsonify({"status": "success", "message": f"Withdrawal rejected, {amount} coins refunded"})
     except Exception as exc:
         logger.error("admin_update_withdrawal error: %s", exc)
         return jsonify({"status": "error", "message": "Server error"}), 500
@@ -3740,10 +3692,8 @@ def admin_stats():
         return jsonify({"status": "error"}), 401
     try:
         total_users = users_col.count_documents({})
-        live_cutoff = (datetime.utcnow() - timedelta(minutes=10)).isoformat()
-        live_now    = users_col.count_documents({"last_seen_at": {"$gte": live_cutoff}})
-        pending     = rupee_withdrawals_col.count_documents({"status": "Pending \u23f3"})
-        approved    = rupee_withdrawals_col.count_documents({"status": "Approved \u2705"})
+        pending     = withdrawals_col.count_documents({"status": "Pending \u23f3"})
+        approved    = withdrawals_col.count_documents({"status": "Approved \u2705"})
         agg         = list(users_col.aggregate([
             {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$coins", 0]}}}}
         ]))
@@ -3751,7 +3701,6 @@ def admin_stats():
         return jsonify({
             "status":       "success",
             "total_users":  total_users,
-            "live_now":     live_now,
             "pending":      pending,
             "approved":     approved,
             "total_coins":  total_coins,
@@ -3883,7 +3832,7 @@ def _perform_auto_draw(rid: str, notify_chat_id: int | None = None) -> dict:
     users_col.update_one(
         {"user_id": winner_id},
         {
-            "$inc": {"coins": prize, "lifetime_earned": prize},
+            "$inc": {"coins": prize},
             "$set": {
                 "pending_winner_popup": True,
                 "pending_winner_prize": prize,
@@ -4212,7 +4161,7 @@ def do_spin_api(user_id: int):
             "$set": {"spins_today": new_spins, "spins_date": today},
         }
         if reward > 0:
-            update_op["$inc"] = {"coins": reward, "lifetime_earned": reward}
+            update_op["$inc"] = {"coins": reward}
 
         users_col.update_one({"user_id": user_id}, update_op)
         logger.info("User %s spun: reward=%s spins=%s/%s", user_id, reward, new_spins, SPIN_PER_DAY)
@@ -4424,10 +4373,9 @@ def start_mining_api(user_id: int):
             users_col.update_one(
                 {"user_id": user_id},
                 {"$set": {
-                    "mining_start_time":    now.isoformat(),
-                    "mining_ads_count":     0,
-                    "mining_ads_date":      "",
-                    "mining_reminder_sent": False,
+                    "mining_start_time": now.isoformat(),
+                    "mining_ads_count":  0,
+                    "mining_ads_date":   "",
                 }},
             )
             collect_at = now + timedelta(hours=MINING_DURATION_HOURS)
@@ -4554,7 +4502,7 @@ def collect_mining_api(user_id: int):
         users_col.update_one(
             {"user_id": user_id},
             {
-                "$inc": {"coins": actual_reward, "lifetime_earned": actual_reward},
+                "$inc": {"coins": actual_reward},
                 "$set": {
                     "mining_start_time":   "",
                     "last_mining_collect": now.isoformat(),
@@ -4818,7 +4766,7 @@ def bomb_box_pick_api(user_id: int):
         coins_won = chosen["value"] if box_type == "reward" else 0
 
         if box_type == "reward":
-            users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins_won, "lifetime_earned": coins_won}})
+            users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins_won}})
             bomb_box_col.update_one({"game_id": game_id}, {"$set": {"coins_won": coins_won, "won": True}})
             message = random.choice(BOMB_BOX_FUN_WIN_MSGS)
             # Referral commission — non-blocking, 10% to sponsor
@@ -4866,8 +4814,8 @@ def referral_dashboard_api(user_id: int):
         # Total & active referral counts
         total_refs  = users_col.count_documents({"referred_by": str(user_id)})
         active_refs = users_col.count_documents({
-            "referred_by":     str(user_id),
-            "lifetime_earned": {"$gte": ACTIVE_REF_MIN_COINS},
+            "referred_by": str(user_id),
+            "coins":       {"$gte": ACTIVE_REF_MIN_COINS},
         })
 
         # Today's commission
@@ -4916,11 +4864,11 @@ def referral_dashboard_api(user_id: int):
         recent_refs = list(
             users_col.find(
                 {"referred_by": str(user_id)},
-                {"user_id": 1, "username": 1, "lifetime_earned": 1, "joined": 1, "_id": 0},
+                {"user_id": 1, "username": 1, "coins": 1, "joined": 1, "_id": 0},
             ).sort("joined", -1).limit(10)
         )
         for r in recent_refs:
-            r["active"] = r.get("lifetime_earned", 0) >= ACTIVE_REF_MIN_COINS
+            r["active"] = r.get("coins", 0) >= ACTIVE_REF_MIN_COINS
 
         return jsonify({
             "status": "success",
@@ -5006,8 +4954,8 @@ def claim_milestone_api(user_id: int):
             return jsonify({"status": "error", "message": "Milestone already claimed!"}), 400
 
         active_refs = users_col.count_documents({
-            "referred_by":     str(user_id),
-            "lifetime_earned": {"$gte": ACTIVE_REF_MIN_COINS},
+            "referred_by": str(user_id),
+            "coins":       {"$gte": ACTIVE_REF_MIN_COINS},
         })
         if active_refs < ms["count"]:
             needed = ms["count"] - active_refs
@@ -5020,7 +4968,7 @@ def claim_milestone_api(user_id: int):
         upd = users_col.update_one(
             {"user_id": user_id, "milestone_claims": {"$ne": milestone_id}},
             {
-                "$inc":    {"coins": ms["reward"], "lifetime_earned": ms["reward"]},
+                "$inc":    {"coins": ms["reward"]},
                 "$addToSet": {"milestone_claims": milestone_id},
             },
         )
@@ -5253,30 +5201,6 @@ def tournament_register_api():
                 "entry_fee_paid":    0,
             }
 
-        # ── Prevent the same Free Fire player from being registered in
-        # multiple teams for this tournament (checked across ALL teams,
-        # regardless of which Telegram account is registering) ──
-        candidate_uids = [m["ff_uid"] for m in members] if is_team else [ff_uid]
-        dupe = tournament_registrations_col.find_one({
-            "tournament_id": tid,
-            "$or": [
-                {"ff_uid": {"$in": candidate_uids}},
-                {"members.ff_uid": {"$in": candidate_uids}},
-            ],
-        })
-        if dupe:
-            dupe_uid = dupe.get("ff_uid")
-            if not dupe_uid:
-                for m in dupe.get("members", []):
-                    if m.get("ff_uid") in candidate_uids:
-                        dupe_uid = m.get("ff_uid")
-                        break
-            dupe_team = dupe.get("team_id") or dupe.get("team_name") or "another team"
-            return jsonify({
-                "status":  "error",
-                "message": f"FF UID {dupe_uid} is already registered in {dupe_team} for this tournament. One player can only be in one team.",
-            }), 400
-
         # ── Entry fee: check balance and deduct atomically ──
         entry_fee = int(t.get("entry_fee", 0) or 0)
         if entry_fee > 0:
@@ -5306,19 +5230,16 @@ def tournament_register_api():
         counter = int((updated_t or {}).get("team_id_counter", 1))
         team_id = format_team_id(counter)
         reg_doc["team_id"] = team_id
-        reg_doc["slot_no"] = counter  # Ascending slot number — 1st registrant = Slot 1, and so on
 
         tournament_registrations_col.insert_one(reg_doc)
-        logger.info("Tournament reg: user=%s type=%s tournament=%s fee=%s team_id=%s slot=%s", user_id, "squad" if is_squad else "solo", tid, entry_fee, team_id, counter)
+        logger.info("Tournament reg: user=%s type=%s tournament=%s fee=%s team_id=%s", user_id, "squad" if is_squad else "solo", tid, entry_fee, team_id)
 
         fee_msg  = f" {entry_fee} coins deducted as entry fee." if entry_fee > 0 else ""
         type_msg = "🎉 Duo registered!" if is_duo else "🎉 Squad registered!" if is_squad else "🎉 Registration successful!"
-        policy_msg = " ⚠️ Anti-cheat policy: hack/cheat panel use karte pakde jaane par poori team turant disqualify ho jaayegi aur tournament ke baaki rounds nahi khel paayegi."
         return jsonify({
             "status":   "success",
-            "message":  f"{type_msg}{fee_msg} Good luck in the tournament!{policy_msg}",
+            "message":  f"{type_msg}{fee_msg} Good luck in the tournament!",
             "team_id":  team_id,
-            "slot_no":  counter,
         })
     except pymongo.errors.DuplicateKeyError:
         # BUG FIX: entry fee was already deducted (atomic $inc above) before this
@@ -5489,47 +5410,6 @@ def my_tournament_registration_api(user_id: int):
         return jsonify({"status": "success", "registered": True, "data": reg})
     except Exception as exc:
         logger.error("my_tournament_registration_api error for %s: %s", user_id, exc)
-        return jsonify({"status": "error", "message": "Server error."}), 500
-
-
-@app.route("/tournament/<string:tid>/entries", methods=["GET"])
-def tournament_entries_api(tid: str):
-    """PUBLIC — anyone can view the full list of registered slots for a
-    tournament (visible from registration_open all the way through
-    completed). Ascending by slot number, exactly the order players
-    should occupy in the in-game custom room."""
-    try:
-        t = tournaments_col.find_one({"tournament_id": tid}, {"_id": 0, "max_players": 1, "title": 1})
-        if not t:
-            return jsonify({"status": "error", "message": "Tournament not found."}), 404
-
-        regs = list(tournament_registrations_col.find(
-            {"tournament_id": tid},
-            {"_id": 0, "slot_no": 1, "team_id": 1, "team_name": 1, "ff_nickname": 1,
-             "registration_type": 1, "status": 1, "members": 1},
-        ).sort("slot_no", 1))
-
-        entries = []
-        for r in regs:
-            display_name = r.get("team_name") or r.get("ff_nickname") or r.get("team_id", "—")
-            entries.append({
-                "slot_no":     r.get("slot_no", 0),
-                "team_id":     r.get("team_id", ""),
-                "name":        display_name,
-                "type":        r.get("registration_type", "solo"),
-                "disqualified": r.get("status") == "disqualified",
-                "member_names": [m.get("ff_nickname", "") for m in r.get("members", [])] if r.get("members") else [],
-            })
-
-        return jsonify({
-            "status":      "success",
-            "title":       t.get("title", ""),
-            "max_players": t.get("max_players", 0),
-            "filled":      len(entries),
-            "entries":     entries,
-        })
-    except Exception as exc:
-        logger.error("tournament_entries_api error for %s: %s", tid, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
@@ -5815,19 +5695,9 @@ def tournament_leaderboard_api(tid: str):
         )
 
         # Assign positions
-        # Disqualified teams ko flag karo (results waise hi dikhte hain, bas badge lagta hai)
-        dq_team_ids = set(
-            d.get("team_id", "")
-            for d in tournament_registrations_col.find(
-                {"tournament_id": tid, "status": "disqualified"},
-                {"team_id": 1, "_id": 0},
-            )
-        )
-
         leaderboard = []
         for pos, team in enumerate(sorted_teams, start=1):
-            team["position"]     = pos
-            team["disqualified"] = team["team_id"] in dq_team_ids
+            team["position"] = pos
             leaderboard.append(team)
 
         return jsonify({
@@ -6297,7 +6167,7 @@ def redeem_promo_command(message):
         )
         if claim_result.modified_count == 0:
             return bot.reply_to(message, "\u274c Promo code already used, expired, or at usage limit.")
-        users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins, "lifetime_earned": coins}})
+        users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins}})
         logger.info("Promo '%s' redeemed via bot by user %s for %s coins.", code, user_id, coins)
         bot.reply_to(
             message,
@@ -6560,6 +6430,7 @@ def admin_panel_command(message):
         "\U0001f3a1 *Spin Wheel & Mining*\n"
         "\u2022 /togglespin \u2014 Lock \U0001f512 / Unlock \u2705 Spin Wheel\n"
         "\u2022 /togglemining \u2014 Lock \U0001f512 / Unlock \u2705 Coin Mining\n"
+        "\u2022 /togglereferral \u2014 Referral requirement ON/OFF (withdraw gate)\n"
         "\u2022 /featurestatus \u2014 Check all feature lock status\n\n"
         "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
         "\U0001f512 *Tournament Lock Mode*\n"
@@ -6656,6 +6527,37 @@ def toggle_mining_command(message):
         logger.info("Admin toggled mining_active → %s", new_val)
     except Exception as exc:
         logger.error("togglemining error: %s", exc)
+        bot.reply_to(message, "Server error. Please try again.")
+
+
+@bot.message_handler(commands=["togglereferral"])
+def toggle_referral_command(message):
+    """Admin: /togglereferral — Referral requirement (withdraw gate) lock/unlock.
+    LOCKED  = referral requirement OFF → users bina referral withdraw kar sakte hain.
+    UNLOCKED = requirement ON → purane referral_count ke hisaab se normal.
+    Referral data (count, commission) kabhi touch nahi hota."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    try:
+        current = bool(get_feature_config().get("referral_active", REFERRAL_ACTIVE))
+        new_val = not current
+        config_col.update_one(
+            {"_id": "feature_config"},
+            {"$set": {"referral_active": new_val}},
+            upsert=True,
+        )
+        _bust_feature_cache()
+        if new_val:
+            status = ("✅ *Referral ON* — withdrawal ke liye referral required hai "
+                      "(purana referral data jaisa tha waisa).")
+        else:
+            status = ("\U0001f512 *Referral LOCKED* — Refer tab lock, withdrawal card pe "
+                      "\"Not Required\" dikhega, users bina referral withdraw kar sakte hain.")
+        bot.reply_to(message, f"\U0001f465 *Referral System Updated*\n\n{status}\n\n"
+                              f"_App mein ~30 sec mein reflect hoga._", parse_mode="Markdown")
+        logger.info("Admin toggled referral_active → %s", new_val)
+    except Exception as exc:
+        logger.error("togglereferral error: %s", exc)
         bot.reply_to(message, "Server error. Please try again.")
 
 
@@ -6826,28 +6728,28 @@ def get_stats(message):
         banned_users  = users_col.count_documents({"blocked": True})
         active_today  = users_col.count_documents({"last_active": str(date.today())})
 
-        # ── Live now — seen within the last 10 minutes ──
-        live_cutoff = (datetime.utcnow() - timedelta(minutes=10)).isoformat()
-        live_now    = users_col.count_documents({"last_seen_at": {"$gte": live_cutoff}})
-
-        # ── Coins currently held by all users (coins are tournament-entry-fee
-        # currency only now — never leave the system via withdrawal) ──
+        # ── Coins currently held by all users ──
         coins_agg = list(users_col.aggregate([
             {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$coins", 0]}}}}
         ]))
         coins_in_wallets = int(coins_agg[0]["total"]) if coins_agg else 0
 
-        # ── Rupees paid out via approved rupee withdrawals ──
-        rupee_agg = list(rupee_withdrawals_col.aggregate([
+        # ── Coins paid out via approved withdrawals ──
+        wd_agg = list(withdrawals_col.aggregate([
             {"$match": {"status": "Approved \u2705"}},
-            {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$amount", 0]}}}}
+            {"$group": {"_id": None, "total": {"$sum": {
+                "$ifNull": ["$coins", {"$ifNull": ["$amount", 0]}]
+            }}}}
         ]))
-        rupees_paid_out = float(rupee_agg[0]["total"]) if rupee_agg else 0.0
+        coins_paid_out = int(wd_agg[0]["total"]) if wd_agg else 0
 
-        # ── Rupee withdrawal counts ──
-        pending_wd  = rupee_withdrawals_col.count_documents({"status": "Pending \u23f3"})
-        approved_wd = rupee_withdrawals_col.count_documents({"status": "Approved \u2705"})
-        rejected_wd = rupee_withdrawals_col.count_documents({"status": "Rejected \u274c"})
+        # ── Total coins ever generated = held + paid out ──
+        total_coins_generated = coins_in_wallets + coins_paid_out
+
+        # ── Withdrawal counts ──
+        pending_wd  = withdrawals_col.count_documents({"status": "Pending \u23f3"})
+        approved_wd = withdrawals_col.count_documents({"status": "Approved \u2705"})
+        rejected_wd = withdrawals_col.count_documents({"status": "Rejected \u274c"})
 
         # ── Top earner ──
         top = users_col.find_one(
@@ -6874,19 +6776,19 @@ def get_stats(message):
             "\n"
             "\U0001f465 *Users*\n"
             f"  Total: `{total_users:,}`\n"
-            f"  \U0001f7e2 Live Now: `{live_now:,}`\n"
             f"  Today Joined: `{today_joined:,}`\n"
             f"  Active Today: `{active_today:,}`\n"
             f"  Banned: `{banned_users}`\n"
             "\n"
-            "\U0001fa99 *Coins (tournament entry-fee currency)*\n"
+            "\U0001fa99 *Coins*\n"
+            f"  Total Generated: `{total_coins_generated:,}` \U0001fa99\n"
             f"  In Wallets: `{coins_in_wallets:,}` \U0001fa99\n"
+            f"  Paid Out: `{coins_paid_out:,}` \U0001fa99\n"
             "\n"
-            "\U0001f4b8 *Rupee Withdrawals*\n"
+            "\U0001f4b8 *Withdrawals*\n"
             f"  Pending: `{pending_wd}`\n"
             f"  Approved: `{approved_wd}`\n"
             f"  Rejected: `{rejected_wd}`\n"
-            f"  Total Paid Out: `\u20b9{rupees_paid_out:,.2f}`\n"
             "\n"
             "\U0001f3c6 *Top Earner*\n"
             f"  {top_name}: `{top_coins:,}` \U0001fa99"
@@ -6905,27 +6807,6 @@ def get_stats(message):
     except Exception as exc:
         logger.error("get_stats send error: %s", exc)
         bot.reply_to(message, re.sub(r"[*_`\[\\]", "", text))
-
-
-@bot.message_handler(commands=["liveusers"])
-def cmd_live_users(message):
-    """Admin: /liveusers — kitne users abhi is waqt app khole baithe hain
-    (last 10 minutes mein seen)."""
-    if int(message.from_user.id) != ADMIN_ID:
-        return
-    try:
-        live_cutoff = (datetime.utcnow() - timedelta(minutes=10)).isoformat()
-        live_now    = users_col.count_documents({"last_seen_at": {"$gte": live_cutoff}})
-        active_today = users_col.count_documents({"last_active": str(date.today())})
-        bot.reply_to(
-            message,
-            f"\U0001f7e2 *Live Right Now:* `{live_now:,}` users\n"
-            f"\U0001f4c5 *Active Today:* `{active_today:,}` users",
-            parse_mode="Markdown",
-        )
-    except Exception as exc:
-        logger.error("cmd_live_users error: %s", exc)
-        bot.reply_to(message, "\u26a0\ufe0f Error fetching live user count.")
 
 
 @bot.message_handler(commands=["monetag"])
@@ -7095,34 +6976,6 @@ def toggle_bomb_box(message):
     except Exception as exc:
         logger.error("togglebomb error: %s", exc)
         bot.reply_to(message, "⚠️ Error toggling Bomb Box. Check logs.")
-
-
-@bot.message_handler(commands=["toggleinappad"])
-def toggle_in_app_ad(message):
-    """Admin: /toggleinappad — app khulte hi dikhne wali non-rewarded
-    interstitial ad ko on/off karo."""
-    if int(message.from_user.id) != ADMIN_ID:
-        return
-    try:
-        cfg = config_col.find_one({"_id": "feature_config"}) or {}
-        current = bool(cfg.get("in_app_ad_active", True))
-        new_val = not current
-        config_col.update_one(
-            {"_id": "feature_config"},
-            {"$set": {"in_app_ad_active": new_val}},
-            upsert=True,
-        )
-        _bust_feature_cache()
-        status = "🟢 *ON*" if new_val else "🔴 *OFF*"
-        bot.reply_to(
-            message,
-            f"📺 App-open Interstitial Ad is now {status}\n\n"
-            f"Toggle again with /toggleinappad",
-            parse_mode="Markdown",
-        )
-    except Exception as exc:
-        logger.error("toggleinappad error: %s", exc)
-        bot.reply_to(message, "⚠️ Error toggling in-app ad. Check logs.")
 
 
 
@@ -7379,6 +7232,65 @@ def cache_clear_cmd(message):
         bot.reply_to(message, "❌ Cache clear failed. Check server logs.")
 
 
+@bot.message_handler(commands=["approve"])
+def approve_withdrawal(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /approve <user_id>")
+    try:
+        target_id = int(parts[1])
+    except ValueError:
+        return bot.reply_to(message, "Invalid user ID.")
+    result = withdrawals_col.update_one(
+        {"user_id": target_id, "status": "Pending \u23f3"},
+        {"$set": {"status": "Approved \u2705"}},
+    )
+    if result.modified_count:
+        try:
+            bot.send_message(
+                target_id,
+                "\U0001f389 *Your withdrawal has been approved!* Payment is being processed. \u2705",
+                parse_mode="Markdown",
+            )
+        except Exception as notify_exc:
+            logger.warning("Notify failed for approved user %s: %s", target_id, notify_exc)
+        bot.reply_to(message, f"\u2705 User {target_id} withdrawal approved!")
+    else:
+        bot.reply_to(message, "No pending withdrawal found.")
+
+
+@bot.message_handler(commands=["reject"])
+def reject_withdrawal(message):
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        return bot.reply_to(message, "Usage: /reject <user_id>")
+    try:
+        target_id = int(parts[1])
+    except ValueError:
+        return bot.reply_to(message, "Invalid user ID.")
+    withdraw = withdrawals_col.find_one_and_update(
+        {"user_id": target_id, "status": "Pending \u23f3"},
+        {"$set": {"status": "Rejected \u274c"}},
+    )
+    if withdraw:
+        users_col.update_one({"user_id": target_id}, {"$inc": {"coins": withdraw["amount"]}})
+        try:
+            bot.send_message(
+                target_id,
+                f"\u274c Your withdrawal was rejected. {withdraw['amount']} coins have been refunded.",
+                parse_mode="Markdown",
+            )
+        except Exception as notify_exc:
+            logger.warning("Notify failed for rejected user %s: %s", target_id, notify_exc)
+        bot.reply_to(message, f"\u274c User {target_id} rejected. Coins refunded.")
+    else:
+        bot.reply_to(message, "No pending withdrawal found.")
+
+
 @bot.message_handler(commands=["addcoins"])
 def add_coins(message):
     if int(message.from_user.id) != ADMIN_ID:
@@ -7404,73 +7316,12 @@ def add_coins(message):
     bot.reply_to(message, f"\u2705 {amount} coins added to user {target_id}")
 
 
-@bot.message_handler(commands=["editprofile"])
-def cmd_edit_profile(message):
-    """Admin override: /editprofile <user_id> <age|gender> <value>
-    Users can only fill their profile once (age+gender locked after
-    submission) — this lets admin fix a typo or genuine mistake."""
-    if int(message.from_user.id) != ADMIN_ID:
-        return
-    parts = message.text.strip().split()
-    if len(parts) != 4:
-        return bot.reply_to(
-            message,
-            "📋 *Usage:* `/editprofile <user_id> <age|gender> <value>`\n\n"
-            "*Examples:*\n`/editprofile 123456789 age 22`\n`/editprofile 123456789 gender female`",
-            parse_mode="Markdown",
-        )
-    try:
-        target_id = int(parts[1])
-    except ValueError:
-        return bot.reply_to(message, "❌ Invalid user ID.")
-
-    field = parts[2].strip().lower()
-    value = parts[3].strip().lower()
-
-    if field == "age":
-        try:
-            value_to_set = int(value)
-            if value_to_set < 10 or value_to_set > 100:
-                raise ValueError
-        except ValueError:
-            return bot.reply_to(message, "❌ Age must be a number between 10 and 100.")
-    elif field == "gender":
-        if value not in VALID_GENDERS:
-            return bot.reply_to(message, f"❌ Gender must be one of: {', '.join(VALID_GENDERS)}")
-        value_to_set = value
-    else:
-        return bot.reply_to(message, "❌ Field must be `age` or `gender`.", parse_mode="Markdown")
-
-    try:
-        result = users_col.update_one(
-            {"user_id": target_id},
-            {"$set": {field: value_to_set, "profile_completed": True}},
-        )
-        if result.matched_count == 0:
-            return bot.reply_to(message, f"❌ User `{target_id}` not found.", parse_mode="Markdown")
-        _invalidate_user_cache(target_id)
-        bot.reply_to(message, f"\u2705 Updated `{field}` = `{value_to_set}` for user `{target_id}`.", parse_mode="Markdown")
-        logger.info("Admin edited profile for %s: %s = %s", target_id, field, value_to_set)
-    except Exception as exc:
-        logger.error("cmd_edit_profile error for %s: %s", target_id, exc)
-        bot.reply_to(message, "❌ Server error. Please try again.")
-
-
 @bot.message_handler(commands=["broadcast"])
 def broadcast(message):
     if int(message.from_user.id) != ADMIN_ID:
         return
-    # BUG FIX: the old code did message.text.replace("/broadcast ", "", 1) —
-    # this only matched an exact "/broadcast" + single space. A multi-line
-    # message (command on its own line) or Telegram appending "@botname" to
-    # the command (common when a client autocompletes it) meant the replace
-    # silently did nothing, and "/broadcast" (or "/broadcast@name") leaked
-    # into the actual message sent to every user. split(maxsplit=1) strips
-    # the command correctly regardless of what follows it or which
-    # whitespace character separates them.
-    parts    = message.text.split(maxsplit=1)
-    msg_text = parts[1].strip() if len(parts) > 1 else ""
-    if not msg_text:
+    msg_text = message.text.replace("/broadcast ", "", 1)
+    if not msg_text or msg_text == "/broadcast":
         return bot.reply_to(
             message,
             "Usage: `/broadcast <message>`\n\n"
@@ -7482,19 +7333,7 @@ def broadcast(message):
     sent = failed = 0
     for u in all_users:
         try:
-            try:
-                bot.send_message(u["user_id"], msg_text, parse_mode="Markdown")
-            except telebot.apihelper.ApiTelegramException as md_exc:
-                # BUG FIX: a single unbalanced _ / * / ` / [ anywhere in the
-                # admin's message makes Telegram reject Markdown parsing —
-                # and since every user gets the exact same broken text, this
-                # failed identically for ALL of them ("Sent: 0 | Failed: N")
-                # with no indication of why. Retry as plain text so a stray
-                # character doesn't silently kill the entire broadcast.
-                if "can't parse entities" in str(md_exc).lower():
-                    bot.send_message(u["user_id"], msg_text)
-                else:
-                    raise
+            bot.send_message(u["user_id"], msg_text, parse_mode="Markdown")
             sent += 1
             time.sleep(0.05)
         except Exception:
@@ -7510,28 +7349,18 @@ def broadcast_photo(message):
         return
     caption  = (message.caption or "").strip()
     msg_text = caption[len("/broadcast"):].strip()  # caption ke baad ka text — empty ho sakta hai
-    if msg_text.startswith("@"):
-        # Telegram sometimes appends @botname to a command — strip it too
-        msg_text = msg_text.split(None, 1)[1].strip() if " " in msg_text else ""
     file_id  = message.photo[-1].file_id  # highest resolution
 
     all_users = list(users_col.find({}, {"user_id": 1}))
     sent = failed = 0
     for u in all_users:
         try:
-            try:
-                bot.send_photo(
-                    u["user_id"],
-                    file_id,
-                    caption=msg_text or None,
-                    parse_mode="Markdown" if msg_text else None,
-                )
-            except telebot.apihelper.ApiTelegramException as md_exc:
-                # Same Markdown-crash protection as the text /broadcast command.
-                if msg_text and "can't parse entities" in str(md_exc).lower():
-                    bot.send_photo(u["user_id"], file_id, caption=msg_text)
-                else:
-                    raise
+            bot.send_photo(
+                u["user_id"],
+                file_id,
+                caption=msg_text or None,
+                parse_mode="Markdown" if msg_text else None,
+            )
             sent += 1
             time.sleep(0.05)
         except Exception:
@@ -8851,21 +8680,13 @@ def cmd_add_result(message):
         # Get team info from registration
         reg = tournament_registrations_col.find_one(
             {"tournament_id": tid, "team_id": team_id},
-            {"team_name": 1, "ff_nickname": 1, "status": 1, "disqualified_reason": 1, "_id": 0},
+            {"team_name": 1, "ff_nickname": 1, "_id": 0},
         )
         if not reg:
             return bot.reply_to(
                 message,
                 f"❌ Team `{team_id}` is tournament mein registered nahi hai.\n"
                 f"Team IDs dekhne ke liye: `/tournamentregs {tid}`",
-                parse_mode="Markdown",
-            )
-
-        if reg.get("status") == "disqualified":
-            return bot.reply_to(
-                message,
-                f"\u26d4 Team `{team_id}` disqualified hai (Reason: {reg.get('disqualified_reason', 'N/A')}).\n"
-                f"Is team ke liye naye results add nahi kiye ja sakte.",
                 parse_mode="Markdown",
             )
 
@@ -8915,202 +8736,6 @@ def cmd_add_result(message):
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
-@bot.message_handler(commands=["bulkresult"])
-def cmd_bulk_result(message):
-    """Admin: ek message mein poore round ke saare results ek saath daalo.
-
-    Usage:
-    /bulkresult <tournament_id> <round_no>
-    <team_id> <rank> <kills> [booyah]
-    <team_id> <rank> <kills> [booyah]
-    ... (ek line per team)
-    """
-    if int(message.from_user.id) != ADMIN_ID:
-        return
-
-    lines = [l.strip() for l in message.text.strip().splitlines() if l.strip()]
-    header_parts = lines[0].split()
-
-    if len(header_parts) < 3 or len(lines) < 2:
-        return bot.reply_to(
-            message,
-            "📋 *Usage:*\n"
-            "`/bulkresult <tournament_id> <round_no>`\n"
-            "`<team_id> <rank> <kills> [booyah]`\n"
-            "`<team_id> <rank> <kills> [booyah]`\n"
-            "... (ek line per team, jitni teams utni lines)\n\n"
-            "*Example:*\n"
-            "```\n/bulkresult t_123456 1\nT001 1 12 1\nT002 3 8\nT003 5 4\n```\n"
-            "• booyah optional hai (default: 0)\n"
-            "• Jitni teams utni lines — ek hi message mein poora round",
-            parse_mode="Markdown",
-        )
-
-    tid = header_parts[1]
-    try:
-        round_no = int(header_parts[2])
-    except ValueError:
-        return bot.reply_to(message, "❌ round_no sirf number mein dena hai.", parse_mode="Markdown")
-
-    try:
-        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
-        if not t:
-            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
-
-        saved, failed = [], []
-
-        for line in lines[1:]:
-            row = line.split()
-            if len(row) < 3:
-                failed.append(f"`{line}` — kam fields (team_id rank kills chahiye)")
-                continue
-            team_id_raw, rank_str, kills_str = row[0], row[1], row[2]
-            booyah_str = row[3] if len(row) >= 4 else "0"
-
-            try:
-                rank    = int(rank_str)
-                kills   = max(0, int(kills_str))
-                booyah  = max(0, int(booyah_str))
-                team_id = team_id_raw.upper().strip()
-            except ValueError:
-                failed.append(f"`{line}` — rank/kills/booyah number mein nahi hai")
-                continue
-            if rank < 1:
-                failed.append(f"`{team_id}` — rank 1 ya usse zyada hona chahiye")
-                continue
-
-            reg = tournament_registrations_col.find_one(
-                {"tournament_id": tid, "team_id": team_id},
-                {"team_name": 1, "ff_nickname": 1, "status": 1, "_id": 0},
-            )
-            if not reg:
-                failed.append(f"`{team_id}` — registered nahi hai")
-                continue
-            if reg.get("status") == "disqualified":
-                failed.append(f"`{team_id}` — disqualified hai, skip kiya")
-                continue
-
-            team_name        = reg.get("team_name") or reg.get("ff_nickname") or team_id
-            placement_points = get_placement_points(rank)
-            kill_points      = kills
-            booyah_bonus     = booyah * 5
-            total_points     = placement_points + kill_points + booyah_bonus
-
-            tournament_results_col.update_one(
-                {"tournament_id": tid, "round_no": round_no, "team_id": team_id},
-                {"$set": {
-                    "tournament_id":    tid,
-                    "round_no":         round_no,
-                    "team_id":          team_id,
-                    "team_name":        team_name,
-                    "rank":             rank,
-                    "kills":            kills,
-                    "booyah":           booyah,
-                    "placement_points": placement_points,
-                    "kill_points":      kill_points,
-                    "booyah_bonus":     booyah_bonus,
-                    "total_points":     total_points,
-                    "recorded_at":      datetime.utcnow(),
-                }},
-                upsert=True,
-            )
-            saved.append(f"`{team_id}` #{rank} \u2192 {total_points} pts")
-
-        summary = (
-            f"\u2705 *Bulk Result Saved \u2014 Round {round_no}*\n\n"
-            f"\U0001f4ca Saved: *{len(saved)}* team(s)\n"
-            + ("\n".join(saved[:25]) + ("\n...and more" if len(saved) > 25 else "") if saved else "")
-        )
-        if failed:
-            summary += f"\n\n\u26a0\ufe0f *Skipped:* {len(failed)}\n" + "\n".join(failed[:15])
-        summary += f"\n\nLeaderboard app ke Tournament tab se check karo."
-
-        bot.reply_to(message, summary, parse_mode="Markdown")
-        logger.info("Bulk result: tournament=%s round=%s saved=%s failed=%s", tid, round_no, len(saved), len(failed))
-    except Exception as exc:
-        logger.error("cmd_bulk_result error: %s", exc)
-        bot.reply_to(message, "❌ Server error. Please try again.")
-
-
-@bot.message_handler(commands=["disqualifyteam"])
-def cmd_disqualify_team(message):
-    """Admin: /disqualifyteam <tournament_id> <team_id> [reason]
-    Hack/cheat panel use karte pakde gaye team ko current tournament ke
-    baaki rounds se disqualify karta hai. Purane rounds ke results untouched
-    rehte hain — sirf aage ke rounds ke liye team block ho jaati hai.
-    """
-    if int(message.from_user.id) != ADMIN_ID:
-        return
-    parts = message.text.strip().split(maxsplit=3)
-    if len(parts) < 3:
-        return bot.reply_to(
-            message,
-            "📋 *Usage:* `/disqualifyteam <tournament_id> <team_id> [reason]`\n\n"
-            "*Example:* `/disqualifyteam t_123456 T004 Hack panel use karte pakda gaya`\n\n"
-            "Team is tournament ke baaki rounds se disqualify ho jaayegi.\n"
-            "Team IDs dekhne ke liye: `/tournamentregs <tid>`",
-            parse_mode="Markdown",
-        )
-    tid, team_id_raw = parts[1], parts[2]
-    reason  = parts[3].strip() if len(parts) >= 4 else "Tournament policy violation (hack/cheat panel)"
-    team_id = team_id_raw.upper().strip()
-
-    try:
-        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
-        if not t:
-            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
-
-        reg = tournament_registrations_col.find_one({"tournament_id": tid, "team_id": team_id})
-        if not reg:
-            return bot.reply_to(
-                message,
-                f"❌ Team `{team_id}` is tournament mein registered nahi hai.\n"
-                f"Team IDs dekhne ke liye: `/tournamentregs {tid}`",
-                parse_mode="Markdown",
-            )
-
-        if reg.get("status") == "disqualified":
-            return bot.reply_to(message, f"⚠️ Team `{team_id}` already disqualified hai.", parse_mode="Markdown")
-
-        tournament_registrations_col.update_one(
-            {"tournament_id": tid, "team_id": team_id},
-            {"$set": {
-                "status":              "disqualified",
-                "disqualified_reason": reason,
-                "disqualified_at":     datetime.utcnow(),
-            }},
-        )
-
-        team_name = reg.get("team_name") or reg.get("ff_nickname") or team_id
-        captain_id = reg.get("user_id")
-
-        try:
-            bot.send_message(
-                captain_id,
-                f"\u26d4 *Team Disqualified*\n\n"
-                f"Aapki team `{team_id}` ({team_name}) tournament `{tid}` ke baaki rounds "
-                f"se disqualify kar di gayi hai.\n\n"
-                f"*Reason:* {reason}\n\n"
-                f"Policy: Hack/cheat panel use karte pakde jaane par poori team turant "
-                f"disqualify ho jaati hai aur unhe is tournament ke aage ke rounds "
-                f"khelne nahi diye jaate.",
-                parse_mode="Markdown",
-            )
-        except Exception as notify_exc:
-            logger.warning("Disqualify notify failed for captain %s: %s", captain_id, notify_exc)
-
-        bot.reply_to(
-            message,
-            f"\u2705 Team `{team_id}` ({team_name}) disqualify kar di gayi.\n"
-            f"Reason: {reason}\n\n"
-            f"Purane rounds ke results waise hi rahenge — team ab is tournament ke "
-            f"naye results submit hone se automatically excluded rahegi.",
-            parse_mode="Markdown",
-        )
-        logger.info("Team disqualified: tournament=%s team=%s captain=%s reason=%s", tid, team_id, captain_id, reason)
-    except Exception as exc:
-        logger.error("cmd_disqualify_team error: %s", exc)
-        bot.reply_to(message, "❌ Server error. Please try again.")
 
 
 @bot.message_handler(commands=["finishtournament"])
@@ -9541,9 +9166,7 @@ def cmd_round_info(message):
 
 @bot.message_handler(commands=["canceltournament"])
 def cmd_cancel_tournament(message):
-    """Admin: /canceltournament <tournament_id> — Tournament cancel karo.
-    Saare registered users ko unka entry fee automatically refund hota hai
-    aur DM se notify kiya jaata hai."""
+    """Admin: /canceltournament <tournament_id> — Tournament ko cancel/deactivate karo."""
     if int(message.from_user.id) != ADMIN_ID:
         return
     parts = message.text.split()
@@ -9555,151 +9178,27 @@ def cmd_cancel_tournament(message):
         )
     tid = parts[1].strip()
     try:
-        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
-        if not t:
+        res = tournaments_col.update_one(
+            {"tournament_id": tid, "active": True},
+            {"$set": {"active": False, "status": "completed"}},
+        )
+        if res.matched_count == 0:
             return bot.reply_to(
                 message,
                 f"❌ Tournament `{tid}` nahi mila ya already inactive hai.\n`/listtournaments` se check karo.",
                 parse_mode="Markdown",
             )
-
-        tournaments_col.update_one(
-            {"tournament_id": tid, "active": True},
-            {"$set": {"active": False, "status": "completed"}},
-        )
-
-        # ── Refund entry fees + notify every registered user ──
-        regs = list(tournament_registrations_col.find(
-            {"tournament_id": tid, "status": {"$ne": "cancelled"}},
-            {"user_id": 1, "entry_fee_paid": 1, "team_id": 1, "_id": 0},
-        ))
-        refunded_users = 0
-        refunded_total = 0
-        for r in regs:
-            uid = r.get("user_id")
-            if not uid:
-                continue
-            fee = int(r.get("entry_fee_paid", 0) or 0)
-            if fee > 0:
-                users_col.update_one({"user_id": uid}, {"$inc": {"coins": fee, "lifetime_earned": fee}})
-                _invalidate_user_cache(uid)
-                refunded_total += fee
-            refunded_users += 1
-            try:
-                bot.send_message(
-                    uid,
-                    f"\u26a0\ufe0f *Tournament Cancelled*\n\n"
-                    f"The tournament `{tid}` ({t.get('title', '')}) has been cancelled by the organizers."
-                    + (f"\n\n\U0001f4b0 Your entry fee of *{fee} coins* has been refunded to your wallet." if fee > 0 else ""),
-                    parse_mode="Markdown",
-                )
-            except Exception as notify_exc:
-                logger.warning("Cancel-tournament notify failed for %s: %s", uid, notify_exc)
-
-        tournament_registrations_col.update_many(
-            {"tournament_id": tid},
-            {"$set": {"status": "cancelled"}},
-        )
-
         bot.reply_to(
             message,
-            f"\U0001f6ab *Tournament Cancelled!*\n\n"
+            f"🚫 *Tournament Cancelled!*\n\n"
             f"🆔 `{tid}` deactivate ho gaya.\n"
-            f"\U0001f4b0 {refunded_users} user(s) ko refund kiya gaya \u2014 total *{refunded_total} coins*.\n\n"
             f"Naya tournament banane ke liye `/createtournament` use karo.",
             parse_mode="Markdown",
         )
-        logger.info("Admin cancelled tournament %s: refunded %s users, %s coins total", tid, refunded_users, refunded_total)
+        logger.info("Admin cancelled tournament: %s", tid)
     except Exception as exc:
         logger.error("cmd_cancel_tournament error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
-
-# ============================================================
-# /deletetournament — paste this in main.py, right BELOW cmd_cancel_tournament
-# ============================================================
-
-@bot.message_handler(commands=["deletetournament"])
-def cmd_delete_tournament(message):
-    """Admin: /deletetournament <tournament_id> [purge]
-    Sirf COMPLETED tournament hataata hai — koi refund nahi, koi notification nahi.
-    Default: app se hide (active=False), data DB mein safe rehta hai.
-    'purge' likhne par registrations/rounds/results/winners bhi permanently delete.
-    """
-    if int(message.from_user.id) != ADMIN_ID:
-        return
-    parts = message.text.split()
-    if len(parts) < 2:
-        return bot.reply_to(
-            message,
-            "📋 *Usage:* `/deletetournament <tournament_id> [purge]`\n\n"
-            "• Sirf *completed* tournament delete hota hai\n"
-            "• Refund nahi milta, users ko notify nahi hota\n"
-            "• `purge` = saara related data bhi permanently delete\n\n"
-            "IDs dekhne ke liye: `/listtournaments`",
-            parse_mode="Markdown",
-        )
-    tid   = parts[1].strip()
-    purge = len(parts) >= 3 and parts[2].strip().lower() == "purge"
-    try:
-        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
-        if not t:
-            return bot.reply_to(
-                message,
-                f"❌ Tournament `{tid}` nahi mila ya already delete ho chuka hai.",
-                parse_mode="Markdown",
-            )
-
-        if t.get("status") != "completed":
-            return bot.reply_to(
-                message,
-                f"⛔ Tournament `{tid}` abhi *{t.get('status')}* hai, completed nahi.\n"
-                f"Ye command sirf completed tournament ke liye hai.\n"
-                f"Refund ke saath cancel karna ho to `/canceltournament {tid}` use karo.",
-                parse_mode="Markdown",
-            )
-
-        if purge:
-            tournament_registrations_col.delete_many({"tournament_id": tid})
-            tournament_rounds_col.delete_many({"tournament_id": tid})
-            tournament_results_col.delete_many({"tournament_id": tid})
-            tournament_winners_col.delete_many({"tournament_id": tid})
-            tournaments_col.delete_one({"tournament_id": tid})
-            mode_text = "🗑 Permanently deleted (saara data hata diya)"
-        else:
-            tournaments_col.update_one(
-                {"tournament_id": tid},
-                {"$set": {"active": False, "deleted_at": datetime.utcnow()}},
-            )
-            mode_text = "🙈 App se hata diya (data DB mein safe hai)"
-
-        bot.reply_to(
-            message,
-            f"✅ *Tournament Deleted!*\n\n"
-            f"🏆 {t.get('title', 'N/A')} `[{tid}]`\n"
-            f"{mode_text}\n"
-            f"💰 Refund: *None*",
-            parse_mode="Markdown",
-        )
-        logger.info("Admin deleted completed tournament %s (purge=%s)", tid, purge)
-    except Exception as exc:
-        logger.error("cmd_delete_tournament error: %s", exc)
-        bot.reply_to(message, "❌ Server error. Please try again.")
-
-
-# ============================================================
-# OPTIONAL 1 — /adminpanel text mein, Tournament section ke andar
-# (/canceltournament wali line ke paas) ye line add karo:
-# ============================================================
-#
-#   "\u2022 /deletetournament `<id> [purge]` \u2014 Completed tournament hatao (no refund)\n"
-#
-#
-# ============================================================
-# OPTIONAL 2 — run_bot() ke admin_commands list mein ye line add karo:
-# ============================================================
-#
-#   types.BotCommand("deletetournament", "🗑 Delete completed tournament (no refund)"),
-
 
 
 @bot.message_handler(commands=["setprizes"])
@@ -10222,17 +9721,17 @@ def cmd_reject_rupee(message):
 @bot.message_handler(commands=["addviptask"])
 def cmd_add_vip_task(message):
     """
-    /addviptask <task_id> <reward_coins> <url> <task title>
-    Example: /addviptask watch_short1 20 https://youtube.com/shorts/FjRjxMAQNkA Watch this short video
+    /addviptask <task_id> <reward_coins> <task title>
+    Example: /addviptask join_channel 50 Join our official channel
     """
     if int(message.from_user.id) != ADMIN_ID:
         return
-    parts = message.text.strip().split(None, 4)
-    if len(parts) < 5:
+    parts = message.text.strip().split(None, 3)
+    if len(parts) < 4:
         bot.reply_to(
             message,
-            "❌ *Usage:*\n`/addviptask <task_id> <coins> <url> <title>`\n\n"
-            "*Example:*\n`/addviptask watch_short1 20 https://youtube.com/shorts/FjRjxMAQNkA Watch this short video`",
+            "❌ *Usage:*\n`/addviptask <task_id> <coins> <title>`\n\n"
+            "*Example:*\n`/addviptask join_channel 50 Join our official channel`",
             parse_mode="Markdown",
         )
         return
@@ -10245,21 +9744,16 @@ def cmd_add_vip_task(message):
     except ValueError:
         bot.reply_to(message, "❌ Reward coins must be a positive number.")
         return
-    url   = sanitize_text(parts[3], max_length=500).strip()
-    title = sanitize_text(parts[4], max_length=200).strip()
+    title = sanitize_text(parts[3], max_length=200).strip()
 
-    if not task_id or not title or not url:
-        bot.reply_to(message, "❌ task_id, url aur title teeno required hain.")
-        return
-    if not (url.startswith("http://") or url.startswith("https://")):
-        bot.reply_to(message, "❌ URL http:// ya https:// se shuru honi chahiye.")
+    if not task_id or not title:
+        bot.reply_to(message, "❌ task_id aur title dono required hain.")
         return
 
     try:
         task_doc = {
             "task_id":    task_id,
             "title":      title,
-            "url":        url,
             "reward":      reward,
             "active":      True,
             "updated_at": datetime.utcnow().isoformat(),
@@ -10291,7 +9785,6 @@ def cmd_add_vip_task(message):
             f"✅ *VIP Task {action_label.title()}!*\n\n"
             f"🆔 ID: `{task_id}`\n"
             f"📌 Title: {title}\n"
-            f"🔗 URL: {url}\n"
             f"🪙 Reward: {reward} coins\n\n"
             f"_Ab premium users ise claim kar sakte hain._",
             parse_mode="Markdown",
@@ -10403,105 +9896,12 @@ def handle_photo(message):
 
 
 # ============================================================
-# REMINDER SCHEDULER — mining ready + unused daily spins
-# ============================================================
-
-def _send_reminder_safe(user_id: int, text: str) -> bool:
-    try:
-        bot.send_message(user_id, text, parse_mode="Markdown")
-        return True
-    except Exception as exc:
-        logger.debug("Reminder send skipped for %s: %s", user_id, exc)
-        return False
-
-
-def _check_mining_reminders() -> None:
-    """One-time DM when a user's mining session finishes but hasn't been collected yet."""
-    try:
-        now = datetime.utcnow()
-        candidates = users_col.find(
-            {
-                "mining_start_time":   {"$nin": ["", None]},
-                "mining_reminder_sent": {"$ne": True},
-                "blocked":              {"$ne": True},
-            },
-            {"user_id": 1, "mining_start_time": 1},
-        )
-        for u in candidates:
-            try:
-                start = datetime.fromisoformat(u["mining_start_time"])
-            except Exception:
-                continue
-            elapsed = (now - start).total_seconds()
-            if elapsed >= MINING_DURATION_HOURS * 3600:
-                sent = _send_reminder_safe(
-                    u["user_id"],
-                    "\u26cf\ufe0f *Mining complete!*\n\nYour coins are ready to collect \u2014 open the app and tap Mining to claim them before starting a new session.",
-                )
-                if sent:
-                    users_col.update_one({"user_id": u["user_id"]}, {"$set": {"mining_reminder_sent": True}})
-    except Exception as exc:
-        logger.error("_check_mining_reminders error: %s", exc)
-
-
-def _check_daily_spin_reminder() -> None:
-    """Once a day, nudge users who opened the app today but haven't used all free spins."""
-    try:
-        today = str(date.today())
-        cfg = config_col.find_one({"_id": "reminder_state"}) or {}
-        if cfg.get("last_spin_reminder_date") == today:
-            return
-
-        candidates = users_col.find(
-            {"last_active": today, "blocked": {"$ne": True}},
-            {"user_id": 1, "spins_today": 1, "spins_date": 1, "premium": 1},
-        )
-        sent = 0
-        for u in candidates:
-            spins_done  = u.get("spins_today", 0) if u.get("spins_date") == today else 0
-            spins_limit = PREMIUM_SPIN_PER_DAY if u.get("premium") else SPIN_PER_DAY
-            remaining   = spins_limit - spins_done
-            if remaining > 0:
-                if _send_reminder_safe(
-                    u["user_id"],
-                    f"\U0001f3a1 You still have *{remaining}* free spin(s) left today \u2014 don't miss out on free coins!",
-                ):
-                    sent += 1
-
-        config_col.update_one(
-            {"_id": "reminder_state"},
-            {"$set": {"last_spin_reminder_date": today}},
-            upsert=True,
-        )
-        logger.info("Daily spin reminder sent to %s users", sent)
-    except Exception as exc:
-        logger.error("_check_daily_spin_reminder error: %s", exc)
-
-
-def reminder_scheduler_loop(stop_event: threading.Event) -> None:
-    """Runs on the single active polling instance only (started inside run_bot,
-    after the polling lock is acquired) — avoids duplicate DMs across workers.
-    Accepts the same stop_event as refresh_bot_polling_lock so it actually
-    stops when polling restarts, instead of leaking a new thread on every
-    reconnect (each doing its own DB scan + duplicate reminder sends)."""
-    if stop_event.wait(60):  # let the bot finish starting up first
-        return
-    while not stop_event.wait(900):  # every 15 minutes
-        try:
-            _check_mining_reminders()
-            _check_daily_spin_reminder()
-        except Exception as exc:
-            logger.error("reminder_scheduler_loop error: %s", exc)
-
-
-# ============================================================
 # BOT POLLING THREAD
 # ============================================================
 
 def run_bot() -> None:
     instance_id = f"{os.getenv('RENDER_INSTANCE_ID') or os.getenv('HOSTNAME') or os.getpid()}-{int(time.time())}"
     logger.info("Starting Telegram bot polling worker: %s", instance_id)
-    commands_registered = False
     while True:
         if not acquire_bot_polling_lock(instance_id):
             logger.warning("Another bot polling instance is already active. Retrying in 30s...")
@@ -10509,66 +9909,60 @@ def run_bot() -> None:
             continue
         stop_event = threading.Event()
         Thread(target=refresh_bot_polling_lock, args=(instance_id, stop_event), daemon=True).start()
-        Thread(target=reminder_scheduler_loop, args=(stop_event,), daemon=True, name="reminder-scheduler").start()
         try:
             try:
                 bot.remove_webhook()
             except Exception as webhook_exc:
                 logger.warning("Could not remove webhook before polling: %s", webhook_exc)
-            # ── Register bot commands in Telegram menu (once — no need to
-            # re-register on every reconnect if a transient network blip
-            # restarts polling; saves 2 Telegram API calls per restart) ──
-            if not commands_registered:
-                try:
-                    # User-facing commands (visible to everyone)
-                    user_commands = [
-                        types.BotCommand("start",   "🚀 Start the bot"),
-                        types.BotCommand("balance", "💰 Check your balance"),
-                        types.BotCommand("premium", "👑 Premium status & benefits"),
-                        types.BotCommand("redeem",  "🎟 Redeem a promo code"),
-                    ]
-                    bot.set_my_commands(
-                        user_commands,
-                        scope=types.BotCommandScopeDefault()
-                    )
+            # ── Register bot commands in Telegram menu ──
+            try:
+                # User-facing commands (visible to everyone)
+                user_commands = [
+                    types.BotCommand("start",   "🚀 Start the bot"),
+                    types.BotCommand("balance", "💰 Check your balance"),
+                    types.BotCommand("premium", "👑 Premium status & benefits"),
+                    types.BotCommand("redeem",  "🎟 Redeem a promo code"),
+                ]
+                bot.set_my_commands(
+                    user_commands,
+                    scope=types.BotCommandScopeDefault()
+                )
 
-                    # Admin-only commands (visible only to admin in their chat)
-                    admin_commands = user_commands + [
-                        types.BotCommand("stats",            "📊 Bot stats"),
-                        types.BotCommand("monetag",          "💵 Monetag earnings"),
-                        types.BotCommand("setpremium",       "👑 Activate premium for user"),
-                        types.BotCommand("removepremium",    "❌ Remove premium from user"),
-                        types.BotCommand("listtournaments",        "📋 List all tournaments"),
-                        types.BotCommand("createtournament",       "➕ Create tournament"),
-                        types.BotCommand("startround",             "▶️ Start next round"),
-                        types.BotCommand("endround",               "⏹ End current round"),
-                        types.BotCommand("nextround",              "⏩ End + Start next round"),
-                        types.BotCommand("addresult",              "📝 Add team round result"),
-                        types.BotCommand("bulkresult",             "📋 Add all teams' results at once"),
-                        types.BotCommand("tournamentleaderboard",  "📊 View leaderboard"),
-                        types.BotCommand("roundresults",           "📋 View round results"),
-                        types.BotCommand("finishtournament",       "🏁 Finish & declare winners"),
-                        types.BotCommand("setprizes",              "🏆 Set tournament prizes"),
-                        types.BotCommand("broadcast",        "📢 Broadcast message to all users"),
-                        types.BotCommand("addtask",          "✅ Add a task"),
-                        types.BotCommand("deltask",          "🗑 Delete a task"),
-                        types.BotCommand("resetdevice",      "🔄 Reset user device lock"),
-                        types.BotCommand("ban",              "🚫 Ban a user"),
-                        types.BotCommand("unban",            "✅ Unban a user"),
-                        types.BotCommand("setbalance",       "💰 Set user balance"),
-                        types.BotCommand("addpromo",         "🎟 Add promo code"),
-                        types.BotCommand("delpromo",         "🗑 Delete promo code"),
-                        types.BotCommand("server_stats",     "⚡ Cache & server stats"),
-                        types.BotCommand("cache_clear",      "🗑 Flush all in-memory caches"),
-                    ]
-                    bot.set_my_commands(
-                        admin_commands,
-                        scope=types.BotCommandScopeChat(chat_id=ADMIN_ID)
-                    )
-                    logger.info("Bot commands registered successfully.")
-                    commands_registered = True
-                except Exception as cmd_exc:
-                    logger.warning("Could not set bot commands: %s", cmd_exc)
+                # Admin-only commands (visible only to admin in their chat)
+                admin_commands = user_commands + [
+                    types.BotCommand("stats",            "📊 Bot stats"),
+                    types.BotCommand("monetag",          "💵 Monetag earnings"),
+                    types.BotCommand("setpremium",       "👑 Activate premium for user"),
+                    types.BotCommand("removepremium",    "❌ Remove premium from user"),
+                    types.BotCommand("listtournaments",        "📋 List all tournaments"),
+                    types.BotCommand("createtournament",       "➕ Create tournament"),
+                    types.BotCommand("startround",             "▶️ Start next round"),
+                    types.BotCommand("endround",               "⏹ End current round"),
+                    types.BotCommand("nextround",              "⏩ End + Start next round"),
+                    types.BotCommand("addresult",              "📝 Add team round result"),
+                    types.BotCommand("tournamentleaderboard",  "📊 View leaderboard"),
+                    types.BotCommand("roundresults",           "📋 View round results"),
+                    types.BotCommand("finishtournament",       "🏁 Finish & declare winners"),
+                    types.BotCommand("setprizes",              "🏆 Set tournament prizes"),
+                    types.BotCommand("broadcast",        "📢 Broadcast message to all users"),
+                    types.BotCommand("addtask",          "✅ Add a task"),
+                    types.BotCommand("deltask",          "🗑 Delete a task"),
+                    types.BotCommand("resetdevice",      "🔄 Reset user device lock"),
+                    types.BotCommand("ban",              "🚫 Ban a user"),
+                    types.BotCommand("unban",            "✅ Unban a user"),
+                    types.BotCommand("setbalance",       "💰 Set user balance"),
+                    types.BotCommand("addpromo",         "🎟 Add promo code"),
+                    types.BotCommand("delpromo",         "🗑 Delete promo code"),
+                    types.BotCommand("server_stats",     "⚡ Cache & server stats"),
+                    types.BotCommand("cache_clear",      "🗑 Flush all in-memory caches"),
+                ]
+                bot.set_my_commands(
+                    admin_commands,
+                    scope=types.BotCommandScopeChat(chat_id=ADMIN_ID)
+                )
+                logger.info("Bot commands registered successfully.")
+            except Exception as cmd_exc:
+                logger.warning("Could not set bot commands: %s", cmd_exc)
             bot.polling(none_stop=True, interval=1, timeout=20)
         except Exception as exc:
             error_text = str(exc)
