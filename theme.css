@@ -27,7 +27,7 @@ html,body{
   background:linear-gradient(90deg,#fff,#c4b5fd 60%,#67e8f9);
   -webkit-background-clip:text; background-clip:text; color:transparent !important;
 }
-#tournament-trophy-btn,#lb-crown-btn{
+#top-earners-btn,#lb-crown-btn{
   width:38px; height:38px; display:flex; align-items:center; justify-content:center;
   background:var(--surface); border:1px solid var(--edge); border-radius:12px;
 }
