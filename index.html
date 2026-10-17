@@ -348,7 +348,7 @@
             0%,100% { filter: drop-shadow(0 0 0px #f1c40f); }
             50%      { filter: drop-shadow(0 0 8px #f1c40f); }
         }
-        #tournament-trophy-btn.has-active { animation: trophy-live-pulse 2s ease-in-out infinite; }
+        #nav-leaderboard.has-active { animation: trophy-live-pulse 2s ease-in-out infinite; }
 
         /* Content padding area */
         .t-body { padding: 0 16px 20px; }
@@ -819,9 +819,8 @@
     <div class="header" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px;">
         <h3 id="tab-title">Rewards</h3>
         <div style="display:flex; gap:15px; align-items:center;">
-            <div onclick="openTournamentHub(event)" id="tournament-trophy-btn" style="cursor:pointer; font-size:20px; position:relative;" title="Tournament Hub">
-                🏆
-                <span id="t-trophy-dot" style="display:none; position:absolute; top:-2px; right:-2px; width:7px; height:7px; background:#ef4444; border-radius:50%; border:1.5px solid #0a0e1a;"></span>
+            <div onclick="switchTab('leaderboard', null)" id="top-earners-btn" style="cursor:pointer; font-size:20px; position:relative;" title="Top Earners Ranking">
+                🥇
             </div>
             <div onclick="openPublicLeaderboard()" id="lb-crown-btn" style="cursor:pointer; font-size:20px;" title="Tournament Leaderboard">👑</div>
         </div>
@@ -2022,8 +2021,9 @@
         <div class="nav-item" id="nav-tasks" onclick="switchTab('tasks', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
             <span style="font-size:20px;">✅</span><span>Tasks</span>
         </div>
-        <div class="nav-item" id="nav-leaderboard" onclick="switchTab('leaderboard', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
-            <span style="font-size:20px;">🏆</span><span>Top</span>
+        <div class="nav-item" id="nav-leaderboard" onclick="openTournamentHub(event)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;position:relative;">
+            <span style="font-size:20px;">🎮</span><span>Tournament</span>
+            <span id="t-trophy-dot" style="display:none; position:absolute; top:2px; right:10px; width:7px; height:7px; background:#ef4444; border-radius:50%; border:1.5px solid #0a0e1a;"></span>
         </div>
         <div class="nav-item" id="nav-refer" onclick="switchTab('refer', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
             <span style="font-size:20px;">👥</span><span>Refer</span>
