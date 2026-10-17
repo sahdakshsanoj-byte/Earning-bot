@@ -3773,7 +3773,7 @@ async function loadTournamentData(forceRefresh) {
 
         // Update trophy dot
         const dot  = document.getElementById('t-trophy-dot');
-        const tBtn = document.getElementById('tournament-trophy-btn');
+        const tBtn = document.getElementById('nav-leaderboard');
         const hasActive = _allTournaments.some(t => ['registration_open','match_live'].includes(t.status));
         if (dot) dot.style.display = hasActive ? 'block' : 'none';
         if (tBtn) tBtn.classList.toggle('has-active', hasActive);
@@ -5164,7 +5164,7 @@ async function _initTournamentIndicator() {
 
         const hasActive = _allTournaments.some(t => ['registration_open','match_live'].includes(t.status));
         const dot  = document.getElementById('t-trophy-dot');
-        const tBtn = document.getElementById('tournament-trophy-btn');
+        const tBtn = document.getElementById('nav-leaderboard');
         if (dot) dot.style.display = hasActive ? 'block' : 'none';
         if (tBtn) tBtn.classList.toggle('has-active', hasActive);
 
