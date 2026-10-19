@@ -54,6 +54,27 @@ if (typeof CONFIG === 'undefined') {
     window.CONFIG = CONFIG;
 }
 
+// ── Telegram auth header ────────────────────────────────────────────────
+// Backend ab har user-specific request par Telegram ka signed initData verify
+// karta hai (taaki koi dusre ka user_id bhej kar uske coins na nikal sake).
+// Ek jagah se saari API calls (fetch + fetchWithRetry) mein header jod do.
+(function installTelegramAuthFetch() {
+    const _origFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+        try {
+            const url  = typeof input === 'string' ? input : ((input && input.url) || '');
+            const base = String(CONFIG.API_BASE_URL || '');
+            if (base && url.startsWith(base) && tg && tg.initData) {
+                init = init ? { ...init } : {};
+                const h = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {});
+                h.set('X-Telegram-Init-Data', tg.initData);
+                init.headers = h;
+            }
+        } catch (_) { /* auth header best-effort; backend decide karega */ }
+        return _origFetch(input, init);
+    };
+})();
+
 const userId = tg.initDataUnsafe?.user?.id;
 
 window.USER_ID = userId;
@@ -3961,8 +3982,8 @@ function _renderTournament(t, winners, roundsData) {
     html += `
     <div class="t-stats-grid">
         <div class="t-stat-tile">
-            <p class="t-lbl">👥 Registered</p>
-            <p class="t-val" style="color:#4ade80;">${t.registered_count || 0}</p>
+            <p class="t-lbl">👥 Teams Registered</p>
+            <p class="t-val" style="color:#4ade80;">${t.registered_count || 0}${t.max_slots > 0 ? ' / ' + t.max_slots : ''}</p>
         </div>
         <div class="t-stat-tile">
             <p class="t-lbl">🎯 Slots Left</p>
@@ -3970,7 +3991,7 @@ function _renderTournament(t, winners, roundsData) {
         </div>
         <div class="t-stat-tile">
             <p class="t-lbl">🏟️ Max Players</p>
-            <p class="t-val">${t.max_players || '—'}</p>
+            <p class="t-val">${t.max_players || '—'}${t.team_size > 1 ? ' <span style="font-size:10px;color:#64748b;">(' + t.team_size + '/team)</span>' : ''}</p>
         </div>
         <div class="t-stat-tile">
             <p class="t-lbl">${_roundTileLabel}</p>
