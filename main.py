@@ -919,7 +919,7 @@ def check_admin_token(req) -> bool:
 # 8. TELEGRAM INIT DATA VERIFICATION
 # ============================================================
 
-def verify_telegram_init_data(init_data: str) -> dict | None:
+def verify_telegram_init_data(init_data: str, max_age: int = 86400) -> dict | None:
     if not init_data:
         return None
     try:
@@ -939,7 +939,7 @@ def verify_telegram_init_data(init_data: str) -> dict | None:
         if not hmac.compare_digest(computed, received_hash):
             return None
         auth_date = int(params.get("auth_date", 0))
-        if time.time() - auth_date > 86400:
+        if time.time() - auth_date > max_age:
             return None
         return params
     except Exception as exc:
@@ -1290,6 +1290,78 @@ def ip_firewall():
         return jsonify({"status": "error", "message": reason}), 429
 
     return None
+
+
+# ------------------------------------------------------------
+# TELEGRAM AUTH GUARD — user-specific routes par "kaun hai" verify karo
+# ------------------------------------------------------------
+# Pehle har route sirf URL/body ke user_id par bharosa karta tha. Telegram IDs
+# public hote hain, isliye koi bhi dusre ka ID bhej kar uske coins nikal sakta tha.
+# Ab frontend har request mein Telegram ka signed initData
+# (header: X-Telegram-Init-Data) bhejta hai; yahan HMAC se verify hota hai aur
+# URL/body ka user_id uske saath match hona zaroori hai.
+#
+# TG_AUTH_MODE (Render env var):  enforce (default) | log (sirf warning log) | off
+# TG_AUTH_MAX_AGE (seconds):      initData kitna purana chalega (default 3 din)
+TG_AUTH_MODE    = (os.getenv("TG_AUTH_MODE") or "enforce").strip().lower()
+try:
+    TG_AUTH_MAX_AGE = int(os.getenv("TG_AUTH_MAX_AGE") or 259200)
+except ValueError:
+    TG_AUTH_MAX_AGE = 259200
+_TG_AUTH_EXEMPT_PREFIXES = ("/admin", "/mod")   # inke apne token checks hain
+
+
+def _claimed_user_id():
+    """Request jis user_id ke naam par aayi hai (URL / ?user_id= / JSON body). None = koi nahi."""
+    raw = (request.view_args or {}).get("user_id")
+    if raw is None:
+        raw = request.args.get("user_id")
+    if raw is None and request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        body = request.get_json(silent=True)
+        if isinstance(body, dict):
+            raw = body.get("user_id")
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return -1   # malformed id — verified id se kabhi match nahi karega
+
+
+def _verified_user_id_from_header():
+    init_data = request.headers.get("X-Telegram-Init-Data", "")
+    if not init_data:
+        return None
+    params = verify_telegram_init_data(init_data, TG_AUTH_MAX_AGE)
+    if not params:
+        return None
+    try:
+        return int(json.loads(params.get("user", "{}")).get("id", 0)) or None
+    except Exception:
+        return None
+
+
+@app.before_request
+def telegram_auth_guard():
+    if TG_AUTH_MODE == "off" or request.method == "OPTIONS":
+        return None
+    path = request.path
+    if path in ("/", "/favicon.ico") or path.startswith(_TG_AUTH_EXEMPT_PREFIXES):
+        return None
+    claimed = _claimed_user_id()
+    if claimed is None:
+        return None          # public route (leaderboard, config, tournament list, ...)
+    verified = _verified_user_id_from_header()
+    if verified is not None and verified == claimed:
+        return None
+    logger.warning("AUTH: %s %s claimed=%s verified=%s mode=%s",
+                   request.method, path, claimed, verified, TG_AUTH_MODE)
+    if TG_AUTH_MODE == "log":
+        return None
+    return jsonify({
+        "status":  "error",
+        "message": "Session verification failed. Please close and reopen the app from the bot.",
+    }), 401
 
 
 @app.after_request
@@ -5018,6 +5090,17 @@ def _parse_tournament_datetime(date_str: str, time_str: str):
     return None
 
 
+def _team_size_for_mode(mode: str) -> int:
+    """Solo = 1 player, Duo = 2, Squad = 4 (ek registration = ek team = ek slot)."""
+    m = (mode or "Solo").strip().lower()
+    return 4 if m == "squad" else 2 if m == "duo" else 1
+
+
+def _tournament_slots(t: dict) -> int:
+    """Total team slots. Purane tournaments mein sirf max_players tha (wo slots hi the)."""
+    return int(t.get("max_slots", t.get("max_players", 0)) or 0)
+
+
 def _format_tournament(t, include_registrations=True):
     """Tournament dict ko user-friendly format mein convert karo."""
     if not t:
@@ -5026,10 +5109,12 @@ def _format_tournament(t, include_registrations=True):
     t.pop("_id", None)
     tid = t.get("tournament_id", "")
 
+    t["max_slots"] = _tournament_slots(t)
+    t["team_size"] = _team_size_for_mode(t.get("mode", "Solo"))
     if include_registrations:
         reg_count = tournament_registrations_col.count_documents({"tournament_id": tid})
         t["registered_count"] = reg_count
-        t["slots_remaining"]  = max(0, t.get("max_players", 0) - reg_count)
+        t["slots_remaining"]  = max(0, t["max_slots"] - reg_count)
 
     # Room credentials sirf match_live mein expose karo
     if t.get("status") != "match_live":
@@ -5127,7 +5212,8 @@ def tournament_register_api():
 
         # Slot check
         reg_count = tournament_registrations_col.count_documents({"tournament_id": tid})
-        if t.get("max_players", 0) > 0 and reg_count >= t["max_players"]:
+        _slots = _tournament_slots(t)
+        if _slots > 0 and reg_count >= _slots:
             return jsonify({"status": "error", "message": "Tournament is full! No slots remaining."}), 400
 
         # Duplicate check (same user_id = same leader)
@@ -5448,7 +5534,7 @@ def admin_create_tournament_api():
         existing = tournaments_col.find_one({"tournament_id": tid})
         if not existing:
             # Count currently active tournaments
-            active_count = tournaments_col.count_documents({"active": True})
+            active_count = tournaments_col.count_documents({"active": True, "status": {"$ne": "completed"}})
             if active_count >= MAX_TOURNAMENTS:
                 return jsonify({
                     "status":  "error",
@@ -5467,7 +5553,9 @@ def admin_create_tournament_api():
             "date":           sanitize_text(data.get("date", ""), max_length=30),
             "time":           sanitize_text(data.get("time", ""), max_length=30),
             "entry_fee":      int(data.get("entry_fee", 0)),
-            "max_players":    int(data.get("max_players", 50)),
+            "max_slots":      max(1, int(data.get("max_slots", data.get("max_players", 12)))),
+            "max_players":    max(1, int(data.get("max_slots", data.get("max_players", 12))))
+                              * _team_size_for_mode(sanitize_text(data.get("mode", "Squad"), max_length=30)),
             "prize_pool":     sanitize_text(data.get("prize_pool", ""), max_length=200),
             "description":    sanitize_text(data.get("description", ""), max_length=600),
             "prizes":         data.get("prizes", []),
@@ -7985,7 +8073,7 @@ def group_code_filter_handler(message):
 def cmd_create_tournament(message):
     """Admin: /createtournament — Naya tournament create karo.
     Format:
-      /createtournament Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool
+      /createtournament Title | Mode | Map | Date | Time | EntryFee | MaxSlots | PrizePool
     Mode: Solo / Duo / Squad
     Example (Solo):
       /createtournament FF Solo Cup | Solo | Kalahari | 20 June 2026 | 7:00 PM | 0 | 100 | 5000 Coins
@@ -8002,14 +8090,15 @@ def cmd_create_tournament(message):
         return bot.reply_to(
             message,
             "📋 *Usage:*\n"
-            "`/createtournament Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool | Rounds | Description`\n\n"
+            "`/createtournament Title | Mode | Map | Date | Time | EntryFee | MaxSlots | PrizePool | Rounds | Description`\n\n"
             "*Mode options:* `Solo` / `Duo` / `Squad`\n"
             "*Rounds:* Number of rounds (1-10) — e.g. `3`\n"
             "*Description:* Max 100 words (optional)\n\n"
             "*Examples:*\n"
             "1-Round: `/createtournament FF Solo Cup | Solo | Kalahari | 20 Jun 2026 | 7:00 PM | 0 | 100 | 5000 Coins | 1 | Grand finale!`\n"
             "3-Round: `/createtournament FF Grand Finals | Squad | Bermuda | 5 Jun 2026 | 8:00 PM | 0 | 50 | 5000 Coins | 3 | 3 epic rounds!`\n\n"
-            "⚠️ EntryFee, MaxPlayers aur Rounds sirf number mein dena hai.\n"
+            "⚠️ EntryFee, MaxSlots aur Rounds sirf number mein dena hai.\n"
+            "👥 *MaxSlots = kitni TEAMS khelengi.* Players auto banenge: Solo x1, Duo x2, Squad x4 (12 slots Squad = 48 players).\n"
             "💡 Individual prizes: `/setprizes <tid> 1st:5000 Coins | 2nd:3000 Coins | 3rd:1000 Coins`",
             parse_mode="Markdown",
         )
@@ -8019,7 +8108,7 @@ def cmd_create_tournament(message):
         return bot.reply_to(
             message,
             "❌ *8 fields minimum chahiye, `|` se alag karo:*\n"
-            "`Title | Mode | Map | Date | Time | EntryFee | MaxPlayers | PrizePool | Rounds | Description`\n\n"
+            "`Title | Mode | Map | Date | Time | EntryFee | MaxSlots | PrizePool | Rounds | Description`\n\n"
             "*Mode:* `Solo` / `Duo` / `Squad` | *Rounds:* 1-10",
             parse_mode="Markdown",
         )
@@ -8057,22 +8146,32 @@ def cmd_create_tournament(message):
 
     try:
         entry_fee  = int(entry_fee_str)
-        max_players = int(max_p_str)
+        max_slots = int(max_p_str)
     except ValueError:
-        return bot.reply_to(message, "❌ EntryFee aur MaxPlayers sirf number mein dena hai. Example: `0` ya `50`.", parse_mode="Markdown")
+        return bot.reply_to(message, "❌ EntryFee aur MaxSlots sirf number mein dena hai. Example: `0` ya `12`.", parse_mode="Markdown")
+    if entry_fee < 0:
+        return bot.reply_to(message, "❌ EntryFee negative nahi ho sakta.")
+    if max_slots < 1:
+        return bot.reply_to(message, "❌ MaxSlots kam se kam 1 hona chahiye.")
+    team_size   = _team_size_for_mode(mode)
+    max_players = max_slots * team_size
 
     try:
         # Check MAX_TOURNAMENTS limit
-        active_count = tournaments_col.count_documents({"active": True})
+        active_count = tournaments_col.count_documents({"active": True, "status": {"$ne": "completed"}})
         if active_count >= MAX_TOURNAMENTS:
             return bot.reply_to(
                 message,
                 f"❌ Maximum *{MAX_TOURNAMENTS}* active tournaments allowed!\n"
-                f"Pehle kisi tournament ko `/deletetournament <tournament_id>` se delete karo.",
+                f"Pehle kisi finished tournament ko `/deletetournament <tournament_id> yes` se hata do.",
                 parse_mode="Markdown",
             )
 
         tid = f"t_{int(time.time())}"
+        _n = 1
+        while tournaments_col.find_one({"tournament_id": tid}, {"_id": 1}):
+            _n += 1
+            tid = f"t_{int(time.time())}_{_n}"
         match_dt = _parse_tournament_datetime(date, t_time)
         tournaments_col.update_one(
             {"tournament_id": tid},
@@ -8086,7 +8185,8 @@ def cmd_create_tournament(message):
                 "time":          sanitize_text(t_time, max_length=30),
                 "match_time":    match_dt,   # used for the countdown timer; None if unparseable
                 "entry_fee":     entry_fee,
-                "max_players":   max_players,
+                "max_slots":     max_slots,     # kitni teams
+                "max_players":   max_players,   # total players = slots x team size
                 "prize_pool":    sanitize_text(prize_pool, max_length=200),
                 "description":   description,
                 "prizes":        [],
@@ -8108,7 +8208,8 @@ def cmd_create_tournament(message):
             f"{mode_emoji} *Mode:* {mode}  |  🗺 *Map:* {map_}\n"
             f"📅 *Date:* {date}  |  ⏰ *Time:* {t_time}\n"
             f"💰 *Entry Fee:* {entry_fee} 🪙\n"
-            f"👥 *Max Players:* {max_players}\n"
+            f"🎯 *Slots (Teams):* {max_slots}\n"
+            f"👥 *Max Players:* {max_players} ({team_size} per team)\n"
             f"🏅 *Prize Pool:* {prize_pool}\n"
             f"🔄 *Rounds:* {total_rounds}\n\n"
             f"📌 *Status:* Coming Soon\n"
@@ -8332,9 +8433,10 @@ def cmd_tournament_info(message):
             f"⚔️ *Mode:* {t.get('mode', 'N/A')}  |  🗺 *Map:* {t.get('map', 'N/A')}\n"
             f"📅 *Date:* {t.get('date', 'N/A')}  |  ⏰ *Time:* {t.get('time', 'N/A')}\n"
             f"💰 *Entry Fee:* {t.get('entry_fee', 0)} 🪙\n"
-            f"👥 *Max Players:* {t.get('max_players', 'N/A')}\n"
+            f"🎯 *Slots (Teams):* {_tournament_slots(t)}\n"
+            f"👥 *Max Players:* {_tournament_slots(t) * _team_size_for_mode(t.get('mode', 'Solo'))}\n"
             f"🏅 *Prize Pool:* {t.get('prize_pool', 'N/A')}\n"
-            f"📝 *Registered:* {reg_count} players\n"
+            f"📝 *Registered:* {reg_count} / {_tournament_slots(t)} teams\n"
             f"🔁 *Rounds Progress:* {rounds_str} completed"
             f"{team_id_info}"
             f"{rounds_info}\n\n"
@@ -8727,7 +8829,7 @@ def cmd_add_result(message):
             f"{booyah_line}"
             f"📊 *Total Round {round_no} Points:* *{total_points}*\n\n"
             f"Next team: `/addresult {tid} {round_no} T00X <rank> <kills> [booyah]`\n"
-            f"Leaderboard: `/tournamentleaderboard {tid}`",
+            f"Leaderboard: `/tournamentinfo {tid}`",
             parse_mode="Markdown",
         )
         logger.info("Result added: tournament=%s round=%s team=%s rank=%s kills=%s booyah=%s pts=%s", tid, round_no, team_id, rank, kills, booyah, total_points)
@@ -9198,6 +9300,62 @@ def cmd_cancel_tournament(message):
         logger.info("Admin cancelled tournament: %s", tid)
     except Exception as exc:
         logger.error("cmd_cancel_tournament error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["deletetournament"])
+def cmd_delete_tournament(message):
+    """Admin: /deletetournament <tournament_id> yes
+    Sirf COMPLETED (ya cancelled) tournament ko permanently hata deta hai —
+    tournament, registrations, rounds, results aur winners sab. Koi REFUND nahi hota.
+    (Chalu tournament rokna ho to /canceltournament use karo.)"""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = (message.text or "").split()
+    if len(parts) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/deletetournament <tournament_id> yes`\n\n"
+            "Sirf completed/cancelled tournament hata sakte ho. *Koi refund nahi hota.*\n"
+            "IDs dekhne ke liye: `/listtournaments`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid})
+        if not t:
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
+        if t.get("active", True) and t.get("status") != "completed":
+            return bot.reply_to(
+                message,
+                f"⚠️ `{tid}` abhi chalu hai (status: {t.get('status', '?')}).\n"
+                f"Pehle `/finishtournament {tid}` (winners ke saath) ya `/canceltournament {tid}` karo, phir delete.",
+                parse_mode="Markdown",
+            )
+        if len(parts) < 3 or parts[2].lower() != "yes":
+            reg_n = tournament_registrations_col.count_documents({"tournament_id": tid})
+            return bot.reply_to(
+                message,
+                f"⚠️ *Confirm karo:* `{tid}` ka saara data ({reg_n} registrations, rounds, results, winners) "
+                f"permanently delete hoga. *Refund nahi milega.*\n\n"
+                f"Pakka karna hai to: `/deletetournament {tid} yes`",
+                parse_mode="Markdown",
+            )
+        regs    = tournament_registrations_col.delete_many({"tournament_id": tid}).deleted_count
+        rounds  = tournament_rounds_col.delete_many({"tournament_id": tid}).deleted_count
+        results = tournament_results_col.delete_many({"tournament_id": tid}).deleted_count
+        wins    = tournament_winners_col.delete_many({"tournament_id": tid}).deleted_count
+        tournaments_col.delete_one({"tournament_id": tid})
+        bot.reply_to(
+            message,
+            f"🗑 *Tournament Deleted*\n\n🆔 `{tid}`\n"
+            f"Registrations: {regs} | Rounds: {rounds} | Results: {results} | Winners: {wins}\n"
+            f"_Koi refund nahi diya gaya._",
+            parse_mode="Markdown",
+        )
+        logger.info("Admin deleted tournament %s (regs=%s rounds=%s results=%s winners=%s)", tid, regs, rounds, results, wins)
+    except Exception as exc:
+        logger.error("cmd_delete_tournament error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
 
 
@@ -9940,19 +10098,21 @@ def run_bot() -> None:
                     types.BotCommand("endround",               "⏹ End current round"),
                     types.BotCommand("nextround",              "⏩ End + Start next round"),
                     types.BotCommand("addresult",              "📝 Add team round result"),
-                    types.BotCommand("tournamentleaderboard",  "📊 View leaderboard"),
-                    types.BotCommand("roundresults",           "📋 View round results"),
+                    types.BotCommand("tournamentstatus",       "📊 Tournament status"),
+                    types.BotCommand("roundinfo",              "📋 Round info & results"),
                     types.BotCommand("finishtournament",       "🏁 Finish & declare winners"),
+                    types.BotCommand("canceltournament",       "🚫 Cancel tournament"),
+                    types.BotCommand("deletetournament",       "🗑 Delete finished tournament"),
                     types.BotCommand("setprizes",              "🏆 Set tournament prizes"),
                     types.BotCommand("broadcast",        "📢 Broadcast message to all users"),
-                    types.BotCommand("addtask",          "✅ Add a task"),
-                    types.BotCommand("deltask",          "🗑 Delete a task"),
+                    types.BotCommand("addpromtask",       "✅ Add a promo task"),
+                    types.BotCommand("delpromtask",       "🗑 Delete a promo task"),
                     types.BotCommand("resetdevice",      "🔄 Reset user device lock"),
-                    types.BotCommand("ban",              "🚫 Ban a user"),
-                    types.BotCommand("unban",            "✅ Unban a user"),
-                    types.BotCommand("setbalance",       "💰 Set user balance"),
-                    types.BotCommand("addpromo",         "🎟 Add promo code"),
-                    types.BotCommand("delpromo",         "🗑 Delete promo code"),
+                    types.BotCommand("block",            "🚫 Block a user"),
+                    types.BotCommand("unblock",          "✅ Unblock a user"),
+                    types.BotCommand("addcoins",         "💰 Add coins to user"),
+                    types.BotCommand("createpromo",      "🎟 Create promo code"),
+                    types.BotCommand("deletepromo",      "🗑 Delete promo code"),
                     types.BotCommand("server_stats",     "⚡ Cache & server stats"),
                     types.BotCommand("cache_clear",      "🗑 Flush all in-memory caches"),
                 ]
