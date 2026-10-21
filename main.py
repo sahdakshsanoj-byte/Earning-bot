@@ -23,6 +23,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -457,6 +458,41 @@ def is_rate_limited(key: str, cooldown_seconds: int) -> bool:
             return True
         _rate_cache[key] = now + cooldown_seconds
         return False
+
+
+# ── MongoDB-backed per-key lock (multi-worker safe) ───────────────────────
+# Ek hi user ki do requests ek saath chalein to doosri ko turant mana kar do.
+# rate_limits collection par expires_at TTL index pehle se hai (crash hone par
+# lock apne aap expire ho jata hai); stale lock yahin hata dete hain.
+def acquire_db_lock(key: str, ttl_seconds: int = 30) -> bool:
+    lock_id = f"lock:{key}"
+    now = datetime.utcnow()
+    for _ in range(2):
+        try:
+            rate_col.insert_one({"_id": lock_id, "expires_at": now + timedelta(seconds=ttl_seconds)})
+            return True
+        except pymongo.errors.DuplicateKeyError:
+            # Purana (expired) lock ho to hata ke ek baar aur try karo
+            rate_col.delete_one({"_id": lock_id, "expires_at": {"$lt": now}})
+        except Exception as exc:
+            logger.error("acquire_db_lock error (%s): %s", key, exc)
+            return True   # DB hiccup par user ko block mat karo — baaki guards active hain
+    return False
+
+
+def release_db_lock(key: str) -> None:
+    try:
+        rate_col.delete_one({"_id": f"lock:{key}"})
+    except Exception as exc:
+        logger.warning("release_db_lock error (%s): %s", key, exc)
+
+
+def md_safe(text) -> str:
+    """Legacy Telegram Markdown ke special chars escape karo (user-supplied naam/text ke liye)."""
+    out = str(text if text is not None else "")
+    for ch in ("\\", "_", "*", "`", "["):
+        out = out.replace(ch, "\\" + ch)
+    return out
 
 
 def _cleanup_rate_cache() -> None:
@@ -2026,10 +2062,16 @@ def claim_allcomplete_bonus_api(user_id: int):
                 "message": f"Complete {MAX_WEB_TASKS_PER_DAY - web_done} more website task(s) first!",
             }), 400
 
-        users_col.update_one(
-            {"user_id": user_id},
+        # Atomic claim: sirf ek request is date ko bonus le sakti hai (concurrent requests safe)
+        _claim = users_col.update_one(
+            {"user_id": user_id, "allcomplete_bonus_date": {"$ne": today}},
             {"$inc": {"coins": ALL_TASKS_BONUS}, "$set": {"allcomplete_bonus_date": today}},
         )
+        if _claim.modified_count == 0:
+            return jsonify({
+                "status":  "error",
+                "message": "All-tasks bonus already claimed today! Come back tomorrow.",
+            }), 400
         _invalidate_user_cache(user_id)
         logger.info("All-tasks bonus of %s coins credited to user %s", ALL_TASKS_BONUS, user_id)
         return jsonify({
@@ -2048,6 +2090,24 @@ def claim_allcomplete_bonus_api(user_id: int):
 
 @app.route("/withdraw", methods=["POST"])
 def withdraw_api():
+    """Wrapper: ek user ke liye ek waqt mein sirf ek withdrawal request process hogi."""
+    _body = request.get_json(silent=True) or {}
+    try:
+        _lock_uid = int(_body.get("user_id") or 0)
+    except (TypeError, ValueError):
+        _lock_uid = 0
+    if not _lock_uid:
+        return _withdraw_impl()
+    _lock_key = f"wd_{_lock_uid}"
+    if not acquire_db_lock(_lock_key, 30):
+        return jsonify({"status": "error", "message": "Aapki request process ho rahi hai. Thoda wait karo."}), 429
+    try:
+        return _withdraw_impl()
+    finally:
+        release_db_lock(_lock_key)
+
+
+def _withdraw_impl():
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"status": "error", "message": "No data received."}), 400
@@ -2180,10 +2240,17 @@ def withdraw_api():
             "timestamp":       now_utc,
             "date":            now_ist.strftime("%d %b %Y, %I:%M %p IST"),
         }
-        withdrawals_col.insert_one(withdrawal)
+        try:
+            withdrawals_col.insert_one(withdrawal)
+        except Exception as ins_exc:
+            # Coins kat chuke the par request save nahi hui — coins wapas do
+            logger.error("withdraw insert failed for %s, refunding %s: %s", user_id, requested_amount, ins_exc)
+            users_col.update_one({"user_id": user_id}, {"$inc": {"coins": requested_amount}})
+            _invalidate_user_cache(user_id)
+            return jsonify({"status": "error", "message": "Server error. Aapke coins safe hain, dobara try karo."}), 500
 
         addr_display  = payment_address if payment_address != "via_telegram" else "Telegram DM"
-        tg_username   = result.get("username") or ""
+        tg_username   = md_safe(result.get("username") or "")
         username_line = ""
         if method == "google_redeem":
             username_line = f"Username: @{tg_username}\n" if tg_username else "Username: _(not set)_\n"
@@ -2405,6 +2472,8 @@ def create_ad_claim_token(user_id: int) -> tuple[dict, int]:
                 "data":    {"ads_done": ads_today, "ads_total": MAX_ADS_PER_DAY, "remaining": 0},
             }, 400
 
+        # Ek waqt mein ek hi valid ad-token — purane tokens bank karke ek saath claim na ho sakein
+        ad_reward_tokens_col.delete_many({"user_id": user_id, "source": "sdk_ad"})
         raw_token  = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         expires_at = datetime.utcnow() + timedelta(seconds=AD_CLAIM_TOKEN_TTL_SECONDS)
@@ -2460,22 +2529,36 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
                 "data":    {"ads_done": ads_today, "ads_total": MAX_ADS_PER_DAY, "remaining": 0},
             }, 400
 
-        done        = ads_today + 1
-        remaining   = MAX_ADS_PER_DAY - done
-        ad_event_id = f"ad_{user_id}_{today}_{done}"
         # Premium: 2x ad coins
         _ad_reward  = PREMIUM_AD_REWARD if is_premium(user_id) else AD_COIN_REWARD
-        users_col.update_one(
-            {"user_id": user_id},
-            {
-                "$inc": {"coins": _ad_reward},
-                "$set": {
-                    "ads_date":        today,
-                    "ads_today":       done,
-                    "last_ad_claim_at": datetime.utcnow().isoformat(),
-                },
-            },
+        _now_dt     = datetime.utcnow()
+        _cooldown_ok = {"$or": [
+            {"last_ad_claim_at": {"$exists": False}},
+            {"last_ad_claim_at": {"$lt": (_now_dt - timedelta(seconds=30)).isoformat()}},
+        ]}
+        # Atomic: daily limit + 30s cooldown DB-level par enforce — concurrent claims se
+        # coins double nahi honge. Case A: aaj ka counter chal raha hai.
+        _upd = users_col.find_one_and_update(
+            {"user_id": user_id, "blocked": {"$ne": True}, "ads_date": today,
+             "ads_today": {"$lt": MAX_ADS_PER_DAY}, **_cooldown_ok},
+            {"$inc": {"coins": _ad_reward, "ads_today": 1},
+             "$set": {"last_ad_claim_at": _now_dt.isoformat()}},
+            return_document=True,
         )
+        # Case B: naya din — counter 1 se shuru
+        if _upd is None:
+            _upd = users_col.find_one_and_update(
+                {"user_id": user_id, "blocked": {"$ne": True}, "ads_date": {"$ne": today}, **_cooldown_ok},
+                {"$inc": {"coins": _ad_reward},
+                 "$set": {"ads_date": today, "ads_today": 1, "last_ad_claim_at": _now_dt.isoformat()}},
+                return_document=True,
+            )
+        if _upd is None:
+            # Kisi concurrent request ne pehle claim kar liya (limit ya cooldown)
+            return {"status": "error", "message": "Please wait 30 seconds before claiming the next ad reward."}, 429
+        done        = int(_upd.get("ads_today", 1))
+        remaining   = MAX_ADS_PER_DAY - done
+        ad_event_id = f"ad_{user_id}_{today}_{done}"
         _invalidate_user_cache(user_id)
         # Referral commission — non-blocking, 10% to sponsor
         _fire_commission(user_id, _ad_reward, "ad", ad_event_id)
@@ -2558,10 +2641,23 @@ def claim_channel_api():
                 # Agar link same hai (ya naya link nahi aaya) toh already claimed
                 if not claimed_link or not claimed_link_in_db or claimed_link_in_db == claimed_link:
                     return jsonify({"status": "error", "message": "Reward already claimed for this channel! \u2705"}), 400
-                # Link change hui hai — allow re-claim (fall through)
+                # Link change hui hai — allow re-claim, lekin spam rokne ke liye
+                # do re-claims ke beech kam se kam 6 ghante ka gap zaroori hai.
+                _prev_at = existing_claim.get("claimed_at") if isinstance(existing_claim, dict) else None
+                if _prev_at:
+                    try:
+                        if datetime.utcnow() - datetime.fromisoformat(_prev_at) < timedelta(hours=6):
+                            return jsonify({"status": "error", "message": "Reward already claimed for this channel! \u2705"}), 400
+                    except ValueError:
+                        pass
             else:
                 return jsonify({"status": "error", "message": "Reward already claimed for this channel! \u2705"}), 400
 
+        # Official Telegram channels ke liye membership verify karna ZAROORI hai —
+        # pehle channel_url khali bhejne par verification skip ho jata tha.
+        if channel_id in ("official", "channel2", "channel3"):
+            if not channel_url or not extract_channel_username(channel_url):
+                return jsonify({"status": "error", "message": "Channel link missing. Please reopen the app and try again."}), 400
         if channel_url:
             ch_username = extract_channel_username(channel_url)
             if ch_username:
@@ -2577,17 +2673,24 @@ def claim_channel_api():
         # BUG FIX #4: Sponsor slots ke liye claimed_link object save karo,
         # baki channels ke liye simple True store karo.
         if channel_id in ("slot1", "slot2") and claimed_link:
-            claim_value = {"claimed_link": claimed_link}
+            claim_value = {"claimed_link": claimed_link, "claimed_at": datetime.utcnow().isoformat()}
         else:
             claim_value = True
 
-        users_col.update_one(
-            {"user_id": user_id},
-            {
-                "$inc": {"coins": reward},
-                "$set": {f"channel_claims.{channel_id}": claim_value},
-            },
+        # Atomic claim: jo state humne upar padhi thi wahi ho tabhi credit — do parallel
+        # requests mein se sirf ek jeetegi (pehle read-then-write tha, double credit possible).
+        _field = f"channel_claims.{channel_id}"
+        _claim_filter = {"user_id": user_id, "blocked": {"$ne": True}}
+        if existing_claim:
+            _claim_filter[_field] = existing_claim          # relink case: wahi purani value
+        else:
+            _claim_filter[_field] = {"$exists": False}      # pehli baar
+        _res = users_col.update_one(
+            _claim_filter,
+            {"$inc": {"coins": reward}, "$set": {_field: claim_value}},
         )
+        if _res.modified_count == 0:
+            return jsonify({"status": "error", "message": "Reward already claimed for this channel! \u2705"}), 400
         _invalidate_user_cache(user_id)
         return jsonify({
             "status":  "success",
@@ -2748,6 +2851,24 @@ def admin_remove_promo_task():
 
 @app.route("/withdraw_rupees", methods=["POST"])
 def withdraw_rupees_api():
+    """Wrapper: ek user ke liye ek waqt mein sirf ek rupee-withdrawal process hogi."""
+    _body = request.get_json(silent=True) or {}
+    try:
+        _lock_uid = int(_body.get("user_id") or 0)
+    except (TypeError, ValueError):
+        _lock_uid = 0
+    if not _lock_uid:
+        return _withdraw_rupees_impl()
+    _lock_key = f"wdr_{_lock_uid}"
+    if not acquire_db_lock(_lock_key, 30):
+        return jsonify({"status": "error", "message": "Aapki request process ho rahi hai. Thoda wait karo."}), 429
+    try:
+        return _withdraw_rupees_impl()
+    finally:
+        release_db_lock(_lock_key)
+
+
+def _withdraw_rupees_impl():
     """User apna rupee balance withdraw kare (UPI ya Google Play)."""
     data = request.get_json(silent=True)
     if not data:
@@ -2769,6 +2890,8 @@ def withdraw_rupees_api():
     try:
         amount = round(float(data.get("amount", 0)), 2)
     except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid amount."}), 400
+    if not math.isfinite(amount):
         return jsonify({"status": "error", "message": "Invalid amount."}), 400
 
     MIN_RUPEE_WITHDRAW = 30.0
@@ -2837,10 +2960,17 @@ def withdraw_rupees_api():
         "date":            now_ist.strftime("%d %b %Y, %I:%M %p IST"),
         "type":            "rupee",
     }
-    rupee_withdrawals_col.insert_one(withdrawal)
+    try:
+        rupee_withdrawals_col.insert_one(withdrawal)
+    except Exception as ins_exc:
+        # Rupees kat chuke the par request save nahi hui — wapas do
+        logger.error("rupee withdraw insert failed for %s, refunding %s: %s", user_id, amount, ins_exc)
+        users_col.update_one({"user_id": user_id}, {"$inc": {"rupees": amount}})
+        _invalidate_user_cache(user_id)
+        return jsonify({"status": "error", "message": "Server error. Aapke rupees safe hain, dobara try karo."}), 500
 
     addr_display = payment_address if payment_address != "via_telegram" else "Telegram DM"
-    tg_username  = result.get("username") or ""
+    tg_username  = md_safe(result.get("username") or "")
     uname_line   = f"Username: @{tg_username}\n" if tg_username else ""
 
     try:
@@ -3192,8 +3322,31 @@ def redeem_promo_api():
         if coins <= 0:
             return jsonify({"status": "error", "message": "Invalid promo code value."}), 400
 
-        promos_col.update_one({"code": code}, {"$push": {"used_by": user_id}})
-        users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins}})
+        # Atomic claim: used_by + max_uses check aur push ek hi DB operation mein —
+        # parallel requests se limit cross ya double-credit nahi hoga.
+        _claimed = promos_col.find_one_and_update(
+            {
+                "code": code,
+                "active": {"$ne": False},
+                "used_by": {"$ne": user_id},
+                "$expr": {"$or": [
+                    {"$lte": [{"$ifNull": ["$max_uses", 0]}, 0]},
+                    {"$lt": [{"$size": {"$ifNull": ["$used_by", []]}}, "$max_uses"]},
+                ]},
+            },
+            {"$addToSet": {"used_by": user_id}},
+        )
+        if _claimed is None:
+            _p = promos_col.find_one({"code": code}) or {}
+            if user_id in (_p.get("used_by") or []):
+                return jsonify({"status": "error", "message": "You have already used this promo code."}), 400
+            return jsonify({"status": "error", "message": "This promo code has reached its usage limit."}), 400
+        try:
+            users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins}})
+        except Exception as credit_exc:
+            promos_col.update_one({"code": code}, {"$pull": {"used_by": user_id}})   # rollback claim
+            raise credit_exc
+        _invalidate_user_cache(user_id)
         logger.info("Promo '%s' redeemed by user %s for %s coins.", code, user_id, coins)
         return jsonify({
             "status":  "success",
@@ -3330,6 +3483,7 @@ def admin_reject_withdrawal():
     if withdraw:
         amount = int(withdraw.get("amount", withdraw.get("coins", 0)))
         users_col.update_one({"user_id": uid}, {"$inc": {"coins": amount}})
+        _invalidate_user_cache(uid)
         try:
             bot.send_message(
                 uid,
@@ -3353,7 +3507,9 @@ def admin_add_coins():
         return jsonify({"status": "error", "message": "Invalid user ID or amount"}), 400
     if amount <= 0:
         return jsonify({"status": "error", "message": "Amount must be positive"}), 400
-    users_col.update_one({"user_id": uid}, {"$inc": {"coins": amount}})
+    _res = users_col.update_one({"user_id": uid}, {"$inc": {"coins": amount}})
+    if _res.matched_count == 0:
+        return jsonify({"status": "error", "message": "User not found"}), 404
     _invalidate_user_cache(uid)
     try:
         bot.send_message(uid, f"\U0001f381 Admin has gifted you *{amount} coins*!", parse_mode="Markdown")
@@ -3717,16 +3873,18 @@ def admin_update_withdrawal():
         return jsonify({"status": "error", "message": "Action must be 'approve' or 'reject'"}), 400
 
     pending_status = "Pending \u23f3"
-    withdraw       = withdrawals_col.find_one({"user_id": uid, "status": pending_status})
-    if not withdraw:
-        return jsonify({"status": "error", "message": "No pending withdrawal found"}), 404
 
     try:
+        # Atomic: status pehle badlo — double click / do admin ek saath ho to sirf ek jeetega
+        withdraw = withdrawals_col.find_one_and_update(
+            {"user_id": uid, "status": pending_status},
+            {"$set": {"status": "Approved \u2705" if action == "approve" else "Rejected \u274c"}},
+            return_document=False,
+        )
+        if not withdraw:
+            return jsonify({"status": "error", "message": "No pending withdrawal found"}), 404
+
         if action == "approve":
-            withdrawals_col.update_one(
-                {"user_id": uid, "status": pending_status},
-                {"$set": {"status": "Approved \u2705"}},
-            )
             try:
                 bot.send_message(
                     uid,
@@ -3740,10 +3898,7 @@ def admin_update_withdrawal():
 
         amount = int(withdraw.get("amount", withdraw.get("coins", 0)))
         users_col.update_one({"user_id": uid}, {"$inc": {"coins": amount}})
-        withdrawals_col.update_one(
-            {"user_id": uid, "status": pending_status},
-            {"$set": {"status": "Rejected \u274c"}},
-        )
+        _invalidate_user_cache(uid)
         try:
             bot.send_message(
                 uid,
@@ -4142,11 +4297,12 @@ def spin_token_api(user_id: int):
         spins_date = user.get("spins_date", "")
         spins_done = user.get("spins_today", 0) if spins_date == today else 0
 
-        if spins_done >= SPIN_PER_DAY:
+        _tok_limit = PREMIUM_SPIN_PER_DAY if is_premium(user_id) else SPIN_PER_DAY
+        if spins_done >= _tok_limit:
             return jsonify({
                 "status":  "error",
-                "message": f"Daily spin limit reached ({SPIN_PER_DAY}/{SPIN_PER_DAY}). Come back tomorrow!",
-                "data":    {"spins_done": spins_done, "spins_total": SPIN_PER_DAY},
+                "message": f"Daily spin limit reached ({_tok_limit}/{_tok_limit}). Come back tomorrow!",
+                "data":    {"spins_done": spins_done, "spins_total": _tok_limit},
             }), 400
 
         # Stale tokens saaf karo
@@ -4169,7 +4325,7 @@ def spin_token_api(user_id: int):
             "token":       raw_token,
             "expires_in":  SPIN_TOKEN_TTL,
             "spins_done":  spins_done,
-            "spins_total": SPIN_PER_DAY,
+            "spins_total": _tok_limit,
         })
     except Exception as exc:
         logger.error("spin_token_api error for %s: %s", user_id, exc)
@@ -4225,18 +4381,30 @@ def do_spin_api(user_id: int):
                 "message": f"Daily spin limit reached ({_spin_limit}/{_spin_limit}). Come back tomorrow!",
             }), 400
 
+        # Atomic spin-slot claim: parallel requests daily limit paar nahi kar sakti
+        slot = users_col.update_one(
+            {"user_id": user_id, "spins_date": today, "spins_today": {"$lt": _spin_limit}},
+            {"$inc": {"spins_today": 1}},
+        )
+        if slot.modified_count == 0:
+            slot = users_col.update_one(
+                {"user_id": user_id, "spins_date": {"$ne": today}},
+                {"$set": {"spins_today": 1, "spins_date": today}},
+            )
+        if slot.modified_count == 0:
+            return jsonify({
+                "status":  "error",
+                "message": f"Daily spin limit reached ({_spin_limit}/{_spin_limit}). Come back tomorrow!",
+            }), 400
+        fresh = users_col.find_one({"user_id": user_id}, {"spins_today": 1}) or {}
+        new_spins = int(fresh.get("spins_today", spins_done + 1))
+
         # Weighted random spin result
         reward = random.choices(SPIN_REWARDS, weights=SPIN_WEIGHTS, k=1)[0]
-        new_spins = spins_done + 1
-
-        update_op = {
-            "$set": {"spins_today": new_spins, "spins_date": today},
-        }
         if reward > 0:
-            update_op["$inc"] = {"coins": reward}
-
-        users_col.update_one({"user_id": user_id}, update_op)
-        logger.info("User %s spun: reward=%s spins=%s/%s", user_id, reward, new_spins, SPIN_PER_DAY)
+            users_col.update_one({"user_id": user_id}, {"$inc": {"coins": reward}})
+        _invalidate_user_cache(user_id)
+        logger.info("User %s spun: reward=%s spins=%s/%s", user_id, reward, new_spins, _spin_limit)
         # Referral commission — non-blocking, 10% to sponsor (only if won)
         if reward > 0:
             _fire_commission(user_id, reward, "game", f"spin_{user_id}_{today}_{new_spins}")
@@ -4498,8 +4666,14 @@ def upgrade_mining_api(user_id: int):
 
         # Atomic upgrade: include current_level in condition — prevents concurrent double-upgrade
         # If level already changed between read and update, modified_count == 0
+        # Level 1 users ke document mein mining_level field hota hi nahi (default 1) —
+        # pehle equality filter unpe kabhi match nahi karta tha, to upgrade hamesha 409 deta tha.
+        if current_level == 1:
+            _level_filter = {"$or": [{"mining_level": 1}, {"mining_level": {"$exists": False}}]}
+        else:
+            _level_filter = {"mining_level": current_level}
         upgraded = users_col.update_one(
-            {"user_id": user_id, "mining_level": current_level, "coins": {"$gte": cost}},
+            {"user_id": user_id, "blocked": {"$ne": True}, "coins": {"$gte": cost}, **_level_filter},
             {"$inc": {"coins": -cost}, "$set": {"mining_level": next_level}},
         )
         if upgraded.modified_count == 0:
@@ -4571,8 +4745,10 @@ def collect_mining_api(user_id: int):
         mining_level  = int(user.get("mining_level", 1))
         actual_reward = MINING_LEVEL_REWARDS.get(mining_level, MINING_REWARD)
         now = datetime.utcnow()
-        users_col.update_one(
-            {"user_id": user_id},
+        # Atomic collect: mining_start_time wahi hona chahiye jo humne padha tha — do
+        # parallel requests mein se sirf ek ko reward milega (doosri ka session ab clear hai).
+        _collected = users_col.update_one(
+            {"user_id": user_id, "blocked": {"$ne": True}, "mining_start_time": mining_start_str},
             {
                 "$inc": {"coins": actual_reward},
                 "$set": {
@@ -4583,6 +4759,9 @@ def collect_mining_api(user_id: int):
                 },
             },
         )
+        if _collected.modified_count == 0:
+            return jsonify({"status": "error", "message": "Mining reward already collected."}), 409
+        _invalidate_user_cache(user_id)
         logger.info("User %s collected mining reward: %s coins (level %s)", user_id, actual_reward, mining_level)
         # Referral commission — non-blocking, 10% to sponsor
         _fire_commission(user_id, actual_reward, "game", f"mining_{user_id}_{now.strftime('%Y%m%d%H%M%S')}")
@@ -4732,6 +4911,8 @@ def bomb_box_token_api(user_id: int):
                     "message": f"Cooldown active. Come back in {mins}m {secs}s.",
                 }), 429
 
+        # Ek waqt mein ek hi valid bomb-box token (tokens bank karke multi-start na ho)
+        ad_reward_tokens_col.delete_many({"user_id": user_id, "type": "bomb_box"})
         token      = secrets.token_hex(16)
         expires_at = datetime.utcnow() + timedelta(seconds=BOMB_BOX_GAME_TTL)
         ad_reward_tokens_col.insert_one({
@@ -4748,6 +4929,17 @@ def bomb_box_token_api(user_id: int):
 
 @app.route("/bomb_box_start/<int:user_id>", methods=["POST"])
 def bomb_box_start_api(user_id: int):
+    """Wrapper: ek user ke liye ek waqt mein ek hi game start hoga."""
+    _lock_key = f"bbstart_{user_id}"
+    if not acquire_db_lock(_lock_key, 15):
+        return jsonify({"status": "error", "message": "Game start ho raha hai. Thoda wait karo."}), 429
+    try:
+        return _bomb_box_start_impl(user_id)
+    finally:
+        release_db_lock(_lock_key)
+
+
+def _bomb_box_start_impl(user_id: int):
     try:
         cfg = get_feature_config()
         if not cfg.get("bomb_box_active", True):
@@ -4782,7 +4974,17 @@ def bomb_box_start_api(user_id: int):
             if BOMB_BOX_COOLDOWN_SECS - elapsed > 0:
                 return jsonify({"status": "cooldown", "message": "Cooldown still active."}), 429
 
-        # Expire any stale active games
+        # Agar pehle se ek valid (unplayed) game chal raha hai to wahi wapas do —
+        # naya game banane se cooldown bypass hota tha.
+        _active = bomb_box_col.find_one({
+            "user_id":   user_id,
+            "played":    False,
+            "timestamp": {"$gt": time.time() - BOMB_BOX_GAME_TTL},
+        })
+        if _active:
+            return jsonify({"status": "success", "game_id": _active["game_id"]})
+
+        # Expire any stale (TTL se purane) active games
         bomb_box_col.update_many(
             {"user_id": user_id, "played": False},
             {"$set": {"played": True, "expired": True}},
@@ -4817,6 +5019,9 @@ def bomb_box_pick_api(user_id: int):
         if box_index not in range(4):
             return jsonify({"status": "error", "message": "Invalid box index."}), 400
 
+        if not users_col.find_one({"user_id": user_id, "blocked": {"$ne": True}}, {"_id": 1}):
+            return jsonify({"status": "error", "message": "Account unavailable."}), 403
+
         now  = time.time()
         game = bomb_box_col.find_one_and_update(
             {
@@ -4839,6 +5044,7 @@ def bomb_box_pick_api(user_id: int):
 
         if box_type == "reward":
             users_col.update_one({"user_id": user_id}, {"$inc": {"coins": coins_won}})
+            _invalidate_user_cache(user_id)
             bomb_box_col.update_one({"game_id": game_id}, {"$set": {"coins_won": coins_won, "won": True}})
             message = random.choice(BOMB_BOX_FUN_WIN_MSGS)
             # Referral commission — non-blocking, 10% to sponsor
@@ -5178,6 +5384,27 @@ def get_single_tournament_api(tid: str):
 
 @app.route("/tournament/register", methods=["POST"])
 def tournament_register_api():
+    """Wrapper: ek tournament ki registrations serialize hoti hain (slot overfill / double-charge se bachne ke liye)."""
+    _body = request.get_json(silent=True) or {}
+    _tid  = sanitize_text(_body.get("tournament_id", ""), max_length=60)
+    if not _tid:
+        return _tournament_register_impl()
+    _lock_key = f"treg_{_tid}"
+    _got = False
+    for _ in range(10):                      # max ~2 sec wait (registrations ms mein khatam hoti hain)
+        if acquire_db_lock(_lock_key, 15):
+            _got = True
+            break
+        time.sleep(0.2)
+    if not _got:
+        return jsonify({"status": "error", "message": "Registrations busy hain, 2 second baad dobara try karo."}), 429
+    try:
+        return _tournament_register_impl()
+    finally:
+        release_db_lock(_lock_key)
+
+
+def _tournament_register_impl():
     """User ko specific tournament mein register karo (tournament_id required).
     Solo mode:  { user_id, tournament_id, ff_uid, ff_nickname }
     Squad mode: { user_id, tournament_id, team_name, members: [{ff_uid, ff_nickname}, ...] }
@@ -5195,6 +5422,7 @@ def tournament_register_api():
     if is_rate_limited(f"tourney_reg_{user_id}", 15):
         return jsonify({"status": "error", "message": "Please wait before retrying."}), 429
 
+    fee_deducted = 0   # entry fee jo kat chuki hai — kisi bhi failure par wapas karni hai
     try:
         user = users_col.find_one({"user_id": user_id}, {"blocked": 1, "username": 1, "_id": 0})
         if not user:
@@ -5302,6 +5530,8 @@ def tournament_register_api():
                     "status":  "error",
                     "message": f"Insufficient coins! Entry fee is {entry_fee} 🪙 but you only have {bal} 🪙.",
                 }), 400
+            fee_deducted = entry_fee
+            _invalidate_user_cache(user_id)
             logger.info("Tournament fee deducted: user=%s fee=%s tournament=%s", user_id, entry_fee, tid)
 
         reg_doc["entry_fee_paid"] = entry_fee
@@ -5332,15 +5562,25 @@ def tournament_register_api():
         # insert ran. A same-user double-submit race can hit this branch after
         # the coins are gone but with no registration recorded — refund so the
         # race costs the user nothing.
-        if entry_fee > 0:
+        if fee_deducted > 0:
             try:
-                users_col.update_one({"user_id": user_id}, {"$inc": {"coins": entry_fee}})
-                logger.warning("Duplicate tournament registration race: refunded %s coins to user=%s tournament=%s", entry_fee, user_id, tid)
+                users_col.update_one({"user_id": user_id}, {"$inc": {"coins": fee_deducted}})
+                _invalidate_user_cache(user_id)
+                logger.warning("Duplicate tournament registration race: refunded %s coins to user=%s tournament=%s", fee_deducted, user_id, tid)
             except Exception:
                 logger.error("Failed to refund entry fee after duplicate registration race: user=%s tournament=%s", user_id, tid)
         return jsonify({"status": "error", "message": "You are already registered!"}), 400
     except Exception as exc:
         logger.error("tournament_register_api error for %s: %s", user_id, exc)
+        # Fee kat chuki thi par registration save nahi hui — coins wapas karo
+        if fee_deducted > 0:
+            try:
+                users_col.update_one({"user_id": user_id}, {"$inc": {"coins": fee_deducted}})
+                _invalidate_user_cache(user_id)
+                logger.warning("Registration failed, refunded %s coins to user=%s tournament=%s", fee_deducted, user_id, tid)
+                return jsonify({"status": "error", "message": "Server error. Aapka entry fee wapas kar diya gaya hai, dobara try karo."}), 500
+            except Exception:
+                logger.error("CRITICAL: refund failed after registration error: user=%s fee=%s tournament=%s", user_id, fee_deducted, tid)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
@@ -6025,7 +6265,7 @@ def start(message):
 
     bot.send_message(
         user_id,
-        f"\U0001f44b *Hello {username}!*\n\n"
+        f"\U0001f44b *Hello {md_safe(username)}!*\n\n"
         f"\U0001f4b0 Balance: *{current_coins} \U0001fa99*\n\n"
         f"Earn coins daily, complete tasks, and withdraw rewards!\n\n"
         f"Tap the button below to start earning! \U0001f680",
@@ -6393,6 +6633,10 @@ def add_promo_task_command(message):
         reward = int(parts[2])
     except ValueError:
         return bot.reply_to(message, "Invalid reward amount. Must be an integer.")
+    if reward <= 0 or reward > 100000:
+        return bot.reply_to(message, "❌ Reward 1 se 100000 coins ke beech hona chahiye.")
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{1,40}", task_id):
+        return bot.reply_to(message, "❌ task_id me sirf letters, numbers, _ aur - (max 40) allowed hain.")
     title_raw = parts[3].strip()
     silent    = False
     if "|" in title_raw:
@@ -6404,6 +6648,8 @@ def add_promo_task_command(message):
     try:
         existing = promo_tasks_col.find_one({"task_id": task_id})
         if existing:
+            if not existing.get("active", True):
+                return bot.reply_to(message, f"Task '{task_id}' deactivated hai (purane claims us id se jude hain). Naya task_id use karo, jaise {task_id}_2.")
             return bot.reply_to(message, f"Task '{task_id}' already exists. Use /delpromtask first.")
         promo_tasks_col.insert_one({
             "task_id":    task_id,
@@ -7365,12 +7611,13 @@ def reject_withdrawal(message):
         {"$set": {"status": "Rejected \u274c"}},
     )
     if withdraw:
-        users_col.update_one({"user_id": target_id}, {"$inc": {"coins": withdraw["amount"]}})
+        _amt = int(withdraw.get("amount", withdraw.get("coins", 0)))
+        users_col.update_one({"user_id": target_id}, {"$inc": {"coins": _amt}})
+        _invalidate_user_cache(target_id)
         try:
             bot.send_message(
                 target_id,
-                f"\u274c Your withdrawal was rejected. {withdraw['amount']} coins have been refunded.",
-                parse_mode="Markdown",
+                f"\u274c Your withdrawal was rejected. {_amt} coins have been refunded.",
             )
         except Exception as notify_exc:
             logger.warning("Notify failed for rejected user %s: %s", target_id, notify_exc)
@@ -7391,8 +7638,12 @@ def add_coins(message):
         amount    = int(parts[2])
     except ValueError:
         return bot.reply_to(message, "Invalid user ID or amount.")
+    if amount <= 0:
+        return bot.reply_to(message, "❌ Amount positive hona chahiye.")
     try:
-        users_col.update_one({"user_id": target_id}, {"$inc": {"coins": amount}})
+        _res = users_col.update_one({"user_id": target_id}, {"$inc": {"coins": amount}})
+        if _res.matched_count == 0:
+            return bot.reply_to(message, f"❌ User {target_id} database me nahi mila.")
         _invalidate_user_cache(target_id)
     except Exception as exc:
         logger.error("addcoins DB error for %s: %s", target_id, exc)
@@ -7421,11 +7672,20 @@ def broadcast(message):
     sent = failed = 0
     for u in all_users:
         try:
-            bot.send_message(u["user_id"], msg_text, parse_mode="Markdown")
+            try:
+                bot.send_message(u["user_id"], msg_text, parse_mode="Markdown")
+            except Exception as _md_exc:
+                if "can't parse" in str(_md_exc).lower():
+                    bot.send_message(u["user_id"], msg_text)      # Markdown toota to plain text bhejo
+                else:
+                    raise
             sent += 1
-            time.sleep(0.05)
-        except Exception:
+        except Exception as _exc:
             failed += 1
+            _m = re.search(r"retry after (\d+)", str(_exc))
+            if _m:
+                time.sleep(min(int(_m.group(1)) + 1, 30))        # Telegram flood limit
+        time.sleep(0.05)
     bot.reply_to(message, f"\U0001f4e2 Sent: {sent} | Failed: {failed}")
 
 
@@ -8318,16 +8578,25 @@ def cmd_tournament_status(message):
     tid    = parts[1].strip()
     status = parts[2].strip()
     try:
-        res = tournaments_col.update_one(
-            {"tournament_id": tid, "active": True},
-            {"$set": {"status": status}},
-        )
-        if res.matched_count == 0:
+        _cur = tournaments_col.find_one({"tournament_id": tid, "active": True}, {"status": 1})
+        if not _cur:
             return bot.reply_to(
                 message,
                 f"❌ Tournament `{tid}` nahi mila.\nIDs dekhne ke liye: `/listtournaments`",
                 parse_mode="Markdown",
             )
+        _cur_status = _cur.get("status", "coming_soon")
+        _order = {k: i for i, k in enumerate(TOURNAMENT_STATES)}
+        if _cur_status == "completed" and status != "completed":
+            return bot.reply_to(message, "❌ Completed tournament dobara open nahi ho sakta. Naya tournament banao.")
+        if _order.get(status, 0) < _order.get(_cur_status, 0) and _cur_status == "match_live":
+            return bot.reply_to(message, "❌ Match live hone ke baad status peeche nahi ja sakta (registration ya coming_soon par).")
+        res = tournaments_col.update_one(
+            {"tournament_id": tid, "active": True, "status": _cur_status},
+            {"$set": {"status": status}},
+        )
+        if res.matched_count == 0:
+            return bot.reply_to(message, "⚠️ Status isi waqt kisi aur ne badal diya, dobara try karo.")
         bot.reply_to(
             message,
             f"✅ *Status Updated!*\n\n"
@@ -9244,7 +9513,7 @@ def cmd_round_info(message):
                 for res in results:
                     results_text += (
                         f"  #{res.get('rank','?')} "
-                        f"{res.get('team_name', res.get('username','?'))} "
+                        f"{md_safe(str(res.get('team_name', res.get('username','?'))))} "
                         f"— {res.get('total_points', res.get('kills', 0))} pts\n"
                     )
         except Exception:
@@ -9585,7 +9854,7 @@ def cmd_set_premium(message):
     bot.reply_to(
         message,
         f"✅ *Premium Activated!*\n\n"
-        f"👤 *User:* {display_name} (`{target_uid}`)\n"
+        f"👤 *User:* {md_safe(display_name)} (`{target_uid}`)\n"
         f"👑 *Plan:* {plan_info['label']}\n"
         f"📅 *Expires:* {expiry_dt.strftime('%d %b %Y')} ({days} days)\n\n"
         f"*Benefits Unlocked:*\n"
@@ -9646,11 +9915,12 @@ def cmd_remove_premium(message):
         {"user_id": target_uid},
         {"$set": {"premium": False, "premium_expiry": None}},
     )
+    _invalidate_user_cache(target_uid)
 
     display_name = target_user.get("first_name") or target_user.get("username") or str(target_uid)
     bot.reply_to(
         message,
-        f"✅ Premium removed for *{display_name}* (`{target_uid}`).",
+        f"✅ Premium removed for *{md_safe(display_name)}* (`{target_uid}`).",
         parse_mode="Markdown",
     )
 
@@ -9685,7 +9955,7 @@ def cmd_premium_status(message):
         days_left = prem_info.get("days_left", 0)
         bot.reply_to(
             message,
-            f"👑 *Premium Active — {first_name}!*\n\n"
+            f"👑 *Premium Active — {md_safe(first_name)}!*\n\n"
             f"📦 *Plan:* {plan}\n"
             f"📅 *Expires:* {expiry} ({days_left} days left)\n\n"
             f"*Your Premium Benefits:*\n"
@@ -9730,15 +10000,17 @@ def cmd_add_rupees(message):
     try:
         target_id = int(parts[1])
         amount    = round(float(parts[2]), 2)
-        if amount <= 0:
+        if not math.isfinite(amount) or amount <= 0:
             raise ValueError
     except ValueError:
         return bot.reply_to(message, "❌ Invalid user ID or amount.")
-    users_col.update_one(
+    _res = users_col.update_one(
         {"user_id": target_id},
         {"$inc": {"rupees": amount}},
         upsert=False,
     )
+    if _res.matched_count == 0:
+        return bot.reply_to(message, f"❌ User {target_id} database me nahi mila.")
     _invalidate_user_cache(target_id)
     try:
         bot.send_message(target_id, f"💰 *₹{amount:.2f} credited* to your rupee wallet by admin!", parse_mode="Markdown")
@@ -9759,19 +10031,23 @@ def cmd_deduct_rupees(message):
     try:
         target_id = int(parts[1])
         amount    = round(float(parts[2]), 2)
-        if amount <= 0:
+        if not math.isfinite(amount) or amount <= 0:
             raise ValueError
     except ValueError:
         return bot.reply_to(message, "❌ Invalid user ID or amount.")
+    # Atomic: balance se zyada deduct nahi hoga (negative balance nahi banega)
     result = users_col.find_one_and_update(
-        {"user_id": target_id},
+        {"user_id": target_id, "rupees": {"$gte": amount}},
         {"$inc": {"rupees": -amount}},
         return_document=True,
     )
     if not result:
-        return bot.reply_to(message, f"❌ User {target_id} not found.")
+        _u = users_col.find_one({"user_id": target_id}, {"rupees": 1})
+        if not _u:
+            return bot.reply_to(message, f"❌ User {target_id} not found.")
+        return bot.reply_to(message, f"❌ Balance kam hai (₹{float(_u.get('rupees', 0) or 0):.2f}). Itna deduct nahi ho sakta.")
     _invalidate_user_cache(target_id)
-    new_bal = round(result.get("rupees", 0) - amount, 2)
+    new_bal = round(float(result.get("rupees", 0) or 0), 2)
     bot.reply_to(message, f"✅ ₹{amount:.2f} deducted from user {target_id}. New balance: ₹{max(0, new_bal):.2f}")
     logger.info("Admin deducted ₹%s rupees from user %s", amount, target_id)
 
@@ -9793,7 +10069,7 @@ def cmd_rupee_balance(message):
         return bot.reply_to(message, f"❌ User {target_id} not found.")
     bot.reply_to(
         message,
-        f"💰 *User {target_id}* (@{user.get('username') or 'N/A'})\n"
+        f"💰 *User {target_id}* (@{md_safe(user.get('username') or 'N/A')})\n"
         f"🪙 Coins: `{user.get('coins', 0)}`\n"
         f"₹ Rupees: `₹{round(user.get('rupees', 0.0), 2):.2f}`",
         parse_mode="Markdown",
@@ -10027,7 +10303,7 @@ def handle_photo(message):
 
         admin_caption = (
             f"📸 *Payment Screenshot Received*\n\n"
-            f"👤 User: {username} (`{user_id}`)\n"
+            f"👤 User: {md_safe(username)} (`{user_id}`)\n"
             f"💬 Caption: {caption or '—'}\n"
             f"📦 Premium Status: {status}\n\n"
             f"✅ To activate:\n"
