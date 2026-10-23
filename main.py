@@ -248,6 +248,16 @@ CHANNEL_REWARDS            = {          # per-channel override (sponsor slots ea
 }
 CHANNEL_TOTAL_REWARD       = 15
 
+# Official channels ka username SERVER par fix hai — client se aane wala URL in par trust nahi hota.
+# Badalna ho to Render env: OFFICIAL_CHANNELS="official=@cdoternoffical,channel2=@chatdotern,channel3=@chatdotern"
+OFFICIAL_CHANNEL_MAP = {"official": "@cdoternoffical", "channel2": "@chatdotern", "channel3": "@chatdotern"}
+for _pair in (os.getenv("OFFICIAL_CHANNELS") or "").split(","):
+    if "=" in _pair:
+        _k, _v = _pair.split("=", 1)
+        _k, _v = _k.strip().lower(), _v.strip()
+        if _k in OFFICIAL_CHANNEL_MAP and _v:
+            OFFICIAL_CHANNEL_MAP[_k] = _v if _v.startswith("@") else "@" + _v.lstrip("/").split("t.me/")[-1]
+
 MAX_ADS_PER_DAY            = 10
 AD_COIN_REWARD             = 5
 AD_CLAIM_TOKEN_TTL_SECONDS = 300
@@ -2278,6 +2288,31 @@ def _withdraw_impl():
         return jsonify({"status": "error", "message": "Server error. Please try again."}), 500
 
 
+@app.route("/task_visit", methods=["POST"])
+def task_visit_api():
+    """Web task ka link khula — server par aaj ka visit time record karo (verify ke liye zaroori)."""
+    data = request.get_json(silent=True) or {}
+    try:
+        user_id = int(data.get("user_id", 0))
+    except (TypeError, ValueError):
+        return jsonify({"status": "ok"})
+    task_id = sanitize_text(data.get("task_id", "")).lower()
+    if not user_id or task_id not in WEB_TASK_IDS:
+        return jsonify({"status": "ok"})
+    try:
+        now = datetime.utcnow()
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        field = f"task_visits.{task_id}"
+        # Aaj ka pehla visit hi rakho (baar baar click se timer reset na ho)
+        users_col.update_one(
+            {"user_id": user_id, "$or": [{field: {"$exists": False}}, {field: {"$lt": day_start}}]},
+            {"$set": {field: now}},
+        )
+    except Exception as exc:
+        logger.error("task_visit error for %s: %s", user_id, exc)
+    return jsonify({"status": "ok"})
+
+
 @app.route("/verify_task", methods=["POST"])
 def verify_task_api():
     data = request.get_json(silent=True)
@@ -2347,6 +2382,17 @@ def verify_task_api():
         task_completions = user.get("task_completions", {})
         live_codes       = get_live_task_codes()
         existing         = task_completions.get(task_id, {})
+
+        # Web task: aaj link khola hona chahiye aur kam se kam 15 sec guzre hon (code share karke skip na ho)
+        if task_id in WEB_TASK_IDS:
+            _vt = (user.get("task_visits") or {}).get(task_id)
+            _now = datetime.utcnow()
+            if not isinstance(_vt, datetime) or _vt < _now.replace(hour=0, minute=0, second=0, microsecond=0):
+                _release_task_lock(_idem_key)
+                return jsonify({"status": "error", "message": "Pehle 'Visit Site' dabao aur site khol kar code lo."}), 400
+            if (_now - _vt).total_seconds() < 15:
+                _release_task_lock(_idem_key)
+                return jsonify({"status": "error", "message": "Site par thoda ruko, code milne ke baad verify karo."}), 400
 
         if task_id in ONE_TIME_TASK_IDS:
             if isinstance(existing, dict) and existing.get("code") == correct_code:
@@ -2434,6 +2480,7 @@ def verify_task_api():
             "data":    {"reward": reward, "premium_bonus": premium_bonus},
         })
     except Exception as exc:
+        _release_task_lock(_idem_key)
         logger.error("verify_task error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
@@ -2590,6 +2637,15 @@ def ad_claim_token_api(user_id: int):
 # CHANNEL CLAIM
 # ============================================================
 
+def get_sponsor_link(slot_id: str) -> str:
+    """Admin ne /setsponsor se jo trusted link set kiya (config.js ke link se match hona chahiye)."""
+    try:
+        doc = config_col.find_one({"_id": "sponsor_links"}) or {}
+        return str((doc.get("links") or {}).get(slot_id, "") or "")
+    except Exception:
+        return ""
+
+
 @app.route("/claim_channel", methods=["POST"])
 def claim_channel_api():
     data = request.get_json(silent=True)
@@ -2609,6 +2665,9 @@ def claim_channel_api():
 
     if channel_id not in CHANNEL_IDS:
         return jsonify({"status": "error", "message": "Invalid channel."}), 400
+    if channel_id in ("slot3", "slot4"):
+        # Ye slots code-verify (/verify_task) se chalte hain — yahan se bina code reward nahi milega
+        return jsonify({"status": "error", "message": "Is slot ke liye code verify karo."}), 400
 
     if is_rate_limited(f"channel_{user_id}_{channel_id}", 10):
         return jsonify({"status": "error", "message": "Please wait a moment."}), 429
@@ -2639,7 +2698,10 @@ def claim_channel_api():
                     # Purana boolean True format — treat as claimed with any link
                     claimed_link_in_db = ""
                 # Agar link same hai (ya naya link nahi aaya) toh already claimed
-                if not claimed_link or not claimed_link_in_db or claimed_link_in_db == claimed_link:
+                # Link-change sirf SERVER ke trusted link (/setsponsor) se maani jati hai —
+                # client ka claimed_link badal kar baar baar claim karna ab possible nahi.
+                _srv_link = get_sponsor_link(channel_id)
+                if not _srv_link or not claimed_link_in_db or claimed_link_in_db == _srv_link:
                     return jsonify({"status": "error", "message": "Reward already claimed for this channel! \u2705"}), 400
                 # Link change hui hai — allow re-claim, lekin spam rokne ke liye
                 # do re-claims ke beech kam se kam 6 ghante ka gap zaroori hai.
@@ -2655,11 +2717,17 @@ def claim_channel_api():
 
         # Official Telegram channels ke liye membership verify karna ZAROORI hai —
         # pehle channel_url khali bhejne par verification skip ho jata tha.
-        if channel_id in ("official", "channel2", "channel3"):
-            if not channel_url or not extract_channel_username(channel_url):
-                return jsonify({"status": "error", "message": "Channel link missing. Please reopen the app and try again."}), 400
-        if channel_url:
-            ch_username = extract_channel_username(channel_url)
+        if channel_id in OFFICIAL_CHANNEL_MAP:
+            # Server-side username — fake/own channel URL se claim nahi hoga
+            ch_username = OFFICIAL_CHANNEL_MAP[channel_id]
+            if not verify_channel_membership(ch_username, user_id):
+                return jsonify({
+                    "status":  "not_joined",
+                    "message": "Please join the channel first, then tap Retry!",
+                }), 400
+        elif channel_url or get_sponsor_link(channel_id):
+            # Trusted server link ho to wahi verify hota hai, warna client ka URL
+            ch_username = extract_channel_username(get_sponsor_link(channel_id) or channel_url)
             if ch_username:
                 is_member = verify_channel_membership(ch_username, user_id)
                 if not is_member:
@@ -2672,8 +2740,9 @@ def claim_channel_api():
 
         # BUG FIX #4: Sponsor slots ke liye claimed_link object save karo,
         # baki channels ke liye simple True store karo.
-        if channel_id in ("slot1", "slot2") and claimed_link:
-            claim_value = {"claimed_link": claimed_link, "claimed_at": datetime.utcnow().isoformat()}
+        _store_link = get_sponsor_link(channel_id) or claimed_link
+        if channel_id in ("slot1", "slot2") and _store_link:
+            claim_value = {"claimed_link": _store_link, "claimed_at": datetime.utcnow().isoformat()}
         else:
             claim_value = True
 
@@ -3037,12 +3106,40 @@ def get_vip_tasks_api():
             return jsonify({"status": "error", "message": "Premium membership required."}), 403
 
         tasks   = list(vip_tasks_col.find({"active": True}, {"_id": 0}))
-        user    = users_col.find_one({"user_id": user_id}, {"vip_task_completions": 1, "_id": 0})
+        user    = users_col.find_one({"user_id": user_id}, {"vip_task_completions": 1, "vip_visits": 1, "_id": 0})
         claimed = (user or {}).get("vip_task_completions", [])
+        visited = list(((user or {}).get("vip_visits") or {}).keys())
 
-        return jsonify({"status": "success", "tasks": tasks, "claimed": claimed})
+        return jsonify({"status": "success", "tasks": tasks, "claimed": claimed, "visited": visited})
     except Exception as exc:
         logger.error("get_vip_tasks error for %s: %s", user_id, exc)
+        return jsonify({"status": "error", "message": "Server error."}), 500
+
+
+@app.route("/vip_task_visit", methods=["POST"])
+def vip_task_visit_api():
+    """User ne VIP task ka link khola — server par time record karo (claim ke liye zaroori)."""
+    data = request.get_json(silent=True) or {}
+    try:
+        user_id = int(data.get("user_id", 0))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid user ID."}), 400
+    task_id = sanitize_text(data.get("task_id", "")).strip()
+    if not user_id or not task_id:
+        return jsonify({"status": "error", "message": "user_id and task_id required."}), 400
+    try:
+        if not is_premium(user_id):
+            return jsonify({"status": "error", "message": "Premium membership required."}), 403
+        if not vip_tasks_col.find_one({"task_id": task_id, "active": True}, {"_id": 1}):
+            return jsonify({"status": "error", "message": "VIP task not found."}), 404
+        # Pehli visit ka time rakho (baar baar click se timer reset na ho)
+        users_col.update_one(
+            {"user_id": user_id, f"vip_visits.{task_id}": {"$exists": False}},
+            {"$set": {f"vip_visits.{task_id}": datetime.utcnow()}},
+        )
+        return jsonify({"status": "success"})
+    except Exception as exc:
+        logger.error("vip_task_visit error for %s: %s", user_id, exc)
         return jsonify({"status": "error", "message": "Server error."}), 500
 
 
@@ -3076,6 +3173,15 @@ def claim_vip_task_api():
             return jsonify({"status": "error", "message": "VIP task not found or no longer active."}), 404
 
         reward = int(task.get("reward", 20))
+
+        # Link wale task me pehle link khulna zaroori hai (server-side check, min 5 sec pehle)
+        if task.get("url"):
+            _vu = users_col.find_one({"user_id": user_id}, {"vip_visits": 1, "_id": 0}) or {}
+            _vt = (_vu.get("vip_visits") or {}).get(task_id)
+            if not _vt:
+                return jsonify({"status": "error", "message": "Pehle 'Go to Task' link kholo, phir claim karo."}), 400
+            if isinstance(_vt, datetime) and (datetime.utcnow() - _vt).total_seconds() < 5:
+                return jsonify({"status": "error", "message": "Thoda ruko, task complete karke claim karo."}), 400
 
         # Atomic claim: update only if NOT blocked AND task NOT already claimed
         # Prevents double-credit under concurrent requests
@@ -6924,7 +7030,7 @@ def feature_status_command(message):
             f"🔐 Locked features: `{tl_feat_str}`\n\n"
             f"Commands: /togglespin /togglemining /togglebomb /togglewebtasks /togglepremium\n"
             f"Lock cmds: /togglelock · /lockfeatures\n"
-            f"Sponsor cmds: /resetsponsor slot1 · /resetsponsor slot2",
+            f"Sponsor cmds: /setsponsor slot1 <link> · /setsponsor list · /resetsponsor slot1 · /resetsponsor slot2",
             parse_mode="Markdown",
         )
     except Exception as exc:
@@ -7384,6 +7490,34 @@ def toggle_web_tasks(message):
 # Note: only slot1/slot2 (type "channel" in config.js) use this
 # channel_claims-based storage. slot3/slot4 (type "verify") are tracked
 # in task_completions instead and aren't covered by this command.
+
+@bot.message_handler(commands=["setsponsor"])
+def set_sponsor_command(message):
+    """/setsponsor <slot1|slot2> <link>  — server ka trusted sponsor link (config.js wale link jaisa hi daalo)
+    /setsponsor list  — saare set links dekho"""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = (message.text or "").split()[1:]
+    try:
+        doc = config_col.find_one({"_id": "sponsor_links"}) or {}
+        links = doc.get("links") or {}
+        if parts and parts[0].lower() == "list":
+            if not links:
+                return bot.reply_to(message, "Koi sponsor link set nahi hai.")
+            return bot.reply_to(message, "🔗 Sponsor links:\n" + "\n".join(f"{k}: {v}" for k, v in links.items()), disable_web_page_preview=True)
+        if len(parts) < 2 or parts[0].lower() not in ("slot1", "slot2") or not re.match(r"^https?://\S+$", parts[1]):
+            return bot.reply_to(
+                message,
+                "⚠️ Usage:\n/setsponsor slot1 https://t.me/channel\n/setsponsor list\n\n"
+                "Link wahi hona chahiye jo config.js ke SPONSORS me hai. Link badalne par users dobara claim kar payenge (6 ghante gap).",
+                disable_web_page_preview=True,
+            )
+        config_col.update_one({"_id": "sponsor_links"}, {"$set": {f"links.{parts[0].lower()}": parts[1]}}, upsert=True)
+        bot.reply_to(message, f"✅ {parts[0].lower()} link set: {parts[1]}", disable_web_page_preview=True)
+    except Exception as exc:
+        logger.error("setsponsor error: %s", exc)
+        bot.reply_to(message, "⚠️ Error. Check logs.")
+
 
 @bot.message_handler(commands=["resetsponsor"])
 def reset_sponsor_command(message):
@@ -9537,7 +9671,7 @@ def cmd_round_info(message):
 
 @bot.message_handler(commands=["canceltournament"])
 def cmd_cancel_tournament(message):
-    """Admin: /canceltournament <tournament_id> — Tournament ko cancel/deactivate karo."""
+    """Admin: /canceltournament <tournament_id> — Tournament cancel karo; paid entry fees auto-refund hoti hain."""
     if int(message.from_user.id) != ADMIN_ID:
         return
     parts = message.text.split()
@@ -9549,20 +9683,56 @@ def cmd_cancel_tournament(message):
         )
     tid = parts[1].strip()
     try:
-        res = tournaments_col.update_one(
+        prev = tournaments_col.find_one_and_update(
             {"tournament_id": tid, "active": True},
             {"$set": {"active": False, "status": "completed"}},
+            return_document=False,
         )
-        if res.matched_count == 0:
+        if not prev:
             return bot.reply_to(
                 message,
                 f"❌ Tournament `{tid}` nahi mila ya already inactive hai.\n`/listtournaments` se check karo.",
                 parse_mode="Markdown",
             )
+
+        # Refund: sirf tab jab tournament complete nahi hua tha (completed ke baad prize ban chuke hote hain)
+        refunded_users = refunded_coins = 0
+        if prev.get("status") != "completed":
+            for reg in list(tournament_registrations_col.find(
+                {"tournament_id": tid, "entry_fee_paid": {"$gt": 0}, "status": {"$ne": "refunded"}}
+            )):
+                # Atomic: har registration sirf ek baar refund hogi
+                claimed = tournament_registrations_col.find_one_and_update(
+                    {"_id": reg["_id"], "status": {"$ne": "refunded"}},
+                    {"$set": {"status": "refunded", "refunded_at": datetime.utcnow()}},
+                    return_document=False,
+                )
+                if not claimed:
+                    continue
+                fee = int(claimed.get("entry_fee_paid", 0) or 0)
+                uid = claimed.get("user_id")
+                if fee <= 0 or not uid:
+                    continue
+                try:
+                    users_col.update_one({"user_id": uid}, {"$inc": {"coins": fee}})
+                    _invalidate_user_cache(uid)
+                    refunded_users += 1
+                    refunded_coins += fee
+                except Exception as _rexc:
+                    logger.error("Cancel refund failed user=%s fee=%s tid=%s: %s", uid, fee, tid, _rexc)
+                    tournament_registrations_col.update_one({"_id": reg["_id"]}, {"$set": {"status": "registered"}})
+                    continue
+                try:
+                    bot.send_message(uid, f"🚫 Tournament cancel ho gaya. Aapki entry fee {fee} coins wapas kar di gayi hai.")
+                except Exception:
+                    pass
+                time.sleep(0.05)
+
         bot.reply_to(
             message,
             f"🚫 *Tournament Cancelled!*\n\n"
             f"🆔 `{tid}` deactivate ho gaya.\n"
+            f"💸 Refund: {refunded_users} users, {refunded_coins} coins\n"
             f"Naya tournament banane ke liye `/createtournament` use karo.",
             parse_mode="Markdown",
         )
@@ -10164,8 +10334,9 @@ def cmd_add_vip_task(message):
     if len(parts) < 4:
         bot.reply_to(
             message,
-            "❌ *Usage:*\n`/addviptask <task_id> <coins> <title>`\n\n"
-            "*Example:*\n`/addviptask join_channel 50 Join our official channel`",
+            "❌ *Usage:*\n`/addviptask <task_id> <coins> <title> | <link>`\n\n"
+            "*Example:*\n`/addviptask join_channel 50 Join our official channel | https://t.me/chatdotern`\n"
+            "_Link optional hai. Link ho to claim se pehle user ko wo kholna padega._",
             parse_mode="Markdown",
         )
         return
@@ -10178,7 +10349,15 @@ def cmd_add_vip_task(message):
     except ValueError:
         bot.reply_to(message, "❌ Reward coins must be a positive number.")
         return
-    title = sanitize_text(parts[3], max_length=200).strip()
+    title_raw = parts[3]
+    task_url  = ""
+    if "|" in title_raw:
+        title_raw, _, _u = title_raw.rpartition("|")
+        task_url = _u.strip()
+        if task_url and not re.match(r"^https?://[^\s]+$", task_url):
+            bot.reply_to(message, "❌ Link http:// ya https:// se shuru hona chahiye.")
+            return
+    title = sanitize_text(title_raw, max_length=200).strip()
 
     if not task_id or not title:
         bot.reply_to(message, "❌ task_id aur title dono required hain.")
@@ -10192,6 +10371,8 @@ def cmd_add_vip_task(message):
             "active":      True,
             "updated_at": datetime.utcnow().isoformat(),
         }
+        if task_url:
+            task_doc["url"] = task_url
         existing = vip_tasks_col.find_one({"task_id": task_id}, {"active": 1, "_id": 0})
         if existing and existing.get("active", True):
             bot.reply_to(message, f"❌ VIP task `{task_id}` already exists!", parse_mode="Markdown")
@@ -10205,7 +10386,7 @@ def cmd_add_vip_task(message):
                 {"task_id": task_id},
                 {
                     "$set": task_doc,
-                    "$unset": {"deactivated_at": ""},
+                    "$unset": {"deactivated_at": "", **({} if task_url else {"url": ""})},
                 },
             )
             action_label = "re-activated"
@@ -10218,8 +10399,9 @@ def cmd_add_vip_task(message):
             message,
             f"✅ *VIP Task {action_label.title()}!*\n\n"
             f"🆔 ID: `{task_id}`\n"
-            f"📌 Title: {title}\n"
-            f"🪙 Reward: {reward} coins\n\n"
+            f"📌 Title: {md_safe(title)}\n"
+            f"🪙 Reward: {reward} coins\n"
+            f"{'🔗 Link: ' + md_safe(task_url) + chr(10) if task_url else ''}\n"
             f"_Ab premium users ise claim kar sakte hain._",
             parse_mode="Markdown",
         )
