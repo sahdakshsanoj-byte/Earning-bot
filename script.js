@@ -1594,6 +1594,7 @@ async function loadVipTasks() {
         const data = await res.json();
         const tasks   = data.tasks   || [];
         const claimed = data.claimed || [];
+        (data.visited || []).forEach(id => _vipTaskVisited.add(id));
 
         if (!tasks.length) {
             list.innerHTML = '<p style="color:#475569;text-align:center;font-size:13px;padding:10px 0;">No VIP tasks available yet.</p>';
@@ -1641,6 +1642,11 @@ async function loadVipTasks() {
 function _openVipTaskLink(taskId, url) {
     openExternalLink(url);
     _vipTaskVisited.add(taskId);
+    // Server ko batao ki link khola gaya (claim ke waqt server check karta hai)
+    fetch(`${CONFIG.API_BASE_URL}/vip_task_visit`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({user_id: userId, task_id: taskId}),
+    }).catch(() => {});
     const btn = document.querySelector(`.vip-task-claim-btn[data-task-id="${taskId}"]`);
     if (btn && !btn.classList.contains('completed')) {
         btn.disabled = false;
@@ -2305,6 +2311,13 @@ function openTask(taskKey, type) {
                : type === 'partner' ? CONFIG.PARTNER_LINKS?.[taskKey]
                : CONFIG.WEB_LINKS[taskKey];
     if (link && link !== '#') {
+        if (type === 'web' && userId) {
+            // Server ko visit record karao (verify ke waqt check hota hai)
+            fetch(`${CONFIG.API_BASE_URL}/task_visit`, {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({user_id: userId, task_id: taskKey}),
+            }).catch(() => {});
+        }
         openExternalLink(link);
     } else {
         showToast("Link will be updated soon!", "error");
