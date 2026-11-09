@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Daksh Grand Earn</title>
+    <title>Cdotern</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
     <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="theme.css?v=1">
     <style>
         /* ═══════════════════════════════════════════════════════
            DESIGN SYSTEM — Glassmorphism + Unified Palette
@@ -348,7 +347,7 @@
             0%,100% { filter: drop-shadow(0 0 0px #f1c40f); }
             50%      { filter: drop-shadow(0 0 8px #f1c40f); }
         }
-        #nav-leaderboard.has-active { animation: trophy-live-pulse 2s ease-in-out infinite; }
+        #tournament-trophy-btn.has-active { animation: trophy-live-pulse 2s ease-in-out infinite; }
 
         /* Content padding area */
         .t-body { padding: 0 16px 20px; }
@@ -819,8 +818,9 @@
     <div class="header" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px;">
         <h3 id="tab-title">Rewards</h3>
         <div style="display:flex; gap:15px; align-items:center;">
-            <div onclick="switchTab('leaderboard', null)" id="top-earners-btn" style="cursor:pointer; font-size:20px; position:relative;" title="Top Earners Ranking">
-                🥇
+            <div onclick="openTournamentHub(event)" id="tournament-trophy-btn" style="cursor:pointer; font-size:20px; position:relative;" title="Tournament Hub">
+                🏆
+                <span id="t-trophy-dot" style="display:none; position:absolute; top:-2px; right:-2px; width:7px; height:7px; background:#ef4444; border-radius:50%; border:1.5px solid #0a0e1a;"></span>
             </div>
             <div onclick="openPublicLeaderboard()" id="lb-crown-btn" style="cursor:pointer; font-size:20px;" title="Tournament Leaderboard">👑</div>
         </div>
@@ -1850,6 +1850,44 @@
 
     <div id="help" class="tab-content" style="display:none;">
 
+        <div class="card c-gold" style="padding:0 !important; overflow:hidden !important;">
+            <div style="background:rgba(241,196,15,0.12); border-bottom:1px solid rgba(241,196,15,0.20); padding:12px 18px; display:flex; align-items:center; gap:8px;">
+                <span style="font-size:18px;">📋</span>
+                <h4 style="color:var(--gold); margin:0; font-size:15px; font-weight:700;">Notice Board</h4>
+            </div>
+            <div style="padding:16px;">
+
+                <div class="notice-green">
+                    <p style="font-size:13px; font-weight:700; color:#4ade80; margin:0 0 8px 0;">🎯 Earning Rates</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Watch Ad: <b style="color:var(--gold);">+5 🪙</b> (max 10/day)</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• YouTube Task: <b style="color:var(--gold);">+5 🪙</b> (max 3/day)</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Website Task: <b style="color:var(--gold);">+3 🪙</b> (max 3/day)</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Telegram Channel: <b style="color:var(--gold);">+5 🪙</b> (one-time each)</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Promotion Task: <b style="color:var(--gold);">+5 🪙</b> (one-time each)</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• 🎡 Spin Wheel: <b style="color:var(--gold);">up to 100 🪙</b> (5 spins/day • 1 ad each)</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0;">• ⛏️ Coin Mining: <b style="color:var(--gold);">+10 🪙/hr</b> (2 ads to start • 1hr cooldown)</p>
+                </div>
+
+                <div class="notice-green">
+                    <p style="font-size:13px; font-weight:700; color:#4ade80; margin:0 0 8px 0;">📤 Withdrawal Rules</p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;">• Minimum Withdrawal: <b style="color:var(--gold);">25000 🪙</b></p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0 0 4px 0;" id="help-ref-rule">• Referral Requirement: <b style="color:var(--gold);">5 Users</b></p>
+                    <p style="font-size:13px; color:var(--text-primary); margin:0;">• Cooldown: <b style="color:var(--gold);">1 Request per 24 Hours</b></p>
+                </div>
+
+                <div class="notice-red">
+                    <p style="font-size:14px; font-weight:700; color:#f87171; text-align:center; margin:0 0 8px 0;">⚠️ Warning ⚠️</p>
+                    <p style="font-size:12px; color:var(--text-primary); text-align:center; margin:0 0 4px 0;">Using multiple accounts is <b style="color:#f87171;">strictly prohibited.</b></p>
+                    <p style="font-size:12px; color:var(--text-primary); text-align:center; margin:0 0 8px 0;">Detected accounts will be <b style="color:#f87171;">suspended.</b></p>
+                    <div style="background:rgba(239,68,68,0.12); border-radius:8px; padding:8px; text-align:center;">
+                        <p style="font-size:15px; font-weight:700; color:#f87171; margin:0;">Penalty: Account Block</p>
+                    </div>
+                    <p style="font-size:11px; color:var(--text-muted); text-align:center; margin:8px 0 0 0;">Please earn fair 🙏</p>
+                </div>
+
+            </div>
+        </div>
+
         <div class="card c-blue">
             <h4 style="margin-bottom:6px; color:#7dd3fc;">💬 Support</h4>
             <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">Tap the button below to message the admin directly on Telegram.</p>
@@ -1983,9 +2021,8 @@
         <div class="nav-item" id="nav-tasks" onclick="switchTab('tasks', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
             <span style="font-size:20px;">✅</span><span>Tasks</span>
         </div>
-        <div class="nav-item" id="nav-leaderboard" onclick="openTournamentHub(event)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;position:relative;">
-            <span style="font-size:20px;">🎮</span><span>Tournament</span>
-            <span id="t-trophy-dot" style="display:none; position:absolute; top:2px; right:10px; width:7px; height:7px; background:#ef4444; border-radius:50%; border:1.5px solid #0a0e1a;"></span>
+        <div class="nav-item" id="nav-leaderboard" onclick="switchTab('leaderboard', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
+            <span style="font-size:20px;">🏆</span><span>Top</span>
         </div>
         <div class="nav-item" id="nav-refer" onclick="switchTab('refer', this)" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:5px 10px;border-radius:12px;font-size:10px;color:#94a3b8;gap:2px;transition:all 0.2s;">
             <span style="font-size:20px;">👥</span><span>Refer</span>
@@ -2515,7 +2552,7 @@
 
     <!-- Cache-bust query param: bump v=N every time you deploy a change -->
     <script src="config.js?v=4"></script>
-    <script src="script.js?v=10"></script>
+    <script src="script.js?v=7"></script>
 
     <!-- All profile patches (mining dots, premium lock, ads count, tournaments)
          are handled directly in script.js — no inline patch needed. -->
