@@ -54,6 +54,27 @@ if (typeof CONFIG === 'undefined') {
     window.CONFIG = CONFIG;
 }
 
+// ── Telegram auth header ────────────────────────────────────────────────
+// Backend ab har user-specific request par Telegram ka signed initData verify
+// karta hai (taaki koi dusre ka user_id bhej kar uske coins na nikal sake).
+// Ek jagah se saari API calls (fetch + fetchWithRetry) mein header jod do.
+(function installTelegramAuthFetch() {
+    const _origFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+        try {
+            const url  = typeof input === 'string' ? input : ((input && input.url) || '');
+            const base = String(CONFIG.API_BASE_URL || '');
+            if (base && url.startsWith(base) && tg && tg.initData) {
+                init = init ? { ...init } : {};
+                const h = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {});
+                h.set('X-Telegram-Init-Data', tg.initData);
+                init.headers = h;
+            }
+        } catch (_) { /* auth header best-effort; backend decide karega */ }
+        return _origFetch(input, init);
+    };
+})();
+
 const userId = tg.initDataUnsafe?.user?.id;
 
 window.USER_ID = userId;
@@ -1154,7 +1175,7 @@ async function doSpin() {
     try {
         await requireAdWatch();
     } catch (e) {
-        showToast('📺 Watch the full ad to spin!', 'error');
+        showToast('📺 Watch the full ad to spin!' + (window._lastAdErr ? ' [' + window._lastAdErr + ']' : ''), 'error');
         _pendingRequests.delete('doSpin');
         if (btn) { btn.disabled = false; btn.innerText = '🎡 Watch Ad & Spin'; }
         return;
@@ -1573,6 +1594,7 @@ async function loadVipTasks() {
         const data = await res.json();
         const tasks   = data.tasks   || [];
         const claimed = data.claimed || [];
+        (data.visited || []).forEach(id => _vipTaskVisited.add(id));
 
         if (!tasks.length) {
             list.innerHTML = '<p style="color:#475569;text-align:center;font-size:13px;padding:10px 0;">No VIP tasks available yet.</p>';
@@ -1620,6 +1642,11 @@ async function loadVipTasks() {
 function _openVipTaskLink(taskId, url) {
     openExternalLink(url);
     _vipTaskVisited.add(taskId);
+    // Server ko batao ki link khola gaya (claim ke waqt server check karta hai)
+    fetch(`${CONFIG.API_BASE_URL}/vip_task_visit`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({user_id: userId, task_id: taskId}),
+    }).catch(() => {});
     const btn = document.querySelector(`.vip-task-claim-btn[data-task-id="${taskId}"]`);
     if (btn && !btn.classList.contains('completed')) {
         btn.disabled = false;
@@ -2284,6 +2311,13 @@ function openTask(taskKey, type) {
                : type === 'partner' ? CONFIG.PARTNER_LINKS?.[taskKey]
                : CONFIG.WEB_LINKS[taskKey];
     if (link && link !== '#') {
+        if (type === 'web' && userId) {
+            // Server ko visit record karao (verify ke waqt check hota hai)
+            fetch(`${CONFIG.API_BASE_URL}/task_visit`, {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({user_id: userId, task_id: taskKey}),
+            }).catch(() => {});
+        }
         openExternalLink(link);
     } else {
         showToast("Link will be updated soon!", "error");
@@ -2582,14 +2616,26 @@ async function claimAllBonus() {
 // MANDATORY AD GATE
 // ============================================================
 async function requireAdWatch() {
+    window._lastAdErr = '';
     if (!CONFIG.CLAIM_AD_ENABLED) return;
     const zoneId = getMonetagZoneId();
-    if (!zoneId) throw new Error('ad_config_missing');
-    try { await loadMonetagSdk(); } catch (e) { throw new Error('ad_sdk_failed'); }
+    if (!zoneId) { window._lastAdErr = 'zone_id_missing'; throw new Error('ad_config_missing'); }
+    try { await loadMonetagSdk(); } catch (e) { window._lastAdErr = 'sdk_load_failed'; throw new Error('ad_sdk_failed'); }
     const showMonetagAd = getMonetagShowFunction();
-    if (!showMonetagAd) throw new Error('ad_function_missing');
-    const result = await showMonetagAd({ ymid: String(userId), requestVar: 'claim_gate' });
-    if (!result?.reward_event_type || result.reward_event_type !== 'valued') throw new Error('ad_skipped');
+    if (!showMonetagAd) { window._lastAdErr = 'show_fn_missing'; throw new Error('ad_function_missing'); }
+    let result;
+    try {
+        result = await showMonetagAd({ ymid: String(userId), requestVar: 'claim_gate' });
+    } catch (e) {
+        // Monetag rejects when no ad is available / ad failed / user closed it
+        window._lastAdErr = 'monetag_rejected:' + String((e && (e.message || e.reason)) || e || 'unknown').slice(0, 40);
+        console.warn('Monetag ad error:', e);
+        throw new Error('ad_failed');
+    }
+    if (!result?.reward_event_type || result.reward_event_type !== 'valued') {
+        window._lastAdErr = 'not_valued:' + String(result?.reward_event_type || 'none');
+        throw new Error('ad_skipped');
+    }
 }
 
 // 10-second cooldown after ad — shows countdown on button
@@ -3761,7 +3807,7 @@ async function loadTournamentData(forceRefresh) {
 
         // Update trophy dot
         const dot  = document.getElementById('t-trophy-dot');
-        const tBtn = document.getElementById('tournament-trophy-btn');
+        const tBtn = document.getElementById('nav-leaderboard');
         const hasActive = _allTournaments.some(t => ['registration_open','match_live'].includes(t.status));
         if (dot) dot.style.display = hasActive ? 'block' : 'none';
         if (tBtn) tBtn.classList.toggle('has-active', hasActive);
@@ -3903,15 +3949,30 @@ function _renderTournament(t, winners, roundsData) {
 
     let html = '';
 
-    // ── Title + meta banner
+    // ── Hero card (theme.css: .t-hero*) — status, title, tags, prize
+    const _hBadgeCls   = { coming_soon:'', registration_open:'reg-open', registration_closed:'reg-closed', match_live:'match-live', completed:'completed' }[t.status] || '';
+    const _hBadgeLabel = { coming_soon:'🔜 Coming Soon', registration_open:'✅ Registration Open', registration_closed:'🔒 Registration Closed', match_live:'🔴 Match Live', completed:'🏆 Completed' }[t.status] || _esc(t.status || '');
+    const _hFirstPrize = (t.prizes || []).find(p => (p.rank || 1) === 1);
+    const _prizeTileText = _hFirstPrize ? (_hFirstPrize.prize || '') : (t.prize_pool || '');
     html += `
-    <div style="padding:14px 16px 0;">
-        <h2 style="color:#e2e8f0;font-size:18px;font-weight:800;margin:0 0 2px;">${_esc(t.title || 'Free Fire Tournament')}</h2>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+    <div class="t-hero">
+        <div class="t-hero-top">
+            <span class="t-hero-badge ${_hBadgeCls}">${_hBadgeLabel}</span>
+            ${t.entry_fee == 0 ? `<span class="t-hero-chip">🆓 Free Entry</span>` : `<span class="t-hero-chip" style="color:#f1c40f;background:rgba(241,196,15,0.12);border-color:rgba(241,196,15,0.35);">💰 ${t.entry_fee} 🪙 Entry</span>`}
+        </div>
+        <h2 class="t-hero-title">${_esc(t.title || 'Free Fire Tournament')}</h2>
+        <div class="t-hero-tags">
             ${t.mode ? `<span style="background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);border-radius:8px;padding:3px 10px;font-size:11px;color:#a78bfa;font-weight:700;">🎮 ${_esc(t.mode)}</span>` : ''}
             ${t.map  ? `<span style="background:rgba(56,189,248,0.10);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#38bdf8;font-weight:700;">🗺️ ${_esc(t.map)}</span>`  : ''}
-            ${t.entry_fee == 0 ? `<span style="background:rgba(74,222,128,0.10);border:1px solid rgba(74,222,128,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#4ade80;font-weight:700;">🆓 Free Entry</span>` : `<span style="background:rgba(241,196,15,0.10);border:1px solid rgba(241,196,15,0.25);border-radius:8px;padding:3px 10px;font-size:11px;color:#f1c40f;font-weight:700;">💰 ${t.entry_fee} 🪙 Entry</span>`}
         </div>
+        ${_prizeTileText ? `
+        <div class="t-hero-prize">
+            <span class="t-hero-prize-icon">🏆</span>
+            <div>
+                <p class="t-hero-prize-lbl">${_hFirstPrize ? '1st Prize' : 'Prize Pool'}</p>
+                <p class="t-hero-prize-val">${_esc(_prizeTileText)}</p>
+            </div>
+        </div>` : ''}
     </div>`;
 
     // ── Description (if set)
@@ -3931,16 +3992,11 @@ function _renderTournament(t, winners, roundsData) {
     const _roundColor  = t.status === 'match_live' ? '#f87171' : '#38bdf8';
     const _roundTileLabel = t.status === 'match_live' ? '🔴 Current Round' : '🔄 Total Rounds';
 
-    // ── Prize tile text (dynamic): prefer 1st-place individual prize, else prize_pool, else fallback
-    const _firstPrize   = (t.prizes || []).find(p => (p.rank || 1) === 1);
-    const _prizeTileText = _firstPrize ? (_firstPrize.prize || '—')
-                          : (t.prize_pool ? t.prize_pool : 'TBA');
-
     html += `
     <div class="t-stats-grid">
         <div class="t-stat-tile">
-            <p class="t-lbl">👥 Registered</p>
-            <p class="t-val" style="color:#4ade80;">${t.registered_count || 0}</p>
+            <p class="t-lbl">👥 Teams Registered</p>
+            <p class="t-val" style="color:#4ade80;">${t.registered_count || 0}${t.max_slots > 0 ? ' / ' + t.max_slots : ''}</p>
         </div>
         <div class="t-stat-tile">
             <p class="t-lbl">🎯 Slots Left</p>
@@ -3948,7 +4004,7 @@ function _renderTournament(t, winners, roundsData) {
         </div>
         <div class="t-stat-tile">
             <p class="t-lbl">🏟️ Max Players</p>
-            <p class="t-val">${t.max_players || '—'}</p>
+            <p class="t-val">${t.max_players || '—'}${t.team_size > 1 ? ' <span style="font-size:10px;color:#64748b;">(' + t.team_size + '/team)</span>' : ''}</p>
         </div>
         <div class="t-stat-tile">
             <p class="t-lbl">${_roundTileLabel}</p>
@@ -3956,10 +4012,6 @@ function _renderTournament(t, winners, roundsData) {
         </div>
         ${t.date ? `<div class="t-stat-tile"><p class="t-lbl">📅 Date</p><p class="t-val" style="font-size:12px;">${_esc(t.date)}</p></div>` : ''}
         ${t.time ? `<div class="t-stat-tile"><p class="t-lbl">⏰ Time</p><p class="t-val" style="font-size:12px;">${_esc(t.time)}</p></div>` : ''}
-        <div class="t-stat-tile">
-            <p class="t-lbl">🏆 Prize</p>
-            <p class="t-val" style="font-size:11px;color:#f1c40f;">${_esc(_prizeTileText)}</p>
-        </div>
     </div>`;
 
     html += '<div class="t-body">';
@@ -3982,13 +4034,6 @@ function _renderTournament(t, winners, roundsData) {
                 </div>
             </div>`;
         });
-    } else if (t.prize_pool) {
-        html += `
-        <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 8px;">🎁 Prize Pool</p>
-        <div style="background:linear-gradient(135deg,rgba(241,196,15,0.08),rgba(251,146,60,0.05));border:1px solid rgba(241,196,15,0.25);border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:10px;">
-            <span style="font-size:26px;">🏆</span>
-            <p style="font-size:15px;font-weight:800;color:#f1c40f;margin:0;">${_esc(t.prize_pool)}</p>
-        </div>`;
     }
 
     // ── Winners section (only if completed)
@@ -4970,7 +5015,7 @@ function _showTournamentTnC(onAccept) {
 
                 <p style="margin:10px 0 8px;color:#cbd5e1;font-weight:700;">💰 Prize & Payout</p>
                 <p style="margin:0 0 6px;">• Prize is credited to your in-app Rupee Wallet within 24 hours of result declaration.</p>
-                <p style="margin:0 0 6px;">• Cdotern reserves the right to disqualify any suspicious account without prior notice.</p>
+                <p style="margin:0 0 6px;">• Daksh Grand Earn reserves the right to disqualify any suspicious account without prior notice.</p>
 
                 <p style="margin:10px 0 8px;color:#cbd5e1;font-weight:700;">⚠️ Disclaimer</p>
                 <p style="margin:0;">• By registering, you confirm that you are eligible to participate and you accept all rules without exception.</p>
@@ -5153,7 +5198,7 @@ async function _initTournamentIndicator() {
 
         const hasActive = _allTournaments.some(t => ['registration_open','match_live'].includes(t.status));
         const dot  = document.getElementById('t-trophy-dot');
-        const tBtn = document.getElementById('tournament-trophy-btn');
+        const tBtn = document.getElementById('nav-leaderboard');
         if (dot) dot.style.display = hasActive ? 'block' : 'none';
         if (tBtn) tBtn.classList.toggle('has-active', hasActive);
 
