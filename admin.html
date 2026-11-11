@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>Command Deck — Daksh Grand Earn</title>
+<title>Command Deck — Cdotern</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -266,7 +266,7 @@ input,select,textarea{font-family:var(--body);}
   <div class="terminal">
     <div class="term-badge"><span class="term-dot"></span> RESTRICTED ACCESS</div>
     <h1>Command<br>Deck</h1>
-    <p class="sub">Daksh Grand Earn — Operator authentication required to reach live controls.</p>
+    <p class="sub">Cdotern — Operator authentication required to reach live controls.</p>
     <div class="field">
       <label>Access Token</label>
       <div class="scan-wrap" id="scanWrap">
@@ -282,7 +282,7 @@ input,select,textarea{font-family:var(--body);}
   <div class="shell">
     <nav class="rail">
       <div class="rail-brand">
-        <div class="b-eyebrow">Daksh Grand Earn</div>
+        <div class="b-eyebrow">Cdotern</div>
         <h2>Command Deck</h2>
       </div>
       <div class="nav-item active" data-sec="overview" onclick="goSection('overview')"><span class="dot"></span>Overview</div>
@@ -430,7 +430,7 @@ input,select,textarea{font-family:var(--body);}
               <div class="field"><label>Title</label><input id="tc-title" placeholder="Free Fire Squad Clash"></div>
             </div>
             <div class="field-row">
-              <div class="field"><label>Mode</label><input id="tc-mode" placeholder="Squad / Duo / Solo" value="Squad"></div>
+              <div class="field"><label>Mode</label><select id="tc-mode" onchange="updatePlayersHint()"><option value="Squad">Squad (4 per team)</option><option value="Duo">Duo (2 per team)</option><option value="Solo">Solo (1 per player)</option></select></div>
               <div class="field"><label>Map</label><input id="tc-map" placeholder="Bermuda" value="Bermuda"></div>
             </div>
             <div class="field-row">
@@ -439,7 +439,7 @@ input,select,textarea{font-family:var(--body);}
             </div>
             <div class="field-row">
               <div class="field"><label>Entry Fee (coins)</label><input id="tc-fee" type="number" value="0"></div>
-              <div class="field"><label>Max Players</label><input id="tc-max" type="number" value="50"></div>
+              <div class="field"><label>Max Slots (teams)</label><input id="tc-max" type="number" value="12" min="1" oninput="updatePlayersHint()"><div id="tc-players-hint" class="m-sub" style="margin:6px 0 0;"></div></div>
             </div>
             <div class="field-row">
               <div class="field"><label>Total Rounds (1–10)</label><input id="tc-rounds" type="number" value="1" min="1" max="10"></div>
@@ -876,7 +876,7 @@ async function loadTournaments(){
     <div class="row">
       <div class="rmain">
         <div class="rname">${_esc(t.title)} <span class="mono" style="color:var(--text-faint);font-size:11px;">${_esc(t.tournament_id)}</span></div>
-        <div class="rmeta">${_esc(t.mode)} · ${_esc(t.map)} · ${_esc(t.date)} ${_esc(t.time)} · ${_esc(t.registered_count ?? 0)} registered</div>
+        <div class="rmeta">${_esc(t.mode)} · ${_esc(t.map)} · ${_esc(t.date)} ${_esc(t.time)} · ${_esc(t.registered_count ?? 0)}/${_esc(t.max_slots ?? '—')} teams registered</div>
       </div>
       <span class="badge badge-amber">${_esc((t.status||'').replace(/_/g,' '))}</span>
     </div>`).join('');
@@ -890,7 +890,7 @@ async function saveTournament(){
     date: document.getElementById('tc-date').value.trim(),
     time: document.getElementById('tc-time').value.trim(),
     entry_fee: Number(document.getElementById('tc-fee').value || 0),
-    max_players: Number(document.getElementById('tc-max').value || 50),
+    max_slots: Math.max(1, Number(document.getElementById('tc-max').value || 12)),
     total_rounds: Number(document.getElementById('tc-rounds').value || 1),
     status: document.getElementById('tc-status').value,
     prize_pool: document.getElementById('tc-prizepool').value.trim(),
@@ -900,6 +900,13 @@ async function saveTournament(){
   const data = await api('/admin/tournament', {method:'POST', body: JSON.stringify(payload)});
   if (data){ toast(data.message || 'Tournament saved.', true); loadTournaments(); }
 }
+function updatePlayersHint(){
+  const mode = document.getElementById('tc-mode').value;
+  const per = mode === 'Squad' ? 4 : mode === 'Duo' ? 2 : 1;
+  const slots = Math.max(1, Number(document.getElementById('tc-max').value || 0));
+  document.getElementById('tc-players-hint').textContent = slots + ' slots × ' + per + ' = ' + (slots * per) + ' players';
+}
+updatePlayersHint();
 async function setTournamentRoom(){
   const payload = { tournament_id: document.getElementById('tr-id').value.trim(), room_id: document.getElementById('tr-room').value.trim(), room_password: document.getElementById('tr-pass').value.trim() };
   if (!payload.tournament_id){ toast('Enter tournament ID.', false); return; }
