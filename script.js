@@ -4172,11 +4172,11 @@ function _renderTournament(t, winners, roundsData) {
                 <button class="t-reg-btn" id="t-reg-btn" onclick="registerForTournament()">${btnLabel}</button>`;
 
             } else if (isSquad) {
-                // ── Squad form: Team Name + 4 members (2 required, 2 optional) ──
+                // ── Squad form: Team Name + 4 members (all 4 compulsory) ──
                 const memberFields = [1,2,3,4].map(i => `
                 <div style="margin-bottom:10px;">
                     <p style="font-size:11px;font-weight:700;color:#64748b;margin:0 0 5px;">
-                        ${i === 1 ? '👑 Member 1 — You (Leader)' : `👤 Member ${i}${i > 2 ? ' <span style="color:#475569;">(Optional)</span>' : ''}`}
+                        ${i === 1 ? '👑 Member 1 — You (Leader)' : `👤 Member ${i}`}
                     </p>
                     <div style="display:flex;gap:6px;">
                         <input class="t-input" id="t-m${i}-uid"  type="text" inputmode="numeric"
@@ -4190,7 +4190,7 @@ function _renderTournament(t, winners, roundsData) {
                 <p style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">🛡️ Register Squad</p>
                 ${feeBox}
                 <input class="t-input" id="t-team-name" type="text" placeholder="Team Name (e.g. Alpha Squad)" maxlength="30" />
-                <p style="font-size:11px;font-weight:700;color:#64748b;margin:8px 0 6px;border-top:1px solid rgba(255,255,255,0.05);padding-top:8px;">👥 Squad Members (2–4)</p>
+                <p style="font-size:11px;font-weight:700;color:#64748b;margin:8px 0 6px;border-top:1px solid rgba(255,255,255,0.05);padding-top:8px;">👥 Squad Members (all 4 required)</p>
                 ${memberFields}
                 <p id="t-reg-msg" style="font-size:12px;color:#94a3b8;min-height:18px;margin:0 0 10px;text-align:center;"></p>
                 <button class="t-reg-btn" id="t-reg-btn" onclick="registerForTournament()">${btnLabel}</button>`;
@@ -5007,15 +5007,27 @@ function _showTournamentTnC(onAccept) {
                 font-size:12.5px; color:#94a3b8; line-height:1.7;
             ">
                 <p style="margin:0 0 8px;color:#cbd5e1;font-weight:700;">📋 General Rules</p>
-                <p style="margin:0 0 6px;">• Entry fee is <b style="color:#f87171;">non-refundable</b> once registration is confirmed.</p>
+                <p style="margin:0 0 6px;">• Entry fee is <b style="color:#f87171;">non-refundable</b> once registration is confirmed. If the organizer <b style="color:#4ade80;">cancels</b> the tournament, your entry fee is returned as coins.</p>
                 <p style="margin:0 0 6px;">• Players must use their own Free Fire UID & Nickname. Fake details will lead to <b>disqualification</b>.</p>
-                <p style="margin:0 0 6px;">• Cheating, hacking, or using any unfair means is strictly prohibited. Violators will be permanently banned.</p>
+                <p style="margin:0 0 6px;">• Cheating, hacking, <b style="color:#f87171;">panels</b>, scripts, mods, bug abuse or any unfair means is strictly prohibited. Violators will be permanently banned.</p>
                 <p style="margin:0 0 6px;">• You must join the in-game room on time. Late entries will not be accommodated.</p>
-                <p style="margin:0 0 6px;">• Results declared by the organizer are <b>final</b> and cannot be disputed.</p>
+                <p style="margin:0 0 6px;">• Results declared by the organizer are <b>final</b>. Report a wrong result or a cheater to support right after the match, with proof.</p>
+
+                <p style="margin:10px 0 8px;color:#cbd5e1;font-weight:700;">🛡️ Team Rules</p>
+                <p style="margin:0 0 6px;">• <b style="color:#f1c40f;">Squad needs exactly 4 players</b> (Duo: 2). Without a full team, registration is not possible.</p>
+                <p style="margin:0 0 6px;">• Every player needs a <b>different, valid FF UID</b>. Players cannot be swapped after registering.</p>
+                <p style="margin:0 0 6px;">• One person can play in only one team per tournament.</p>
+                <p style="margin:0 0 6px;">• The team leader is responsible for team details and for sharing the prize with teammates.</p>
+
+                <p style="margin:10px 0 8px;color:#cbd5e1;font-weight:700;">🚪 Room & Proof</p>
+                <p style="margin:0 0 6px;">• Never share the Room ID & password with anyone outside your team.</p>
+                <p style="margin:0 0 6px;">• The organizer may ask for a screen recording or screenshots. <b>Refusing to share proof can lead to disqualification.</b></p>
+                <p style="margin:0 0 6px;">• Disconnects, lag and network or device issues are the player's own responsibility.</p>
+                <p style="margin:0 0 6px;">• Disqualified teams forfeit their prize and entry fee.</p>
 
                 <p style="margin:10px 0 8px;color:#cbd5e1;font-weight:700;">💰 Prize & Payout</p>
                 <p style="margin:0 0 6px;">• Prize is credited to your in-app Rupee Wallet within 24 hours of result declaration.</p>
-                <p style="margin:0 0 6px;">• Daksh Grand Earn reserves the right to disqualify any suspicious account without prior notice.</p>
+                <p style="margin:0 0 6px;">• Cdotern reserves the right to disqualify any suspicious account without prior notice.</p>
 
                 <p style="margin:10px 0 8px;color:#cbd5e1;font-weight:700;">⚠️ Disclaimer</p>
                 <p style="margin:0;">• By registering, you confirm that you are eligible to participate and you accept all rules without exception.</p>
@@ -5112,8 +5124,6 @@ async function registerForTournament() {
         for (let i = 1; i <= maxSlots; i++) {
             const mUid  = (document.getElementById(`t-m${i}-uid`)?.value  || '').trim();
             const mNick = (document.getElementById(`t-m${i}-nick`)?.value || '').trim();
-            // For squad: M3/M4 are optional — skip if both empty
-            if (!isDuoForm && i > 2 && !mUid && !mNick) continue;
             if (!mUid || !mNick) {
                 const label = isDuoForm ? `Player ${i}` : `Member ${i}`;
                 if (msg) { msg.style.color = '#ef4444'; msg.textContent = `⚠️ ${label}: FF UID and FF Name are both required.`; }
@@ -5126,9 +5136,14 @@ async function registerForTournament() {
             }
             members.push({ ff_uid: mUid, ff_nickname: mNick });
         }
-        const minNeeded = isDuoForm ? 2 : 2;
+        const minNeeded = isDuoForm ? 2 : 4;
         if (members.length < minNeeded) {
-            if (msg) { msg.style.color = '#ef4444'; msg.textContent = `⚠️ Minimum ${minNeeded} players required.`; }
+            if (msg) { msg.style.color = '#ef4444'; msg.textContent = isDuoForm ? '⚠️ Duo ke liye 2 players chahiye.' : '⚠️ Squad ke liye 4 players compulsory hain.'; }
+            return;
+        }
+
+        if (new Set(members.map(m => m.ff_uid)).size !== members.length) {
+            if (msg) { msg.style.color = '#ef4444'; msg.textContent = '⚠️ Same FF UID do baar nahi ho sakta. Sabke alag UID daalo.'; }
             return;
         }
 
