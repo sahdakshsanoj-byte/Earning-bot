@@ -5377,6 +5377,14 @@ def claim_milestone_api(user_id: int):
 # TOURNAMENT HUB API ENDPOINTS
 # ============================================================
 
+def _fmt_ist(dt, fmt: str = "%d %b %Y, %I:%M %p") -> str:
+    """UTC datetime (DB me stored) ko IST me convert karke string banao."""
+    try:
+        return (dt + timedelta(hours=5, minutes=30)).strftime(fmt) + " IST"
+    except Exception:
+        return ""
+
+
 def _parse_tournament_datetime(date_str: str, time_str: str):
     """Best-effort parse of the free-text Date + Time fields (as typed by the
     admin in /createtournament, e.g. "20 June 2026" + "7:00 PM") into a UTC
@@ -5570,7 +5578,7 @@ def _tournament_register_impl():
                 return jsonify({"status": "error", "message": "Team name required."}), 400
 
             # Member count limits per mode
-            min_m = 2
+            min_m = 2 if is_duo else 4      # Squad: 4 players compulsory
             max_m = 2 if is_duo else 4
 
             if not isinstance(raw_members, list) or len(raw_members) < min_m:
@@ -5587,6 +5595,10 @@ def _tournament_register_impl():
                 if not re.match(r"^\d{5,15}$", m_uid):
                     return jsonify({"status": "error", "message": f"Member {i}: FF UID sirf 5-15 digits hona chahiye."}), 400
                 members.append({"ff_uid": m_uid, "ff_nickname": m_nick})
+
+            # Ek hi FF UID team me do baar nahi ho sakta
+            if len({m["ff_uid"] for m in members}) != len(members):
+                return jsonify({"status": "error", "message": "Team me same FF UID do baar nahi ho sakta. Sabke alag UID daalo."}), 400
 
             reg_type = "duo" if is_duo else "squad"
             reg_doc  = {
@@ -5838,7 +5850,7 @@ def my_tournament_registration_api(user_id: int):
         if not reg:
             return jsonify({"status": "success", "registered": False})
         if isinstance(reg.get("registered_at"), datetime):
-            reg["registered_at"] = reg["registered_at"].strftime("%d %b %Y, %H:%M")
+            reg["registered_at"] = _fmt_ist(reg["registered_at"])
         return jsonify({"status": "success", "registered": True, "data": reg})
     except Exception as exc:
         logger.error("my_tournament_registration_api error for %s: %s", user_id, exc)
@@ -5904,7 +5916,11 @@ def admin_create_tournament_api():
                               * _team_size_for_mode(sanitize_text(data.get("mode", "Squad"), max_length=30)),
             "prize_pool":     sanitize_text(data.get("prize_pool", ""), max_length=200),
             "description":    sanitize_text(data.get("description", ""), max_length=600),
-            "prizes":         data.get("prizes", []),
+            # Update karte waqt prizes/room wipe na ho: bheje na ho to purane rakho
+            "prizes":         data.get("prizes", existing.get("prizes", []) if existing else []),
+            "match_time":     _parse_tournament_datetime(sanitize_text(data.get("date", ""), max_length=30),
+                                                         sanitize_text(data.get("time", ""), max_length=30))
+                              or (existing.get("match_time") if existing else None),
             "total_rounds":   new_total_rounds,
             "status":         data.get("status", "coming_soon") if existing else "coming_soon",
             "active":         True,
@@ -6051,7 +6067,7 @@ def admin_tournament_registrations_api():
         )
         for r in regs:
             if isinstance(r.get("registered_at"), datetime):
-                r["registered_at"] = r["registered_at"].strftime("%d %b %Y, %H:%M")
+                r["registered_at"] = _fmt_ist(r["registered_at"])
         return jsonify({"status": "success", "tournament_id": tid, "data": regs, "total": len(regs)})
     except Exception as exc:
         logger.error("admin_tournament_registrations_api error: %s", exc)
@@ -7212,7 +7228,7 @@ def get_stats(message):
             top_name = top_name.replace(ch, "\\" + ch)
 
         text = (
-            "\U0001f4ca *Daksh Grand Earn — Full Stats*\n"
+            "\U0001f4ca *Cdotern — Full Stats*\n"
             "\n"
             "\U0001f465 *Users*\n"
             f"  Total: `{total_users:,}`\n"
@@ -8897,7 +8913,7 @@ def cmd_tournament_regs(message):
             reg_time = ""
             if r.get("registered_at"):
                 try:
-                    reg_time = r["registered_at"].strftime("%d %b %H:%M")
+                    reg_time = _fmt_ist(r["registered_at"], "%d %b %I:%M %p")
                 except Exception:
                     reg_time = ""
 
