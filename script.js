@@ -4110,7 +4110,8 @@ function _renderTournament(t, winners, roundsData) {
                     </p>`
                 ).join('');
                 const teamIdRow = rd.team_id
-                    ? `<p style="font-size:12px;margin:6px 0 4px;"><span style="color:#a78bfa;font-weight:700;">🛡️ Team ID:</span> <b style="color:#e2e8f0;letter-spacing:1px;">${_esc(rd.team_id)}</b></p>`
+                    ? `<p style="font-size:12px;margin:6px 0 2px;"><span style="color:#fbbf24;font-weight:700;">🏆 Tournament ID:</span> <b style="color:#e2e8f0;letter-spacing:1px;">${_esc(_selectedTid||'')}</b></p>
+                       <p style="font-size:12px;margin:2px 0 4px;"><span style="color:#a78bfa;font-weight:700;">🛡️ Team ID:</span> <b style="color:#e2e8f0;letter-spacing:1px;">${_esc(rd.team_id)}</b></p>`
                     : '';
                 regDetails = `
                     ${teamIdRow}
@@ -4208,6 +4209,14 @@ function _renderTournament(t, winners, roundsData) {
 
     } else if (t.status === 'registration_closed') {
         const reg = _tournamentRegCache[_selectedTid] || { registered: false };
+        // Countdown registration close hone ke baad bhi match live hone tak chalta rehta hai
+        if (t.match_time_iso) {
+            html += `
+            <div id="match-countdown-box" style="text-align:center;padding:12px 14px;background:rgba(241,196,15,0.08);border:1px solid rgba(241,196,15,0.3);border-radius:12px;margin-bottom:12px;">
+                <p style="font-size:11px;color:#94a3b8;margin:0 0 4px;text-transform:uppercase;letter-spacing:0.5px;">⏱ Match Starts In</p>
+                <p id="match-countdown-timer" style="font-size:20px;font-weight:800;color:#f1c40f;margin:0;font-variant-numeric:tabular-nums;letter-spacing:1px;">--:--:--</p>
+            </div>`;
+        }
         html += `
         <div style="text-align:center;padding:24px 16px;background:rgba(251,146,60,0.05);border:1px solid rgba(251,146,60,0.20);border-radius:14px;">
             <span class="t-lock-icon" style="font-size:38px;margin-bottom:10px;display:block;">🔒</span>
@@ -4232,6 +4241,19 @@ function _renderTournament(t, winners, roundsData) {
         // match shuru hone se pehle. Ab Team ID + registration type bhi dikhate hain.
         if (reg && reg.registered) {
             const rd4 = reg.data || {};
+            const tidBlock4 = _selectedTid
+                ? `<div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;
+                               padding:8px 12px;background:rgba(251,191,36,0.08);
+                               border:1px solid rgba(251,191,36,0.25);border-radius:10px;">
+                       <div>
+                           <p style="font-size:10px;color:#fbbf24;margin:0 0 2px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">🏆 Tournament ID</p>
+                           <p style="font-size:22px;font-weight:900;color:#e2e8f0;margin:0;letter-spacing:1px;">${_esc(_selectedTid)}</p>
+                       </div>
+                       <button onclick="navigator.clipboard.writeText('${_esc(_selectedTid)}').then(()=>showToast('Tournament ID copied! ✅','success'))"
+                           style="background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.35);
+                                  border-radius:8px;padding:6px 12px;color:#fbbf24;font-size:11px;font-weight:700;cursor:pointer;">📋 Copy</button>
+                   </div>`
+                : '';
             const teamIdBlock4 = rd4.team_id
                 ? `<div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;
                                padding:8px 12px;background:rgba(139,92,246,0.10);
@@ -4252,6 +4274,7 @@ function _renderTournament(t, winners, roundsData) {
             <div class="t-registered-badge" style="margin-top:10px;">
                 <p style="font-size:13px;font-weight:800;color:#4ade80;margin:0 0 4px;">✅ You are registered!</p>
                 ${regTypeLabel4}
+                ${tidBlock4}
                 ${teamIdBlock4}
                 <p style="font-size:11px;color:#64748b;margin-top:8px;">Room ID & Password will be shared before match time. Keep your Team ID ready!</p>
             </div>`;
@@ -4398,10 +4421,9 @@ function _renderTournament(t, winners, roundsData) {
     </div>`;  // close t-body
 
     content.innerHTML = html;
-    // Countdown only applies while registration is open; any other status
-    // (registration_closed, match_live, etc.) stops it — matches "registration
-    // open tak → match live hone tak" requirement.
-    _startMatchCountdown(t.status === 'registration_open' ? t.match_time_iso : null);
+    // Countdown registration open aur registration closed dono me chalta hai (match live hone tak);
+    // match_live / completed par band ho jata hai.
+    _startMatchCountdown((t.status === 'registration_open' || t.status === 'registration_closed') ? t.match_time_iso : null);
 }
 
 let _matchCountdownInterval = null;
@@ -4525,6 +4547,7 @@ async function openTournamentLeaderboard(tid) {
         if (data.status !== 'success') throw new Error(data.message || 'API error');
 
         const board       = data.leaderboard || [];
+        const kp          = Number(data.kill_prize || 0);   // ₹ per kill (0 = points mode)
         const totalRounds = data.total_rounds || 1;
         const rankEmoji   = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
@@ -4591,7 +4614,7 @@ async function openTournamentLeaderboard(tid) {
                 <span style="flex:2;font-size:10px;color:#64748b;font-weight:700;">TEAM</span>
                 ${roundCols}
                 <span style="flex:1;text-align:center;font-size:10px;color:#64748b;font-weight:700;">KILLS</span>
-                <span style="flex:1;text-align:center;font-size:10px;color:#f1c40f;font-weight:700;">PTS</span>
+                <span style="flex:1;text-align:center;font-size:10px;color:#f1c40f;font-weight:700;">${kp > 0 ? 'PRIZE' : 'PTS'}</span>
             </div>`;
 
             board.forEach(row => {
@@ -4616,7 +4639,7 @@ async function openTournamentLeaderboard(tid) {
                     </div>
                     ${roundPts}
                     <span style="flex:1;text-align:center;font-size:12px;color:#94a3b8;font-weight:700;">${row.total_kills ?? 0}</span>
-                    <span style="flex:1;text-align:center;font-size:13px;color:#f1c40f;font-weight:900;">${row.total_points ?? 0}</span>
+                    <span style="flex:1;text-align:center;font-size:13px;color:#f1c40f;font-weight:900;">${kp > 0 ? '₹' + (row.kill_earnings ?? 0) : (row.total_points ?? 0)}</span>
                 </div>`;
             });
         }
@@ -4775,6 +4798,7 @@ async function viewPublicLeaderboard() {
         }
 
         const board = data.leaderboard || [];
+        const kp    = Number(data.kill_prize || 0);   // ₹ per kill (0 = points mode)
 
         // Leaderboard not available yet (empty results)
         if (board.length === 0) {
@@ -4883,8 +4907,8 @@ async function viewPublicLeaderboard() {
                         color:#a78bfa;margin-top:5px;">⭐ Your Team</span>` : ''}
                 </div>
                 <div style="text-align:right;flex-shrink:0;">
-                    <p style="font-size:20px;font-weight:900;color:#f1c40f;margin:0;">${row.total_points ?? 0}</p>
-                    <p style="font-size:10px;color:#64748b;margin:2px 0 0;">pts</p>
+                    <p style="font-size:20px;font-weight:900;color:#f1c40f;margin:0;">${kp > 0 ? '₹' + (row.kill_earnings ?? 0) : (row.total_points ?? 0)}</p>
+                    <p style="font-size:10px;color:#64748b;margin:2px 0 0;">${kp > 0 ? '₹' + kp + '/kill' : 'pts'}</p>
                     <p style="font-size:10px;color:#94a3b8;margin:1px 0 0;">${row.total_kills ?? 0} kills</p>
                 </div>
             </div>`;
@@ -4902,7 +4926,7 @@ async function viewPublicLeaderboard() {
                 <span style="flex:2;font-size:10px;color:#64748b;font-weight:700;">TEAM</span>
                 ${roundCols}
                 <span style="flex:1;text-align:center;font-size:10px;color:#64748b;font-weight:700;">KILLS</span>
-                <span style="flex:1;text-align:center;font-size:10px;color:#f1c40f;font-weight:700;">PTS</span>
+                <span style="flex:1;text-align:center;font-size:10px;color:#f1c40f;font-weight:700;">${kp > 0 ? 'PRIZE' : 'PTS'}</span>
             </div>`;
 
             rest.forEach(row => {
@@ -4948,7 +4972,7 @@ async function viewPublicLeaderboard() {
                     </div>
                     ${roundPts}
                     <span style="flex:1;text-align:center;font-size:12px;color:#94a3b8;font-weight:700;">${row.total_kills ?? 0}</span>
-                    <span style="flex:1;text-align:center;font-size:13px;color:#f1c40f;font-weight:900;">${row.total_points ?? 0}</span>
+                    <span style="flex:1;text-align:center;font-size:13px;color:#f1c40f;font-weight:900;">${kp > 0 ? '₹' + (row.kill_earnings ?? 0) : (row.total_points ?? 0)}</span>
                 </div>`;
             });
         }
