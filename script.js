@@ -3881,12 +3881,13 @@ async function loadTournamentById(tid, forceRefresh) {
 
     // Check cache
     const cached = _tournamentCache[tid];
-    if (!forceRefresh && cached && (Date.now() - cached.ts) < TOURNAMENT_CACHE_TTL) {
+    const _stale = cached && cached.tournament && (cached.tournament.status === 'match_live' || cached.tournament.status === 'registration_closed') && (Date.now() - cached.ts) > 8000;
+    if (!forceRefresh && cached && !_stale && (Date.now() - cached.ts) < TOURNAMENT_CACHE_TTL) {
         _renderTournament(cached.tournament, cached.winners, cached.roundsData || null);
         return;
     }
 
-    if (content) content.innerHTML = '<div style="padding:20px;text-align:center;color:#64748b;font-size:12px;">⏳ Loading...</div>';
+    if (content && forceRefresh !== 'silent') content.innerHTML = '<div style="padding:20px;text-align:center;color:#64748b;font-size:12px;">⏳ Loading...</div>';
 
     try {
         const uid = window._tgUser?.id;
@@ -3898,7 +3899,17 @@ async function loadTournamentById(tid, forceRefresh) {
         const tData   = await tRes.json();
         const regData = regRes ? await regRes.json() : { registered: false };
 
-        _tournamentRegCache[tid] = (regData?.status === 'success') ? regData : { registered: false };
+        if (regData?.status === 'success') {
+            _tournamentRegCache[tid] = regData;
+        } else if (!_tournamentRegCache[tid]) {
+            // Check fail hua (401/429/network) — "not registered" mat dikhao, ek baar dobara try karo
+            try {
+                await new Promise(r => setTimeout(r, 800));
+                const rr = await fetch(`${CONFIG.API_BASE_URL}/tournament/my_registration/${uid}?tournament_id=${encodeURIComponent(tid)}`);
+                const rj = await rr.json();
+                _tournamentRegCache[tid] = (rj?.status === 'success') ? rj : { registered: false, _failed: true };
+            } catch (_) { _tournamentRegCache[tid] = { registered: false, _failed: true }; }
+        }
 
         // Fetch rounds data if tournament has multiple rounds or is live
         let roundsData = null;
@@ -4399,7 +4410,13 @@ function _renderTournament(t, winners, roundsData) {
                 </div>`;
             }
         } else {
-            // Not registered — show a message
+            // Not registered — show a message (ya check fail hua to retry)
+            if (reg && reg._failed) {
+                html += `<div style="text-align:center;padding:14px;background:rgba(251,191,36,0.07);border:1px dashed rgba(251,191,36,0.3);border-radius:12px;">
+                    <p style="font-size:13px;color:#fbbf24;margin:0;font-weight:700;">⚠️ Registration check nahi ho paya</p>
+                    <p style="font-size:11px;color:#94a3b8;margin:6px 0 0;">Network/session issue. Neeche Refresh dabao ya app band karke bot se dobara kholo.</p>
+                </div>`;
+            } else
             html += `
             <div style="text-align:center;padding:14px;background:rgba(239,68,68,0.05);border:1px dashed rgba(239,68,68,0.25);border-radius:12px;">
                 <p style="font-size:13px;color:#f87171;margin:0;font-weight:700;">❌ You are not registered</p>
@@ -4423,6 +4440,14 @@ function _renderTournament(t, winners, roundsData) {
     content.innerHTML = html;
     // Countdown registration open aur registration closed dono me chalta hai (match live hone tak);
     // match_live / completed par band ho jata hai.
+    // Auto-poll: registration_closed ya match_live (room abhi set nahi) — har 15s fresh data, room aate hi dikh jaye
+    if (window._tRoomPoll) { clearTimeout(window._tRoomPoll); window._tRoomPoll = null; }
+    if (t.status === 'registration_closed' || (t.status === 'match_live' && !(document.getElementById('t-room-id-val') && !/Not set yet/.test(document.getElementById('t-room-id-val').textContent)))) {
+        const _pt = _selectedTid;
+        window._tRoomPoll = setTimeout(() => {
+            if (_pt && _pt === _selectedTid && document.getElementById('tournament-content')) loadTournamentById(_pt, 'silent');
+        }, 15000);
+    }
     _startMatchCountdown((t.status === 'registration_open' || t.status === 'registration_closed') ? t.match_time_iso : null);
 }
 
