@@ -9302,6 +9302,109 @@ def cmd_add_result(message):
 
 
 
+@bot.message_handler(commands=["bulkresult"])
+def cmd_bulk_result(message):
+    """Admin: /bulkresult <tournament_id> <round_no>  + next lines: <team_id> <rank> <kills> [booyah]"""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    lines = [l.strip() for l in (message.text or "").strip().split("\n") if l.strip()]
+    head = lines[0].split() if lines else []
+    if len(head) < 3 or len(lines) < 2:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* ek message mein poora round ka result:\n\n"
+            "`/bulkresult <tournament_id> <round_no>`\n"
+            "`<team_id> <rank> <kills> [booyah]`\n"
+            "`<team_id> <rank> <kills> [booyah]`\n\n"
+            "*Example:*\n"
+            "`/bulkresult t_123456 1`\n"
+            "`T001 1 8 1`\n"
+            "`T002 2 5`\n"
+            "`T003 3 4`\n\n"
+            "• Har team nayi line mein\n• booyah optional (default 0), har Booyah = +5 pts\n"
+            "• Same team dobara dene par result update ho jata hai\n"
+            "Team IDs: `/tournamentregs <tid>`",
+            parse_mode="Markdown",
+        )
+    tid = head[1]
+    try:
+        round_no = int(head[2])
+    except ValueError:
+        return bot.reply_to(message, "❌ round_no number hona chahiye.")
+    try:
+        t = tournaments_col.find_one({"tournament_id": tid, "active": True})
+        if not t:
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
+        regs = {}
+        for r in tournament_registrations_col.find(
+            {"tournament_id": tid}, {"team_id": 1, "team_name": 1, "ff_nickname": 1, "_id": 0}
+        ):
+            if r.get("team_id"):
+                regs[str(r["team_id"]).upper()] = r.get("team_name") or r.get("ff_nickname") or r["team_id"]
+
+        # Pehle sab validate karo — ek bhi galat ho to kuch save nahi hoga
+        errors, rows, seen = [], [], set()
+        for i, line in enumerate(lines[1:], start=2):
+            p = line.split()
+            if len(p) < 3:
+                errors.append(f"Line {i}: `{line}` — format `<team_id> <rank> <kills> [booyah]`")
+                continue
+            try:
+                team_id = p[0].upper()
+                rank = int(p[1]); kills = max(0, int(p[2]))
+                booyah = max(0, int(p[3])) if len(p) > 3 else 0
+            except ValueError:
+                errors.append(f"Line {i}: `{line}` — rank/kills/booyah number hone chahiye")
+                continue
+            if rank < 1:
+                errors.append(f"Line {i}: rank 1 ya zyada hona chahiye")
+                continue
+            if team_id not in regs:
+                errors.append(f"Line {i}: team `{team_id}` registered nahi hai")
+                continue
+            if team_id in seen:
+                errors.append(f"Line {i}: team `{team_id}` do baar diya hai")
+                continue
+            seen.add(team_id)
+            rows.append((team_id, rank, kills, booyah))
+        if errors:
+            return bot.reply_to(
+                message,
+                "❌ *Kuch save nahi hua* — pehle ye fix karo:\n\n" + "\n".join(errors[:15]),
+                parse_mode="Markdown",
+            )
+
+        now = datetime.utcnow()
+        out = []
+        for team_id, rank, kills, booyah in rows:
+            pp = get_placement_points(rank)
+            bb = booyah * 5
+            total = pp + kills + bb
+            tournament_results_col.update_one(
+                {"tournament_id": tid, "round_no": round_no, "team_id": team_id},
+                {"$set": {
+                    "tournament_id": tid, "round_no": round_no, "team_id": team_id,
+                    "team_name": regs[team_id], "rank": rank, "kills": kills, "booyah": booyah,
+                    "placement_points": pp, "kill_points": kills, "booyah_bonus": bb,
+                    "total_points": total, "recorded_at": now,
+                }},
+                upsert=True,
+            )
+            out.append((total, f"#{rank} `{team_id}` {regs[team_id]} — {kills}K → *{total}* pts"))
+        out.sort(key=lambda x: -x[0])
+        bot.reply_to(
+            message,
+            f"✅ *Round {round_no} — {len(rows)} teams ka result save!*\n\n"
+            + "\n".join(o[1] for o in out)
+            + f"\n\nLeaderboard: `/tournamentinfo {tid}`",
+            parse_mode="Markdown",
+        )
+        logger.info("Bulk result: tournament=%s round=%s teams=%s", tid, round_no, len(rows))
+    except Exception as exc:
+        logger.error("cmd_bulk_result error: %s", exc)
+        bot.reply_to(message, "❌ Server error. Please try again.")
+
+
 @bot.message_handler(commands=["finishtournament"])
 def cmd_finish_tournament(message):
     """/finishtournament <tournament_id> — Tournament ko completed mark karo."""
