@@ -694,14 +694,15 @@ def _check_and_flag_already_done(user_id: int, task_id: str) -> None:
 # ============================================================
 
 # --- Constants ---
-IP_RATE_LIMIT_REQUESTS  = 50    # Max requests per IP per minute
+IP_RATE_LIMIT_REQUESTS  = 100   # Max requests per IP per minute (bina Telegram login wale / anjaan clients)
+USER_RATE_LIMIT_REQUESTS = 120  # Max requests per Telegram user per minute (verified initData wale)
 IP_RATE_LIMIT_WINDOW    = 60    # Window in seconds
-IP_BAN_DURATION         = 120   # 2 min ban after exceeding limit
+IP_BAN_DURATION         = 120   # 2 min ban after exceeding limit (IP ya user)
 
 ADMIN_MAX_FAIL_ATTEMPTS = 5     # Wrong admin tokens allowed
 ADMIN_LOCKOUT_SECONDS   = 900   # 15 min lockout after 5 fails
 
-SUSPICIOUS_THRESHOLD    = 20    # Requests per minute to trigger alert
+SUSPICIOUS_THRESHOLD    = 80    # Requests per minute to trigger alert
 
 # --- In-memory trackers ---
 _ip_request_log:      dict = {}   # { ip: [(timestamp, endpoint), ...] }
@@ -816,19 +817,33 @@ def check_ip_security(endpoint: str) -> tuple[bool, str]:
     if not ip:
         return True, ""
 
-    if _is_ip_banned(ip):
-        logger.warning("SECURITY: Blocked request from banned IP %s to %s", ip, endpoint)
-        return False, "Too many requests. You have been temporarily blocked."
+    # Telegram login (initData) verify ho jaye to limit USER ke hisaab se lagti hai, IP ke hisaab se nahi.
+    # Kyunki mobile data / college Wi-Fi par hazaron log ek hi IP share karte hain — ek ke spam se baaki block na hon.
+    key, limit = ip, IP_RATE_LIMIT_REQUESTS
+    _init = request.headers.get("X-Telegram-Init-Data", "")
+    if _init:
+        _params = verify_telegram_init_data(_init, max_age=TG_AUTH_MAX_AGE)
+        if _params:
+            try:
+                _uid = int(json.loads(_params.get("user", "{}")).get("id", 0))
+            except Exception:
+                _uid = 0
+            if _uid:
+                key, limit = f"u:{_uid}", USER_RATE_LIMIT_REQUESTS
 
-    count = _record_ip_request(ip, endpoint)
+    if _is_ip_banned(key):
+        logger.warning("SECURITY: Blocked request from banned %s to %s", key, endpoint)
+        return False, "Too many requests. Please wait 2 minutes and try again."
 
-    if count > IP_RATE_LIMIT_REQUESTS:
-        _ban_ip(ip)
-        _alert_admin_suspicious(ip, count, endpoint)
-        return False, "Too many requests. You have been temporarily blocked."
+    count = _record_ip_request(key, endpoint)
+
+    if count > limit:
+        _ban_ip(key)
+        _alert_admin_suspicious(f"{key} (ip {ip})" if key != ip else ip, count, endpoint)
+        return False, "Too many requests. Please wait 2 minutes and try again."
 
     if count > SUSPICIOUS_THRESHOLD:
-        _alert_admin_suspicious(ip, count, endpoint)
+        _alert_admin_suspicious(f"{key} (ip {ip})" if key != ip else ip, count, endpoint)
 
     return True, ""
 
