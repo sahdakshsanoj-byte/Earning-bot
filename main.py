@@ -248,6 +248,8 @@ CHANNEL_REWARDS            = {          # per-channel override (sponsor slots ea
 }
 CHANNEL_TOTAL_REWARD       = 15
 
+AD_COOLDOWN_SECONDS = 10   # do ad claims ke beech ka gap (seconds)
+
 # Official channels ka username SERVER par fix hai — client se aane wala URL in par trust nahi hota.
 # Badalna ho to Render env: OFFICIAL_CHANNELS="official=@cdoternoffical,channel2=@chatdotern,channel3=@chatdotern"
 OFFICIAL_CHANNEL_MAP = {"official": "@cdoternoffical", "channel2": "@chatdotern", "channel3": "@chatdotern"}
@@ -2503,8 +2505,8 @@ def create_ad_claim_token(user_id: int) -> tuple[dict, int]:
         if last_ad_claim:
             try:
                 last_ad_claim_dt = datetime.fromisoformat(last_ad_claim)
-                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=30):
-                    return {"status": "error", "message": "Please wait 30 seconds before watching the next ad."}, 429
+                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=AD_COOLDOWN_SECONDS):
+                    return {"status": "error", "message": f"Please wait {AD_COOLDOWN_SECONDS} seconds before watching the next ad."}, 429
             except ValueError:
                 pass
 
@@ -2560,8 +2562,8 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
         if last_ad_claim:
             try:
                 last_ad_claim_dt = datetime.fromisoformat(last_ad_claim)
-                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=30):
-                    return {"status": "error", "message": "Please wait 30 seconds before claiming the next ad reward."}, 429
+                if datetime.utcnow() - last_ad_claim_dt < timedelta(seconds=AD_COOLDOWN_SECONDS):
+                    return {"status": "error", "message": f"Please wait {AD_COOLDOWN_SECONDS} seconds before claiming the next ad reward."}, 429
             except ValueError:
                 pass
 
@@ -2581,9 +2583,9 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
         _now_dt     = datetime.utcnow()
         _cooldown_ok = {"$or": [
             {"last_ad_claim_at": {"$exists": False}},
-            {"last_ad_claim_at": {"$lt": (_now_dt - timedelta(seconds=30)).isoformat()}},
+            {"last_ad_claim_at": {"$lt": (_now_dt - timedelta(seconds=AD_COOLDOWN_SECONDS)).isoformat()}},
         ]}
-        # Atomic: daily limit + 30s cooldown DB-level par enforce — concurrent claims se
+        # Atomic: daily limit + ad cooldown DB-level par enforce — concurrent claims se
         # coins double nahi honge. Case A: aaj ka counter chal raha hai.
         _upd = users_col.find_one_and_update(
             {"user_id": user_id, "blocked": {"$ne": True}, "ads_date": today,
@@ -2602,7 +2604,7 @@ def manual_ad_reward(user_id: int, claim_token: str) -> tuple[dict, int]:
             )
         if _upd is None:
             # Kisi concurrent request ne pehle claim kar liya (limit ya cooldown)
-            return {"status": "error", "message": "Please wait 30 seconds before claiming the next ad reward."}, 429
+            return {"status": "error", "message": f"Please wait {AD_COOLDOWN_SECONDS} seconds before claiming the next ad reward."}, 429
         done        = int(_upd.get("ads_today", 1))
         remaining   = MAX_ADS_PER_DAY - done
         ad_event_id = f"ad_{user_id}_{today}_{done}"
@@ -5454,12 +5456,28 @@ def _format_tournament(t, include_registrations=True):
     return t
 
 
+COMPLETED_VISIBLE_HOURS = 24   # completed tournament itne ghante users ko dikhta hai (winners dekhne ke liye)
+
+
+def _public_tournament_filter() -> dict:
+    """Users ko dikhne wale tournaments: active, hidden nahi, aur completed hai to sirf kuch ghante."""
+    cutoff = datetime.utcnow() - timedelta(hours=COMPLETED_VISIBLE_HOURS)
+    return {
+        "active": True,
+        "hidden_from_list": {"$ne": True},
+        "$or": [
+            {"status": {"$ne": "completed"}},
+            {"completed_at": {"$gt": cutoff}},
+        ],
+    }
+
+
 @app.route("/tournament", methods=["GET"])
 def get_tournament_api():
     """Saare active tournaments ki list return karo."""
     try:
         raw_list = list(
-            tournaments_col.find({"active": True}, {"_id": 0})
+            tournaments_col.find(_public_tournament_filter(), {"_id": 0})
             .sort("created_at", 1)
             .limit(MAX_TOURNAMENTS)
         )
@@ -5915,6 +5933,7 @@ def admin_create_tournament_api():
             "max_players":    max(1, int(data.get("max_slots", data.get("max_players", 12))))
                               * _team_size_for_mode(sanitize_text(data.get("mode", "Squad"), max_length=30)),
             "prize_pool":     sanitize_text(data.get("prize_pool", ""), max_length=200),
+            "kill_prize":     max(0, int(data.get("kill_prize", existing.get("kill_prize", 0) if existing else 0) or 0)),
             "description":    sanitize_text(data.get("description", ""), max_length=600),
             # Update karte waqt prizes/room wipe na ho: bheje na ho to purane rakho
             "prizes":         data.get("prizes", existing.get("prizes", []) if existing else []),
@@ -6002,7 +6021,7 @@ def admin_tournament_status_api():
     try:
         res = tournaments_col.update_one(
             {"tournament_id": tid, "active": True},
-            {"$set": {"status": status}},
+            {"$set": {"status": status, **({"completed_at": datetime.utcnow()} if status == "completed" else {})}},
         )
         if res.matched_count == 0:
             return jsonify({"status": "error", "message": f"Tournament '{tid}' not found."}), 404
@@ -6042,7 +6061,7 @@ def admin_publish_winners_api():
             })
         if docs:
             tournament_winners_col.insert_many(docs)
-        tournaments_col.update_one({"tournament_id": tid}, {"$set": {"status": "completed"}})
+        tournaments_col.update_one({"tournament_id": tid}, {"$set": {"status": "completed", "completed_at": datetime.utcnow()}})
         logger.info("Admin published %d winners for tournament %s", len(docs), tid)
         return jsonify({"status": "success", "message": f"{len(docs)} winner(s) published for '{tid}'."})
     except Exception as exc:
@@ -6095,6 +6114,7 @@ def tournament_leaderboard_api(tid: str):
         current_round = int(t.get("current_round", 1))
         is_live       = t_status == "match_live"
         is_completed  = t_status == "completed"
+        kill_prize    = max(0, int(t.get("kill_prize", 0) or 0))   # ₹ per kill (Solo etc.), 0 = off
 
         # Fetch all round results for this tournament
         raw_results = list(
@@ -6112,6 +6132,7 @@ def tournament_leaderboard_api(tid: str):
                 "current_round": current_round,
                 "is_live":       is_live,
                 "is_completed":  is_completed,
+                "kill_prize":    kill_prize,
             })
 
         # Aggregate by team_id
@@ -6139,10 +6160,14 @@ def tournament_leaderboard_api(tid: str):
             teams[team_id]["rounds"][round_no] = pts
 
         # Sort: highest points first, then kills as tiebreaker, then booyah
-        sorted_teams = sorted(
-            teams.values(),
-            key=lambda x: (-x["total_points"], -x["total_kills"], -x["total_booyah"])
-        )
+        for _tm in teams.values():
+            _tm["kill_earnings"] = _tm["total_kills"] * kill_prize
+        if kill_prize > 0:
+            # Per-kill prize wale tournament me kills hi paisa hain — kills se rank
+            _sort_key = lambda x: (-x["total_kills"], -x["total_points"], -x["total_booyah"])
+        else:
+            _sort_key = lambda x: (-x["total_points"], -x["total_kills"], -x["total_booyah"])
+        sorted_teams = sorted(teams.values(), key=_sort_key)
 
         # Assign positions
         leaderboard = []
@@ -6157,6 +6182,7 @@ def tournament_leaderboard_api(tid: str):
             "current_round": current_round,
             "is_live":       is_live,
             "is_completed":  is_completed,
+            "kill_prize":    kill_prize,
         })
 
     except Exception as exc:
@@ -6924,7 +6950,9 @@ def admin_panel_command(message):
         "\u2022 /startround `<id>` \u2014 Agla round start karo\n"
         "\u2022 /endround `<id>` \u2014 Current round khatam karo\n"
         "\u2022 /nextround `<id>` \u2014 Next round pe jao\n"
-        "\u2022 /finishtournament `<id>` \u2014 Tournament finish karo\n"
+        "\u2022 /finishtournament `<id>` \u2014 Tournament finish karo (24h baad list se hat jata hai)\n"
+        "\u2022 /hidetournament `<id>` \u2014 Completed tournament turant list se hatao\n"
+        "\u2022 /setkillprize `<id> <₹>` \u2014 Leaderboard par ₹ per kill dikhao\n"
         "\u2022 /tournamentregs `<id>` \u2014 Registered players list\n"
         "\u2022 /setwinners `<id> Nick:Reward | Nick:Reward | Nick:Reward` \u2014 Winners set karo\n"
         "\u2022 /canceltournament `<id>` \u2014 Tournament cancel karo\n"
@@ -8743,7 +8771,7 @@ def cmd_tournament_status(message):
             return bot.reply_to(message, "❌ Match live hone ke baad status peeche nahi ja sakta (registration ya coming_soon par).")
         res = tournaments_col.update_one(
             {"tournament_id": tid, "active": True, "status": _cur_status},
-            {"$set": {"status": status}},
+            {"$set": {"status": status, **({"completed_at": datetime.utcnow()} if status == "completed" else {})}},
         )
         if res.matched_count == 0:
             return bot.reply_to(message, "⚠️ Status isi waqt kisi aur ne badal diya, dobara try karo.")
@@ -9269,7 +9297,8 @@ def cmd_finish_tournament(message):
         return bot.reply_to(
             message,
             "📋 *Usage:* `/finishtournament <tournament_id>`\n\n"
-            "Tournament completed mark ho jaayega.\n"
+            "Tournament completed mark ho jaayega aur 24 ghante baad users ki list se hat jayega.\n"
+            "Turant hatane ke liye: `/finishtournament <id> hide`\n"
             "Winners manually set karne ke liye: `/setwinners <id> ...`\n"
             "IDs: `/listtournaments`",
             parse_mode="Markdown",
@@ -9289,10 +9318,11 @@ def cmd_finish_tournament(message):
             )
 
         # Mark tournament as completed
-        tournaments_col.update_one(
-            {"tournament_id": tid},
-            {"$set": {"status": "completed"}},
-        )
+        _hide_now = len(parts) > 2 and parts[2].strip().lower() == "hide"
+        _fin_set  = {"status": "completed", "completed_at": datetime.utcnow()}
+        if _hide_now:
+            _fin_set["hidden_from_list"] = True
+        tournaments_col.update_one({"tournament_id": tid}, {"$set": _fin_set})
 
         announce_text = (
             f"🏆 *{t.get('title', 'Tournament')} — Tournament Completed!*\n\n"
@@ -9302,8 +9332,11 @@ def cmd_finish_tournament(message):
         bot.reply_to(
             message,
             f"✅ *Tournament Finished!*\n\n"
-            f"🆔 `{tid}` marked as *completed*.\n\n"
-            f"Winners set karne ke liye: `/setwinners {tid} Nick:Reward | Nick:Reward | Nick:Reward`\n"
+            f"🆔 `{tid}` marked as *completed*.\n"
+            + ("👁️ Users ki list se *abhi hata diya gaya*.\n\n" if _hide_now else
+               f"⏳ Users ko winners dekhne ke liye ye *{COMPLETED_VISIBLE_HOURS} ghante* list me dikhega, phir apne aap hat jayega.\n"
+               f"Abhi hatana ho: `/hidetournament {tid}`\n\n")
+            + f"Winners set karne ke liye: `/setwinners {tid} Nick:Reward | Nick:Reward | Nick:Reward`\n"
             f"💰 Coins dene ke liye: `/addcoins <user_id> <amount>`\n"
             f"₹ Rupees dene ke liye: `/addrupees <user_id> <amount>`",
             parse_mode="Markdown",
@@ -9325,6 +9358,62 @@ def cmd_finish_tournament(message):
     except Exception as exc:
         logger.error("cmd_finish_tournament error: %s", exc)
         bot.reply_to(message, "❌ Server error. Please try again.")
+
+
+@bot.message_handler(commands=["setkillprize"])
+def cmd_set_kill_prize(message):
+    """/setkillprize <tournament_id> <rupees_per_kill> — leaderboard par kills ke hisab se ₹ dikhao (0 = band)."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 3:
+        return bot.reply_to(
+            message,
+            "📋 *Usage:* `/setkillprize <tournament_id> <₹ per kill>`\n\n"
+            "*Example:* `/setkillprize t_123 7` → 4 kill = ₹28\n"
+            "Band karne ke liye: `/setkillprize <id> 0`",
+            parse_mode="Markdown",
+        )
+    tid = parts[1].strip()
+    try:
+        amt = int(parts[2])
+        if amt < 0 or amt > 100000:
+            raise ValueError
+    except ValueError:
+        return bot.reply_to(message, "❌ Amount 0 se 100000 ke beech ek poora number hona chahiye.")
+    try:
+        res = tournaments_col.update_one({"tournament_id": tid, "active": True}, {"$set": {"kill_prize": amt}})
+        if res.matched_count == 0:
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
+        if amt > 0:
+            bot.reply_to(message, f"✅ `{tid}`: ₹{amt} per kill set. Leaderboard par ab kills ke hisab se ₹ dikhega (4 kill = ₹{amt*4}).", parse_mode="Markdown")
+        else:
+            bot.reply_to(message, f"✅ `{tid}`: per-kill prize band. Leaderboard par points dikhenge.", parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("cmd_set_kill_prize error: %s", exc)
+        bot.reply_to(message, "❌ Server error.")
+
+
+@bot.message_handler(commands=["hidetournament"])
+def cmd_hide_tournament(message):
+    """/hidetournament <id> — completed tournament ko users ki list se turant hatao (data safe rehta hai).
+    /hidetournament <id> show — wapas dikhao."""
+    if int(message.from_user.id) != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return bot.reply_to(message, "📋 Usage: `/hidetournament <tournament_id>`\nWapas dikhane ke liye: `/hidetournament <id> show`", parse_mode="Markdown")
+    tid  = parts[1].strip()
+    show = len(parts) > 2 and parts[2].strip().lower() == "show"
+    try:
+        res = tournaments_col.update_one({"tournament_id": tid, "active": True},
+                                         {"$set": {"hidden_from_list": not show}})
+        if res.matched_count == 0:
+            return bot.reply_to(message, f"❌ Tournament `{tid}` nahi mila.", parse_mode="Markdown")
+        bot.reply_to(message, f"{'👁️ Wapas dikhega' if show else '🙈 Users ki list se hata diya'}: `{tid}`", parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("cmd_hide_tournament error: %s", exc)
+        bot.reply_to(message, "❌ Server error.")
 
 
 @bot.message_handler(commands=["setwinners"])
@@ -9389,7 +9478,7 @@ def cmd_set_winners(message):
         tournament_winners_col.delete_many({"tournament_id": tid})
         tournament_winners_col.insert_many(winners_docs)
 
-        tournaments_col.update_one({"tournament_id": tid}, {"$set": {"status": "completed"}})
+        tournaments_col.update_one({"tournament_id": tid}, {"$set": {"status": "completed", "completed_at": datetime.utcnow()}})
 
         winners_text = "\n".join(winner_lines)
         bot.reply_to(
@@ -10575,6 +10664,8 @@ def run_bot() -> None:
                     types.BotCommand("tournamentstatus",       "📊 Tournament status"),
                     types.BotCommand("roundinfo",              "📋 Round info & results"),
                     types.BotCommand("finishtournament",       "🏁 Finish & declare winners"),
+                    types.BotCommand("hidetournament",         "🙈 Hide completed tournament"),
+                    types.BotCommand("setkillprize",           "💰 Set ₹ per kill (leaderboard)"),
                     types.BotCommand("canceltournament",       "🚫 Cancel tournament"),
                     types.BotCommand("deletetournament",       "🗑 Delete finished tournament"),
                     types.BotCommand("setprizes",              "🏆 Set tournament prizes"),
