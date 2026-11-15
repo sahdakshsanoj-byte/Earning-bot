@@ -287,8 +287,17 @@ async function getFeatureConfig() {
             if (typeof cfg.referral_active === 'boolean') {
                 const changed = CONFIG.REFERRAL_ACTIVE !== cfg.referral_active;
                 CONFIG.REFERRAL_ACTIVE = cfg.referral_active;
-                if (changed && typeof applyReferralLock === 'function') {
-                    setTimeout(applyReferralLock, 0);
+                if (changed) {
+                    setTimeout(() => {
+                        try { if (typeof applyReferralLock === 'function' && typeof userData !== 'undefined' && userData) applyReferralLock(); } catch (_) {}
+                        // Rupee withdrawal card bhi turant update karo (pehle ye stale "Referrals Required" dikhata tha)
+                        try {
+                            if (typeof userData !== 'undefined' && userData) {
+                                const _p = !!(userData.premium_info && userData.premium_info.premium);
+                                updateRupeeRefUI(getRefCount(userData.referrals), _p ? 2 : 5);
+                            } else { updateRupeeRefUI(0, 5); }
+                        } catch (_) {}
+                    }, 0);
                 }
             }
             _featureCfgCache     = cfg;
@@ -3163,6 +3172,9 @@ function updateRupeeRefUI(refCount, refNeeded) {
     bar.style.background = met
         ? 'linear-gradient(90deg,#22c55e,#16a34a)'
         : 'linear-gradient(90deg,#ef4444,#b91c1c)';
+
+    // Referral lock OFF (/togglereferral) — requirement card poora chhupa do
+    if (box) box.style.display = bypass ? 'none' : '';
 
     // Card border colour
     if (box) box.style.borderColor = met ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)';
