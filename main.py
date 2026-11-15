@@ -6680,13 +6680,15 @@ def create_promo_command(message):
             message,
             "Usage: /createpromo <CODE> <COINS> [max\\_uses] [silent]\n\n"
             "Examples:\n"
-            "`/createpromo WELCOME100 100` \u2014 unlimited uses, broadcast\n"
-            "`/createpromo VIP500 500 50` \u2014 max 50 uses, broadcast\n"
-            "`/createpromo SECRET 100 0 silent` \u2014 no broadcast",
+            "`/createpromo WELCOME100 100` \u2014 unlimited uses, *private* (kisi ko nahi dikhega)\n"
+            "`/createpromo VIP500 500 50` \u2014 max 50 uses, private\n"
+            "`/createpromo OPEN100 100 0 broadcast` \u2014 sab users ko announce hoga",
             parse_mode="Markdown",
         )
-    silent = parts[-1].lower() in {"silent", "quiet", "nobroadcast", "no"} if len(parts) >= 4 else False
-    if silent:
+    # Default: PRIVATE (broadcast nahi). Sirf 'broadcast' likhne par sab ko announce hoga.
+    _last   = parts[-1].lower() if len(parts) >= 4 else ""
+    silent  = _last not in {"broadcast", "public", "announce"}
+    if _last in {"broadcast", "public", "announce", "silent", "quiet", "nobroadcast", "no"}:
         parts = parts[:-1]
     code = parts[1].upper()
     try:
@@ -6724,7 +6726,7 @@ def create_promo_command(message):
             message,
             f"\u2705 *Promo Code Created!*\n\nCode: `{code}`\nCoins: `{coins}`\nMax Uses: `{uses_str}`\n\n"
             f"Users can redeem with: /redeem {code}\n"
-            + ("\U0001f515 Silent mode \u2014 no user notification." if silent else "\U0001f4e2 Broadcasting to all users in background..."),
+            + ("\U0001f515 Private \u2014 kisi user ko notification nahi gayi. Code khud share karo." if silent else "\U0001f4e2 Broadcasting to all users in background..."),
             parse_mode="Markdown",
         )
         if not silent:
