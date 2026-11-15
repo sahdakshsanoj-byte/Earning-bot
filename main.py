@@ -1637,23 +1637,31 @@ def get_or_create_user(user_id: int, username: str, referrer_id=None) -> dict:
                 "blocked":                False,
                 "joined":                 str(date.today()),
             }
+            _ref_ok = None
             if referrer_id and str(referrer_id) != str(user_id):
-                referrer = users_col.find_one({"user_id": int(referrer_id)})
-                if referrer:
-                    users_col.update_one(
-                        {"user_id": int(referrer_id)},
-                        {"$inc": {"coins": 30, "referral_count": 1}},
-                    )
+                _ref_ok = users_col.find_one({"user_id": int(referrer_id)}, {"user_id": 1, "_id": 0})
+                if _ref_ok:
                     new_user["referred_by"] = str(referrer_id)
-                    try:
-                        bot.send_message(
-                            int(referrer_id),
-                            "\U0001f38a *Referral Bonus!*\n\nYou earned 30 coins for inviting a friend!",
-                            parse_mode="Markdown",
-                        )
-                    except Exception as notify_exc:
-                        logger.warning("Referral notify failed: %s", notify_exc)
-            users_col.insert_one(new_user)
+            # Pehle user insert karo (unique index user_id par) — sirf jo request insert jeete
+            # usi ko referral bonus milega. Pehle bonus pehle diya jata tha, to double /start
+            # ya concurrent requests par referrer ko 2x coins + referral_count mil jata tha.
+            try:
+                users_col.insert_one(new_user)
+            except pymongo.errors.DuplicateKeyError:
+                return users_col.find_one({"user_id": user_id}) or {}
+            if _ref_ok:
+                users_col.update_one(
+                    {"user_id": int(referrer_id)},
+                    {"$inc": {"coins": 30, "referral_count": 1}},
+                )
+                try:
+                    bot.send_message(
+                        int(referrer_id),
+                        "\U0001f38a *Referral Bonus!*\n\nYou earned 30 coins for inviting a friend!",
+                        parse_mode="Markdown",
+                    )
+                except Exception as notify_exc:
+                    logger.warning("Referral notify failed: %s", notify_exc)
             return new_user
         return user
     except Exception as exc:
