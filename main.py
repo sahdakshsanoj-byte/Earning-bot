@@ -4163,7 +4163,7 @@ def _get_or_create_today_round() -> dict:
 def _perform_auto_draw(rid: str, notify_chat_id: int | None = None) -> dict:
     """
     Core lottery draw logic — reusable by both manual /drawlottery and
-    the midnight auto-draw thread.
+    (auto-draw thread hata diya gaya — draw sirf /drawlottery se hota hai).
     """
     rdoc = lottery_col.find_one({"_id": rid})
     if not rdoc:
@@ -6314,61 +6314,6 @@ def admin_broadcast_photo():
 
 
 # ============================================================
-# AUTO LOTTERY DRAW LOOP — Midnight UTC mein automatic draw
-# ============================================================
-
-def auto_lottery_draw_loop() -> None:
-    """Background thread: har raat 00:00 UTC pe automatically lottery draw karta hai."""
-    logger.info("Auto-lottery draw loop started.")
-    last_drawn_date = None
-
-    while True:
-        try:
-            now       = datetime.utcnow()
-            today_str = now.date().isoformat()
-
-            if now.hour == 0 and now.minute < 5 and last_drawn_date != today_str:
-                cfg = get_lottery_config()
-                if cfg.get("active"):
-                    rid    = _today_round_id()
-                    result = _perform_auto_draw(rid, notify_chat_id=None)
-                    if result["success"]:
-                        logger.info(
-                            "Auto-draw success: round=%s winner=%s prize=%s participants=%s",
-                            rid, result.get("winner_id"), result.get("prize"), result.get("participants"),
-                        )
-                        last_drawn_date = today_str
-                        try:
-                            bot.send_message(
-                                ADMIN_ID,
-                                f"\U0001f3b0 *Auto Lottery Drawn!*\n\n"
-                                f"Round: `{rid}`\n"
-                                f"\U0001f3c6 Winner: `{result['winner_id']}`\n"
-                                f"\U0001f4b0 Prize: `{result['prize']}` \U0001fa99\n"
-                                f"\U0001f465 Total Tickets: `{result['participants']}`\n\n"
-                                f"_Participants notified automatically._",
-                                parse_mode="Markdown",
-                            )
-                        except Exception as notify_exc:
-                            logger.warning("Admin auto-draw notify failed: %s", notify_exc)
-                    else:
-                        logger.info("Auto-draw skipped: %s", result["message"])
-                        if "already drawn" in result["message"].lower() or "no participants" in result["message"].lower():
-                            last_drawn_date = today_str
-                else:
-                    logger.debug("Auto-draw skipped: lottery is inactive.")
-                    last_drawn_date = today_str
-
-            if last_drawn_date and last_drawn_date != today_str:
-                last_drawn_date = None
-
-        except Exception as exc:
-            logger.error("Auto-lottery draw loop error: %s", exc)
-
-        time.sleep(60)
-
-
-# ============================================================
 # BOT COMMANDS
 # ============================================================
 
@@ -6932,7 +6877,7 @@ def admin_panel_command(message):
         "\U0001f3b0 *Lottery*\n"
         "\u2022 /setlottery `<price> <prize> [active|inactive]` \u2014 Configure\n"
         "\u2022 /lotterystats \u2014 Today's stats\n"
-        "\u2022 /drawlottery \u2014 Manual draw (auto at 00:00 UTC)\n\n"
+        "\u2022 /drawlottery \u2014 Lottery draw (sirf manual — auto draw band hai)\n\n"
         "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
         "\U0001f3a1 *Spin Wheel & Mining*\n"
         "\u2022 /togglespin \u2014 Lock \U0001f512 / Unlock \u2705 Spin Wheel\n"
@@ -10917,7 +10862,6 @@ def _start_background_threads() -> None:
     Thread(target=uptime_ping,                daemon=True, name="uptime-ping").start()
     Thread(target=refresh_leaderboard_loop,   daemon=True, name="lb-refresh").start()
     Thread(target=_cleanup_rate_cache,        daemon=True, name="rate-cache-gc").start()
-    Thread(target=auto_lottery_draw_loop,     daemon=True, name="lottery-draw").start()
     Thread(target=_cleanup_security_caches,   daemon=True, name="security-gc").start()
     logger.info("Background threads started (pid=%s).", os.getpid())
 
