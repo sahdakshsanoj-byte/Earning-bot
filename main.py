@@ -148,6 +148,8 @@ try:
         users_col.create_index("ip", sparse=True, **_idx_opts)
         users_col.create_index("fingerprint", sparse=True, **_idx_opts)
         users_col.create_index("blocked", sparse=True, **_idx_opts)
+        users_col.create_index("last_claim_ts", sparse=True, **_idx_opts)
+        users_col.create_index("mining_start_time", sparse=True, **_idx_opts)
         users_col.create_index("joined", **_idx_opts)
         withdrawals_col.create_index("user_id", **_idx_opts)
         withdrawals_col.create_index("status", **_idx_opts)
@@ -6314,6 +6316,133 @@ def admin_broadcast_photo():
 
 
 # ============================================================
+# REMINDERS — Daily bonus reset + Mining complete
+# ============================================================
+REMINDER_POLL_SECS  = 60     # DB check interval
+REMINDER_BATCH_MAX  = 150    # per loop per type (Telegram flood se bachne ke liye)
+REMINDER_SEND_GAP   = 0.06   # seconds between messages
+
+
+def _reminder_markup(user_id: int):
+    m = types.InlineKeyboardMarkup(row_width=1)
+    m.add(types.InlineKeyboardButton(
+        "\U0001f4b0 Open Cdotern",
+        web_app=types.WebAppInfo(f"https://sahdakshsanoj-byte.github.io/Earning-bot/?user_id={user_id}"),
+    ))
+    return m
+
+
+def _send_reminder(user_id: int, text: str) -> bool:
+    """True = sent. User ne bot block kiya ho to reminders auto-off."""
+    try:
+        bot.send_message(user_id, text, parse_mode="Markdown",
+                         reply_markup=_reminder_markup(user_id), disable_web_page_preview=True)
+        return True
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "403" in msg or "blocked" in msg or "deactivated" in msg or "chat not found" in msg:
+            try:
+                users_col.update_one({"user_id": user_id}, {"$set": {"reminders_off": True}})
+            except Exception:
+                pass
+        else:
+            logger.warning("Reminder send failed for %s: %s", user_id, exc)
+        return False
+
+
+def _run_daily_reminders(now: datetime) -> None:
+    # 24h poore ho chuke (claim available) par abhi tak 48h se kam (streak zinda) — warna purane
+    # users ko spam hoga. daily_reminded_for == last_claim_ts matlab is claim cycle ka reminder ja chuka.
+    cutoff_ready = (now - timedelta(hours=24)).isoformat()
+    cutoff_old   = (now - timedelta(hours=48)).isoformat()
+    q = {
+        "last_claim_ts":  {"$gt": cutoff_old, "$lt": cutoff_ready},
+        "blocked":        {"$ne": True},
+        "reminders_off":  {"$ne": True},
+        "$expr":          {"$ne": [{"$ifNull": ["$daily_reminded_for", ""]}, "$last_claim_ts"]},
+    }
+    for u in users_col.find(q, {"user_id": 1, "last_claim_ts": 1, "streak_day": 1, "_id": 0}).limit(REMINDER_BATCH_MAX):
+        uid, ts = u["user_id"], u["last_claim_ts"]
+        # Atomic claim — ek hi instance/loop reminder bhejega
+        res = users_col.update_one(
+            {"user_id": uid, "last_claim_ts": ts, "daily_reminded_for": {"$ne": ts}},
+            {"$set": {"daily_reminded_for": ts}},
+        )
+        if res.modified_count == 0:
+            continue
+        nxt = (int(u.get("streak_day", 0)) % 30) + 1
+        _send_reminder(
+            uid,
+            "\U0001f381 *Daily Bonus Ready!*\n\n"
+            f"Aapka Day {nxt} bonus claim karne ke liye ready hai.\n"
+            "Streak toote se pehle claim kar lo! \U0001f525\n\n"
+            "_Reminders band karne ke liye /reminders_",
+        )
+        time.sleep(REMINDER_SEND_GAP)
+
+
+def _run_mining_reminders(now: datetime) -> None:
+    cutoff_done = (now - timedelta(hours=MINING_DURATION_HOURS)).isoformat()
+    cutoff_old  = (now - timedelta(hours=24)).isoformat()
+    q = {
+        "mining_start_time": {"$gt": cutoff_old, "$lt": cutoff_done},   # "" string $gt cutoff_old se chhota hai
+        "blocked":           {"$ne": True},
+        "reminders_off":     {"$ne": True},
+        "$expr":             {"$ne": [{"$ifNull": ["$mining_reminded_for", ""]}, "$mining_start_time"]},
+    }
+    for u in users_col.find(q, {"user_id": 1, "mining_start_time": 1, "mining_level": 1, "_id": 0}).limit(REMINDER_BATCH_MAX):
+        uid, st = u["user_id"], u["mining_start_time"]
+        res = users_col.update_one(
+            {"user_id": uid, "mining_start_time": st, "mining_reminded_for": {"$ne": st}},
+            {"$set": {"mining_reminded_for": st}},
+        )
+        if res.modified_count == 0:
+            continue
+        reward = MINING_LEVEL_REWARDS.get(int(u.get("mining_level", 1)), MINING_REWARD)
+        _send_reminder(
+            uid,
+            "⛏️ *Mining Complete!*\n\n"
+            f"Aapki mining poori ho gayi — *{reward} \U0001fa99* collect karne ke liye ready hain.\n"
+            "App kholo aur Collect dabao!\n\n"
+            "_Reminders band karne ke liye /reminders_",
+        )
+        time.sleep(REMINDER_SEND_GAP)
+
+
+def reminder_loop() -> None:
+    logger.info("Reminder loop started.")
+    time.sleep(30)   # startup ke baad thoda ruko
+    while True:
+        try:
+            now = datetime.utcnow()
+            _run_daily_reminders(now)
+            _run_mining_reminders(now)
+        except Exception as exc:
+            logger.error("Reminder loop error: %s", exc)
+        time.sleep(REMINDER_POLL_SECS)
+
+
+@bot.message_handler(commands=["reminders"])
+def reminders_toggle_command(message):
+    """User: /reminders — daily bonus & mining reminders on/off."""
+    try:
+        uid  = int(message.from_user.id)
+        user = users_col.find_one({"user_id": uid}, {"reminders_off": 1})
+        if not user:
+            return bot.reply_to(message, "Pehle /start dabao.")
+        turn_off = not bool(user.get("reminders_off"))
+        users_col.update_one({"user_id": uid}, {"$set": {"reminders_off": turn_off}})
+        bot.reply_to(
+            message,
+            "\U0001f515 Reminders *OFF* kar diye. Wapas ON karne ke liye /reminders" if turn_off
+            else "\U0001f514 Reminders *ON* — Daily Bonus aur Mining complete par notification milega.",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logger.error("reminders_toggle error: %s", exc)
+
+
+# ============================================================
 # BOT COMMANDS
 # ============================================================
 
@@ -10863,6 +10992,7 @@ def _start_background_threads() -> None:
     Thread(target=refresh_leaderboard_loop,   daemon=True, name="lb-refresh").start()
     Thread(target=_cleanup_rate_cache,        daemon=True, name="rate-cache-gc").start()
     Thread(target=_cleanup_security_caches,   daemon=True, name="security-gc").start()
+    Thread(target=reminder_loop,              daemon=True, name="reminders").start()
     logger.info("Background threads started (pid=%s).", os.getpid())
 
 _start_background_threads()
