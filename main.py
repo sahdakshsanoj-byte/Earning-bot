@@ -3316,10 +3316,10 @@ def check_device_api():
         if current_user.get("blocked"):
             return jsonify({"status": "blocked"})
 
-        if fingerprint:
+        if fingerprint and not current_user.get("device_exempt"):
             fp_siblings     = list(
                 users_col.find(
-                    {"fingerprint": fingerprint, "user_id": {"$ne": user_id}},
+                    {"fingerprint": fingerprint, "user_id": {"$ne": user_id}, "device_exempt": {"$ne": True}},
                     {"user_id": 1, "joined": 1, "blocked": 1},
                 ).limit(50)
             )
@@ -6578,11 +6578,13 @@ def reset_device_command(message):
                 "$set": {
                     "ip_flagged":        False,
                     "fp_flagged":        False,
+                    "device_exempt":     True,   # admin ne reset kiya — duplicate-device auto-ban dobara nahi lagega
                     "last_device_reset": datetime.utcnow().isoformat(),
                     **({"blocked": False, "block_reason": "", "blocked_at": ""} if was_blocked else {}),
                 },
             },
         )
+        _invalidate_user_cache(target_id)
 
         try:
             if was_blocked:
@@ -6660,6 +6662,7 @@ def reset_device_command(message):
         {"user_id": user_id},
         {"$unset": {"fingerprint": "", "ip": ""}, "$set": update_set},
     )
+    _invalidate_user_cache(user_id)
 
     try:
         flag_info = []
@@ -8058,7 +8061,11 @@ def unblock_user(message):
     try:
         users_col.update_one(
             {"user_id": target_id},
-            {"$set": {"blocked": False, "fp_flagged": False, "ip_flagged": False}},
+            {
+                "$set":   {"blocked": False, "fp_flagged": False, "ip_flagged": False,
+                           "block_reason": "", "device_exempt": True},
+                "$unset": {"fingerprint": "", "ip": ""},
+            },
         )
         _invalidate_user_cache(target_id)
     except Exception as exc:
